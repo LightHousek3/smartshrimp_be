@@ -35,7 +35,7 @@ uploads/
 *.tgz
 
 # Test
-test/
+tests/
 
 # Docs
 docs/
