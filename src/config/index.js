@@ -63,6 +63,15 @@ const config = {
         from: process.env.EMAIL_FROM || 'noreply@smartshrimp.vn',
         verificationExpiresMinutes:
             parseInt(process.env.EMAIL_VERIFICATION_EXPIRES_MINUTES, 10) || 10,
+        resendDelaySeconds: parseInt(process.env.EMAIL_RESEND_DELAY_SECONDS, 10) || 60,
+        actionTokenExpiresMinutes:
+            parseInt(process.env.EMAIL_ACTION_TOKEN_EXPIRES_MINUTES, 10) || 10,
+        otpPepper: process.env.OTP_PEPPER || process.env.JWT_REFRESH_SECRET,
+        actionTokenPepper: process.env.ACTION_TOKEN_PEPPER || process.env.JWT_REFRESH_SECRET,
+    },
+
+    security: {
+        bcryptSaltRounds: parseInt(process.env.BCRYPT_SALT_ROUNDS, 10) || 12,
     },
 };
 

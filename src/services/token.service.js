@@ -146,6 +146,10 @@ const revokeRefreshToken = async (refreshToken) => {
     });
 };
 
+/**
+ * Revoke every active refresh token for a user.
+ * Uses the supplied database client when called inside a transaction.
+ */
 const revokeAllUserTokens = async (userId, database = prisma) => {
     await database.refreshToken.updateMany({
         where: { userId, revokedAt: null },

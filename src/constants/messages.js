@@ -35,7 +35,29 @@ const messages = {
         INVALID_REFRESH_TOKEN: 'Refresh token không hợp lệ hoặc đã hết hạn',
         UNAUTHORIZED: 'Bạn chưa đăng nhập hoặc phiên đăng nhập không hợp lệ',
         FORBIDDEN: 'Bạn không có quyền thực hiện thao tác này',
-        RESEND_TOO_SOON: 'Vui lòng đợi một lát trước khi yêu cầu gửi lại email',
+        RESEND_TOO_SOON: 'Vui lòng đợi 60 giây trước khi yêu cầu mã OTP mới',
+        OTP_SENT: 'Nếu email hợp lệ, mã OTP đã được gửi',
+        OTP_VERIFIED: 'Xác thực OTP thành công',
+        INVALID_OTP: 'Mã OTP không hợp lệ',
+        OTP_EXPIRED: 'Mã OTP đã hết hạn. Vui lòng yêu cầu mã mới',
+        OTP_ATTEMPTS_EXCEEDED:
+            'Mã OTP đã bị vô hiệu hóa do nhập sai quá nhiều lần. Vui lòng yêu cầu mã mới',
+        INVALID_ACTION_TOKEN: 'Phiên xác thực không hợp lệ hoặc đã hết hạn',
+        ACCOUNT_ALREADY_ACTIVATED: 'Tài khoản đã được kích hoạt hoặc không thể kích hoạt',
+        ACTIVATION_SUCCESS: 'Kích hoạt tài khoản thành công',
+        PASSWORD_RESET_SUCCESS: 'Đặt lại mật khẩu thành công',
+        EMAIL_DELIVERY_FAILED: 'Không thể gửi email xác thực. Vui lòng thử lại sau',
+    },
+
+    // Profile
+    PROFILE: {
+        FETCH_SUCCESS: 'Lấy hồ sơ cá nhân thành công',
+        UPDATE_SUCCESS: 'Cập nhật hồ sơ cá nhân thành công',
+        PASSWORD_CHANGE_SUCCESS: 'Đổi mật khẩu thành công',
+        NOT_FOUND: 'Không tìm thấy hồ sơ cá nhân',
+        CURRENT_PASSWORD_INCORRECT: 'Mật khẩu hiện tại không chính xác',
+        PASSWORD_REUSE_NOT_ALLOWED: 'Mật khẩu mới không được trùng với mật khẩu hiện tại',
+        UPDATE_CONFLICT: 'Hồ sơ đã thay đổi. Vui lòng tải lại và thử lại',
     },
 
     // Generic CRUD
