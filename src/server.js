@@ -2,6 +2,7 @@ const app = require('./app');
 const config = require('./config');
 const logger = require('./config/logger');
 const connectDB = require('./config/db');
+const prisma = require('./config/prisma');
 
 let server;
 
@@ -12,7 +13,7 @@ const startServer = async () => {
     server = app.listen(config.port, () => {
         logger.info(`
     ╔═══════════════════════════════════════════════════╗
-    ║   Smart Shrimp                        ║
+    ║   Smart Shrimp                                    ║
     ║   Environment: ${config.env.padEnd(24)}           ║
     ║   Port: ${String(config.port).padEnd(33)}         ║
     ║   API: ${config.apiPrefix.padEnd(30)}             ║
@@ -43,7 +44,8 @@ process.on('uncaughtException', (error) => {
 process.on('SIGTERM', () => {
     logger.info('SIGTERM received. Shutting down gracefully...');
     if (server) {
-        server.close(() => {
+        server.close(async () => {
+            await prisma.$disconnect();
             logger.info('Process terminated');
         });
     }
