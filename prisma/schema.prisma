@@ -25,27 +25,55 @@ enum AccountStatus {
   @@map("account_status")
 }
 
+enum VerificationPurpose {
+  ACCOUNT_ACTIVATION @map("account_activation")
+  PASSWORD_RESET     @map("password_reset")
+
+  @@map("verification_purpose")
+}
+
 model User {
-  id               String         @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
-  email            String         @unique @db.Citext
-  phone            String?        @db.VarChar(20)
-  passwordHash     String?        @map("password_hash") @db.VarChar(255)
-  fullName         String?        @map("full_name") @db.VarChar(255)
-  avatarUrl        String?        @map("avatar_url")
-  role             UserRole
-  status           AccountStatus  @default(PENDING_ACTIVATION)
-  managedByOwnerId String?        @map("managed_by_owner_id") @db.Uuid
-  activatedAt      DateTime?      @map("activated_at") @db.Timestamptz(6)
-  statusChangedBy  String?        @map("status_changed_by") @db.Uuid
-  statusChangedAt  DateTime?      @map("status_changed_at") @db.Timestamptz(6)
-  statusReason     String?        @map("status_reason")
-  lastLoginAt      DateTime?      @map("last_login_at") @db.Timestamptz(6)
-  createdBy        String?        @map("created_by") @db.Uuid
-  createdAt        DateTime       @default(now()) @map("created_at") @db.Timestamptz(6)
-  updatedAt        DateTime       @default(now()) @map("updated_at") @db.Timestamptz(6)
-  refreshTokens    RefreshToken[]
+  id                     String                       @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  email                  String                       @unique @db.Citext
+  phone                  String?                      @db.VarChar(20)
+  passwordHash           String?                      @map("password_hash") @db.VarChar(255)
+  fullName               String?                      @map("full_name") @db.VarChar(255)
+  avatarUrl              String?                      @map("avatar_url")
+  role                   UserRole
+  status                 AccountStatus                @default(PENDING_ACTIVATION)
+  managedByOwnerId       String?                      @map("managed_by_owner_id") @db.Uuid
+  activatedAt            DateTime?                    @map("activated_at") @db.Timestamptz(6)
+  statusChangedBy        String?                      @map("status_changed_by") @db.Uuid
+  statusChangedAt        DateTime?                    @map("status_changed_at") @db.Timestamptz(6)
+  statusReason           String?                      @map("status_reason")
+  lastLoginAt            DateTime?                    @map("last_login_at") @db.Timestamptz(6)
+  createdBy              String?                      @map("created_by") @db.Uuid
+  createdAt              DateTime                     @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt              DateTime                     @default(now()) @map("updated_at") @db.Timestamptz(6)
+  refreshTokens          RefreshToken[]
+  verificationChallenges EmailVerificationChallenge[]
 
   @@map("users")
+}
+
+model EmailVerificationChallenge {
+  id                   String              @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  userId               String              @map("user_id") @db.Uuid
+  purpose              VerificationPurpose
+  codeHash             String              @map("code_hash") @db.Char(64)
+  expiresAt            DateTime            @default(dbgenerated("NOW() + INTERVAL '10 minutes'")) @map("expires_at") @db.Timestamptz(6)
+  resendAvailableAt    DateTime            @default(dbgenerated("NOW() + INTERVAL '60 seconds'")) @map("resend_available_at") @db.Timestamptz(6)
+  failedAttempts       Int                 @default(0) @map("failed_attempts") @db.SmallInt
+  verifiedAt           DateTime?           @map("verified_at") @db.Timestamptz(6)
+  actionTokenHash      String?             @unique @map("action_token_hash") @db.Char(64)
+  actionTokenExpiresAt DateTime?           @map("action_token_expires_at") @db.Timestamptz(6)
+  consumedAt           DateTime?           @map("consumed_at") @db.Timestamptz(6)
+  supersededAt         DateTime?           @map("superseded_at") @db.Timestamptz(6)
+  createdAt            DateTime            @default(now()) @map("created_at") @db.Timestamptz(6)
+  user                 User                @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId, purpose, createdAt(sort: Desc)], map: "idx_email_verification_lookup")
+  @@map("email_verification_challenges")
 }
 
 model RefreshToken {
