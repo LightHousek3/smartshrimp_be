@@ -146,8 +146,8 @@ const revokeRefreshToken = async (refreshToken) => {
     });
 };
 
-const revokeAllUserTokens = async (userId) => {
-    await prisma.refreshToken.updateMany({
+const revokeAllUserTokens = async (userId, database = prisma) => {
+    await database.refreshToken.updateMany({
         where: { userId, revokedAt: null },
         data: { revokedAt: new Date() },
     });

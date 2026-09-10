@@ -61,7 +61,7 @@ const config = {
             },
         },
         from: process.env.EMAIL_FROM || 'noreply@smartshrimp.vn',
-        verificationExpiresHours:
+        verificationExpiresMinutes:
             parseInt(process.env.EMAIL_VERIFICATION_EXPIRES_MINUTES, 10) || 10,
     },
 };

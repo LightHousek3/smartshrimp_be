@@ -2,6 +2,27 @@
  * Centralized message constants
  */
 const messages = {
+    ACCOUNT: {
+        LIST_FETCHED: 'Account list fetched successfully',
+        FETCHED: 'Account details fetched successfully',
+        CREATED: 'Account created successfully',
+        NOT_FOUND: 'Account not found',
+        EMAIL_ALREADY_EXISTS: 'Email is already in use',
+        INVALID_MANAGING_OWNER: 'Managing owner must be a farm owner',
+        OWNER_NOT_ACTIVE: 'Managing owner must be active',
+        ACTIVATION_EMAIL_SENT: 'Activation email sent successfully',
+        ACTIVATION_RESEND_TOO_SOON: 'Please wait before resending the activation email',
+        ACTIVATION_NOT_PENDING: 'Only pending accounts can receive an activation email',
+        ACTIVATION_EMAIL_FAILED: 'Unable to send the activation email',
+        STATUS_UPDATED: 'Account status updated successfully',
+        STATUS_UNCHANGED: 'New status must be different from the current status',
+        STATUS_PENDING_PROTECTED: 'Pending accounts must be activated through email verification',
+        ADMIN_STATUS_PROTECTED: 'Admin account status cannot be changed here',
+        STAFF_HAS_ACTIVE_ASSIGNMENT: 'Assigned staff must be replaced before deactivation',
+        OWNER_HAS_ACTIVE_STAFF: 'Owner staff must be disabled or transferred before deactivation',
+        OWNER_HAS_OPEN_SEASON: 'Owner with an open season cannot be deactivated',
+    },
+
     // Auth
     AUTH: {
         LOGIN_SUCCESS: 'Đăng nhập thành công',

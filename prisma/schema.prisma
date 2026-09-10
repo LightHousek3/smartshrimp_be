@@ -25,6 +25,22 @@ enum AccountStatus {
   @@map("account_status")
 }
 
+enum VerificationPurpose {
+  ACCOUNT_ACTIVATION @map("account_activation")
+  PASSWORD_RESET     @map("password_reset")
+
+  @@map("verification_purpose")
+}
+
+enum SeasonStatus {
+  PLANNING  @map("planning")
+  ACTIVE    @map("active")
+  COMPLETED @map("completed")
+  CANCELLED @map("cancelled")
+
+  @@map("season_status")
+}
+
 model User {
   id               String         @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
   email            String         @unique @db.Citext
@@ -59,4 +75,55 @@ model RefreshToken {
   user      User      @relation(fields: [userId], references: [id], onDelete: Cascade)
 
   @@map("refresh_tokens")
+}
+
+model EmailVerificationChallenge {
+  id                   String              @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  userId               String              @map("user_id") @db.Uuid
+  purpose              VerificationPurpose
+  codeHash             String              @map("code_hash") @db.Char(64)
+  expiresAt            DateTime            @map("expires_at") @db.Timestamptz(6)
+  resendAvailableAt    DateTime            @map("resend_available_at") @db.Timestamptz(6)
+  failedAttempts       Int                 @default(0) @map("failed_attempts") @db.SmallInt
+  verifiedAt           DateTime?           @map("verified_at") @db.Timestamptz(6)
+  actionTokenHash      String?             @map("action_token_hash") @db.Char(64)
+  actionTokenExpiresAt DateTime?           @map("action_token_expires_at") @db.Timestamptz(6)
+  consumedAt           DateTime?           @map("consumed_at") @db.Timestamptz(6)
+  supersededAt         DateTime?           @map("superseded_at") @db.Timestamptz(6)
+  createdAt            DateTime            @default(now()) @map("created_at") @db.Timestamptz(6)
+
+  @@index([userId, purpose, createdAt], map: "idx_email_verification_lookup")
+  @@map("email_verification_challenges")
+}
+
+// Minimal mappings for account-status eligibility checks against the existing database.
+model Farm {
+  id      String @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  ownerId String @map("owner_id") @db.Uuid
+
+  @@map("farms")
+}
+
+model Pond {
+  id     String @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  farmId String @map("farm_id") @db.Uuid
+
+  @@map("ponds")
+}
+
+model AquacultureSeason {
+  id     String       @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  pondId String       @map("pond_id") @db.Uuid
+  status SeasonStatus
+
+  @@map("aquaculture_seasons")
+}
+
+model SeasonPersonnelAssignment {
+  id           String    @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  seasonId     String    @map("season_id") @db.Uuid
+  userId       String    @map("user_id") @db.Uuid
+  unassignedAt DateTime? @map("unassigned_at") @db.Timestamptz(6)
+
+  @@map("season_personnel_assignments")
 }
