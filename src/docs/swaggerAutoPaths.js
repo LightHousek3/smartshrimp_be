@@ -111,6 +111,21 @@ function extractValidationSchema(middlewareBlock, imports) {
     return schema;
 }
 
+function hasPrecedingRouterAuth(routeSource, routeIndex) {
+    const precedingSource = routeSource.slice(0, routeIndex);
+    const routerUseRegex = /(?:^|\n)\s*router\.use\s*\(([\s\S]*?)\)\s*;/g;
+    let match;
+
+    while ((match = routerUseRegex.exec(precedingSource)) !== null) {
+        const middlewareBlock = match[1].replace(/\/\/.*$/gm, '');
+        if (/\bauthenticate\b/.test(middlewareBlock)) {
+            return true;
+        }
+    }
+
+    return false;
+}
+
 function getRule(description, name) {
     if (!description || !Array.isArray(description.rules)) {
         return undefined;
@@ -394,12 +409,13 @@ function buildOperation({
     tag,
     validationSchema,
     schemaRegistry,
+    routerRequiresAuth,
 }) {
     const oasPath = toOasPath(fullExpressPath);
     const operationId = `${method}_${oasPath.replace(/[{}/:-]/g, '_').replace(/_+/g, '_')}`;
 
     const strippedMiddleware = middlewareBlock.replace(/\/\/.*$/gm, '');
-    const requiresAuth = /\bauthenticate\b/.test(strippedMiddleware);
+    const requiresAuth = routerRequiresAuth || /\bauthenticate\b/.test(strippedMiddleware);
 
     const params = [];
     const parameterIndex = new Map();
@@ -480,6 +496,7 @@ function parseRouteFile(routeSource, routeFile, basePath, apiPrefix, schemaRegis
         const childPath = match[3];
         const middlewareBlock = match[4] || '';
         const validationSchema = extractValidationSchema(middlewareBlock, imports);
+        const routerRequiresAuth = hasPrecedingRouterAuth(routeSource, match.index);
 
         const fullExpressPath = normalizePath(
             `${apiPrefix}${basePath}/${childPath}`.replace(/\/+/g, '/'),
@@ -494,6 +511,7 @@ function parseRouteFile(routeSource, routeFile, basePath, apiPrefix, schemaRegis
             tag,
             validationSchema,
             schemaRegistry,
+            routerRequiresAuth,
         });
 
         operations.push({ method, oasPath, operation, tag });

@@ -159,7 +159,11 @@ const sendOtp = async ({ email, code, purpose }) => {
     });
 };
 
+const sendAccountActivationEmail = ({ email, code }) =>
+    sendOtp({ email, code, purpose: VERIFICATION_PURPOSE.ACCOUNT_ACTIVATION });
+
 module.exports = {
     buildOtpEmail,
     sendOtp,
+    sendAccountActivationEmail,
 };
