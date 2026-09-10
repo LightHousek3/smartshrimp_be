@@ -17,6 +17,17 @@ const messages = {
         RESEND_TOO_SOON: 'Vui lòng đợi một lát trước khi yêu cầu gửi lại email',
     },
 
+    // Profile
+    PROFILE: {
+        FETCH_SUCCESS: 'Lấy hồ sơ cá nhân thành công',
+        UPDATE_SUCCESS: 'Cập nhật hồ sơ cá nhân thành công',
+        PASSWORD_CHANGE_SUCCESS: 'Đổi mật khẩu thành công',
+        NOT_FOUND: 'Không tìm thấy hồ sơ cá nhân',
+        CURRENT_PASSWORD_INCORRECT: 'Mật khẩu hiện tại không chính xác',
+        PASSWORD_REUSE_NOT_ALLOWED: 'Mật khẩu mới không được trùng với mật khẩu hiện tại',
+        UPDATE_CONFLICT: 'Hồ sơ đã thay đổi. Vui lòng tải lại và thử lại',
+    },
+
     // Generic CRUD
     CRUD: {
         CREATED: (resource) => `Tạo ${resource} thành công`,
