@@ -18,7 +18,7 @@ const apiLimiter = rateLimit({
 });
 
 /**
- * Strict rate limiter for auth endpoints (login, register)
+ * Strict rate limiter for auth endpoints
  */
 const authLimiter = rateLimit({
     windowMs: 15 * 60 * 1000, // 15 minutes
@@ -26,7 +26,7 @@ const authLimiter = rateLimit({
     message: {
         success: false,
         statusCode: httpStatus.TOO_MANY_REQUESTS,
-        message: 'Quá nhiều lần xác thực không thành công. Vui lòng thử lại sau 15 phút.',
+        message: 'Quá nhiều lần thao tác không thành công. Vui lòng thử lại sau 15 phút.',
     },
     standardHeaders: true,
     legacyHeaders: false,

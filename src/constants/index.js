@@ -18,9 +18,15 @@ const ACCOUNT_STATUS = {
     BLOCKED: 'BLOCKED',
 };
 
+const VERIFICATION_PURPOSE = {
+    ACCOUNT_ACTIVATION: 'ACCOUNT_ACTIVATION',
+    PASSWORD_RESET: 'PASSWORD_RESET',
+};
+
 module.exports = {
     httpStatus,
     messages,
     USER_ROLE,
     ACCOUNT_STATUS,
+    VERIFICATION_PURPOSE,
 };
