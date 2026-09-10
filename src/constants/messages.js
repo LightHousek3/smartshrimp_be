@@ -6,8 +6,15 @@ const messages = {
     AUTH: {
         LOGIN_SUCCESS: 'Đăng nhập thành công',
         LOGOUT_SUCCESS: 'Đăng xuất thành công',
+        TOKEN_REFRESHED: 'Làm mới token thành công',
+        PENDING_ACTIVATION: 'Tài khoản chưa được kích hoạt. Vui lòng kích hoạt tài khoản trước',
+        ACCOUNT_BLOCKED: 'Tài khoản của bạn đã bị khóa. Vui lòng liên hệ bộ phận hỗ trợ',
+        ACCOUNT_INACTIVE: 'Tài khoản tạm ngừng sử dụng theo quản lý nghiệp vụ',
         INVALID_CREDENTIALS: 'Email hoặc mật khẩu không chính xác',
-        RESEND_TOO_SOON: 'Vui lòng đợi một lát trước khi yêu cầu gửi lại email.',
+        INVALID_REFRESH_TOKEN: 'Refresh token không hợp lệ hoặc đã hết hạn',
+        UNAUTHORIZED: 'Bạn chưa đăng nhập hoặc phiên đăng nhập không hợp lệ',
+        FORBIDDEN: 'Bạn không có quyền thực hiện thao tác này',
+        RESEND_TOO_SOON: 'Vui lòng đợi một lát trước khi yêu cầu gửi lại email',
     },
 
     // Generic CRUD

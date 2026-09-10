@@ -5,7 +5,6 @@ const morgan = require('morgan');
 const compression = require('compression');
 const cookieParser = require('cookie-parser');
 const hpp = require('hpp');
-const path = require('path');
 
 const config = require('./config');
 const corsOptions = require('./config/cors');

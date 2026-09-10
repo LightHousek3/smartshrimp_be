@@ -1,95 +1,99 @@
 const jwt = require('jsonwebtoken');
 const config = require('../config');
+const prisma = require('../config/prisma');
 const { ApiError } = require('../utils');
-const { User } = require('../models');
-const { httpStatus, messages, USER_STATUS } = require('../constants');
+const { messages, ACCOUNT_STATUS } = require('../constants');
 
-/**
- * Authenticate user via JWT Bearer token
- */
+const AUTHENTICATED_USER_SELECT = {
+    id: true,
+    email: true,
+    phone: true,
+    fullName: true,
+    avatarUrl: true,
+    role: true,
+    status: true,
+    managedByOwnerId: true,
+    activatedAt: true,
+    lastLoginAt: true,
+    createdAt: true,
+    updatedAt: true,
+};
+
+const getBearerToken = (authorization) => {
+    const [scheme, token] = (authorization || '').split(' ');
+    return scheme === 'Bearer' && token ? token : null;
+};
+
+const loadActiveUser = async (token) => {
+    const decoded = jwt.verify(token, config.jwt.accessSecret);
+    if (decoded.type !== 'access' || !decoded.sub) {
+        throw new jwt.JsonWebTokenError('Invalid access token');
+    }
+
+    const user = await prisma.user.findUnique({
+        where: { id: decoded.sub },
+        select: AUTHENTICATED_USER_SELECT,
+    });
+
+    if (!user) {
+        throw ApiError.unauthorized(messages.AUTH.UNAUTHORIZED);
+    }
+
+    if (user.status === ACCOUNT_STATUS.BLOCKED) {
+        throw ApiError.forbidden(messages.AUTH.ACCOUNT_BLOCKED);
+    }
+
+    if (user.status !== ACCOUNT_STATUS.ACTIVE) {
+        throw ApiError.forbidden(messages.AUTH.ACCOUNT_INACTIVE);
+    }
+
+    return user;
+};
+
 const authenticate = async (req, res, next) => {
     try {
-        let token;
-
-        // Extract token from Authorization header
-        if (req.headers.authorization && req.headers.authorization.startsWith('Bearer')) {
-            token = req.headers.authorization.split(' ')[1];
-        }
-
+        const token = getBearerToken(req.headers.authorization);
         if (!token) {
             throw ApiError.unauthorized(messages.AUTH.UNAUTHORIZED);
         }
 
-        // Verify token
-        const decoded = jwt.verify(token, config.jwt.accessSecret);
-
-        // Fetch user
-        const user = await User.findById(decoded.sub).select('-password');
-        if (!user) {
-            throw ApiError.unauthorized(messages.AUTH.UNAUTHORIZED);
-        }
-
-        // Check user status
-        if (user.status === USER_STATUS.BLOCKED) {
-            throw ApiError.forbidden(messages.AUTH.ACCOUNT_BLOCKED);
-        }
-
-        if (user.status === USER_STATUS.INACTIVE) {
-            throw ApiError.forbidden(messages.AUTH.ACCOUNT_INACTIVE);
-        }
-
-        // Attach user to request
-        req.user = user;
+        req.user = await loadActiveUser(token);
         next();
     } catch (error) {
-        if (error instanceof jwt.JsonWebTokenError) {
-            return next(ApiError.unauthorized(messages.AUTH.UNAUTHORIZED));
-        }
         if (error instanceof jwt.TokenExpiredError) {
             return next(ApiError.unauthorized('Access token expired'));
         }
-        next(error);
-    }
-};
 
-/**
- * Authorize by roles
- * @param  {...string} roles - Allowed roles (e.g., 'ADMIN', 'USER')
- */
-const authorize = (...roles) => {
-    return (req, res, next) => {
-        if (!req.user) {
+        if (error instanceof jwt.JsonWebTokenError) {
             return next(ApiError.unauthorized(messages.AUTH.UNAUTHORIZED));
         }
 
-        if (!roles.includes(req.user.role)) {
-            return next(ApiError.forbidden(messages.AUTH.FORBIDDEN));
-        }
-
-        next();
-    };
+        return next(error);
+    }
 };
 
-/**
- * Optional authentication - attaches user if token is present, continues otherwise
- */
+const authorize = (...roles) => (req, res, next) => {
+    if (!req.user) {
+        return next(ApiError.unauthorized(messages.AUTH.UNAUTHORIZED));
+    }
+
+    if (!roles.includes(req.user.role)) {
+        return next(ApiError.forbidden(messages.AUTH.FORBIDDEN));
+    }
+
+    return next();
+};
+
 const optionalAuth = async (req, res, next) => {
     try {
-        let token;
-        if (req.headers.authorization && req.headers.authorization.startsWith('Bearer')) {
-            token = req.headers.authorization.split(' ')[1];
-        }
-
+        const token = getBearerToken(req.headers.authorization);
         if (token) {
-            const decoded = jwt.verify(token, config.jwt.accessSecret);
-            const user = await User.findById(decoded.sub).select('-password');
-            if (user && user.status === USER_STATUS.ACTIVE) {
-                req.user = user;
-            }
+            req.user = await loadActiveUser(token);
         }
     } catch (error) {
-        // Silently ignore auth errors for optional auth
+        // Optional authentication intentionally ignores invalid credentials.
     }
+
     next();
 };
 

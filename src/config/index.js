@@ -10,6 +10,9 @@ const config = {
     env: process.env.NODE_ENV || 'development',
     port: parseInt(process.env.PORT, 10) || 3000,
     apiPrefix: API_PREFIX,
+    app: {
+        backendUrl: BASE_URL || undefined,
+    },
 
     jwt: {
         accessSecret: process.env.JWT_ACCESS_SECRET,
@@ -39,7 +42,7 @@ const config = {
     },
 
     rateLimit: {
-        windows: parseInt(process.env.RATE_LIMIT_WINDOW_MS, 10) || 15 * 60 * 1000,
+        windowMs: parseInt(process.env.RATE_LIMIT_WINDOW_MS, 10) || 15 * 60 * 1000,
         max: parseInt(process.env.RATE_LIMIT_MAX, 10) || 100,
     },
 

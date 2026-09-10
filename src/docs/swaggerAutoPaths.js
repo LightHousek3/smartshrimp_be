@@ -396,7 +396,7 @@ function buildOperation({
     schemaRegistry,
 }) {
     const oasPath = toOasPath(fullExpressPath);
-    const operationId = `${method}_${oasPath.replace(/[{}\/:-]/g, '_').replace(/_+/g, '_')}`;
+    const operationId = `${method}_${oasPath.replace(/[{}/:-]/g, '_').replace(/_+/g, '_')}`;
 
     const strippedMiddleware = middlewareBlock.replace(/\/\/.*$/gm, '');
     const requiresAuth = /\bauthenticate\b/.test(strippedMiddleware);
