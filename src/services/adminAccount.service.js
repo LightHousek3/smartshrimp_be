@@ -7,7 +7,6 @@ const emailService = require('./email.service');
 const tokenService = require('./token.service');
 
 const ACTIVATION_PURPOSE = 'ACCOUNT_ACTIVATION';
-const ACTIVATION_RESEND_COOLDOWN_SECONDS = 60;
 const OPEN_SEASON_STATUSES = ['PLANNING', 'ACTIVE'];
 
 const ACCOUNT_SELECT = {
@@ -32,6 +31,7 @@ const ACCOUNT_SELECT = {
 const ACCOUNT_LIST_SELECT = {
     id: true,
     email: true,
+    phone: true,
     fullName: true,
     role: true,
     status: true,
@@ -83,6 +83,24 @@ const buildAccountFilter = ({
     return where;
 };
 
+const buildAccountOrderBy = (sortBy, sortOrder) => {
+    const direction = sortOrder === 'desc' ? 'desc' : 'asc';
+
+    if (sortBy === 'identity') {
+        return [
+            { fullName: { sort: direction, nulls: 'last' } },
+            { email: direction },
+            { id: direction },
+        ];
+    }
+
+    if (sortBy === 'createdAt') {
+        return [{ createdAt: direction }, { id: direction }];
+    }
+
+    return [{ createdAt: 'desc' }, { id: 'desc' }];
+};
+
 const attachManagingOwners = async (accounts) => {
     const ownerIds = [...new Set(accounts.map((account) => account.managedByOwnerId).filter(Boolean))];
 
@@ -114,6 +132,8 @@ const getListAccount = async ({
     search,
     createdFrom,
     createdTo,
+    sortBy,
+    sortOrder,
 }) => {
     const where = buildAccountFilter({
         role,
@@ -127,7 +147,7 @@ const getListAccount = async ({
         prisma.user.findMany({
             where,
             select: ACCOUNT_LIST_SELECT,
-            orderBy: [{ createdAt: 'desc' }, { id: 'desc' }],
+            orderBy: buildAccountOrderBy(sortBy, sortOrder),
             take: limit + 1,
             ...(cursor && { cursor: { id: cursor }, skip: 1 }),
         }),
@@ -193,56 +213,13 @@ const validateManagingOwner = async (database, role, managedByOwnerId) => {
     }
 };
 
-const createAccount = async ({ email, role, managedByOwnerId }, adminId) => {
-    try {
-        return await prisma.$transaction(async (transaction) => {
-            await validateManagingOwner(transaction, role, managedByOwnerId);
-
-            return transaction.user.create({
-                data: {
-                    email,
-                    role,
-                    status: ACCOUNT_STATUS.PENDING_ACTIVATION,
-                    managedByOwnerId: managedByOwnerId || null,
-                    createdBy: adminId,
-                },
-                select: ACCOUNT_SELECT,
-            });
-        });
-    } catch (error) {
-        if (error instanceof ApiError) {
-            throw error;
-        }
-
-        if (error.code === 'P2002') {
-            throw new ApiError(httpStatus.CONFLICT, messages.ACCOUNT.EMAIL_ALREADY_EXISTS);
-        }
-
-        if (error.code === 'P2003') {
-            throw new ApiError(httpStatus.BAD_REQUEST, messages.ACCOUNT.INVALID_MANAGING_OWNER);
-        }
-
-        throw error;
-    }
-};
-
 const hashActivationCode = (code) =>
-    crypto.createHmac('sha256', config.jwt.accessSecret).update(code).digest('hex');
+    crypto.createHmac('sha256', config.email.otpPepper).update(code).digest('hex');
 
-const resendActivation = async (accountId) => {
-    const account = await prisma.user.findUnique({
-        where: { id: accountId },
-        select: { id: true, email: true, status: true },
-    });
-
-    if (!account) {
-        throw new ApiError(httpStatus.NOT_FOUND, messages.ACCOUNT.NOT_FOUND);
-    }
-
-    if (account.status !== ACCOUNT_STATUS.PENDING_ACTIVATION) {
-        throw new ApiError(httpStatus.CONFLICT, messages.ACCOUNT.ACTIVATION_NOT_PENDING);
-    }
-
+const buildActivationChallenge = async (
+    account,
+    { enforceCooldown = true } = {},
+) => {
     const now = new Date();
     const activeChallenge = await prisma.emailVerificationChallenge.findFirst({
         where: {
@@ -254,7 +231,7 @@ const resendActivation = async (accountId) => {
         orderBy: { createdAt: 'desc' },
     });
 
-    if (activeChallenge?.resendAvailableAt > now) {
+    if (enforceCooldown && activeChallenge?.resendAvailableAt > now) {
         throw new ApiError(
             httpStatus.TOO_MANY_REQUESTS,
             messages.ACCOUNT.ACTIVATION_RESEND_TOO_SOON,
@@ -263,9 +240,7 @@ const resendActivation = async (accountId) => {
 
     const code = crypto.randomInt(0, 1000000).toString().padStart(6, '0');
     const expiresAt = new Date(now.getTime() + config.email.verificationExpiresMinutes * 60000);
-    const resendAvailableAt = new Date(
-        now.getTime() + ACTIVATION_RESEND_COOLDOWN_SECONDS * 1000,
-    );
+    const resendAvailableAt = new Date(now.getTime() + config.email.resendDelaySeconds * 1000);
 
     let challenge;
 
@@ -302,6 +277,12 @@ const resendActivation = async (accountId) => {
         throw error;
     }
 
+    return { code, challenge };
+};
+
+const sendActivationEmail = async (account, options) => {
+    const { code, challenge } = await buildActivationChallenge(account, options);
+
     try {
         await emailService.sendAccountActivationEmail({
             email: account.email,
@@ -322,6 +303,65 @@ const resendActivation = async (accountId) => {
         resendAvailableAt: challenge.resendAvailableAt,
     };
 };
+
+const createAccount = async ({ email, role, managedByOwnerId }, adminId) => {
+    let account;
+
+    try {
+        account = await prisma.$transaction(async (transaction) => {
+            await validateManagingOwner(transaction, role, managedByOwnerId);
+
+            return transaction.user.create({
+                data: {
+                    email,
+                    role,
+                    status: ACCOUNT_STATUS.PENDING_ACTIVATION,
+                    managedByOwnerId: managedByOwnerId || null,
+                    createdBy: adminId,
+                },
+                select: ACCOUNT_SELECT,
+            });
+        });
+    } catch (error) {
+        if (error instanceof ApiError) {
+            throw error;
+        }
+
+        if (error.code === 'P2002') {
+            throw new ApiError(httpStatus.CONFLICT, messages.ACCOUNT.EMAIL_ALREADY_EXISTS);
+        }
+
+        if (error.code === 'P2003') {
+            throw new ApiError(httpStatus.BAD_REQUEST, messages.ACCOUNT.INVALID_MANAGING_OWNER);
+        }
+
+        throw error;
+    }
+
+    const activation = await sendActivationEmail(account, { enforceCooldown: false });
+
+    return { ...account, activation };
+};
+
+const findPendingActivationAccount = async (accountId) => {
+    const account = await prisma.user.findUnique({
+        where: { id: accountId },
+        select: { id: true, email: true, status: true },
+    });
+
+    if (!account) {
+        throw new ApiError(httpStatus.NOT_FOUND, messages.ACCOUNT.NOT_FOUND);
+    }
+
+    if (account.status !== ACCOUNT_STATUS.PENDING_ACTIVATION) {
+        throw new ApiError(httpStatus.CONFLICT, messages.ACCOUNT.ACTIVATION_NOT_PENDING);
+    }
+
+    return account;
+};
+
+const resendActivation = async (accountId) =>
+    sendActivationEmail(await findPendingActivationAccount(accountId));
 
 const countOpenOwnerSeasons = async (database, ownerId) => {
     const farms = await database.farm.findMany({

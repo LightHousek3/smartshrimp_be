@@ -21,6 +21,8 @@ const getListAccount = {
             search: Joi.string().trim().max(255),
             createdFrom: Joi.date().iso(),
             createdTo: Joi.date().iso(),
+            sortBy: Joi.string().valid('identity', 'createdAt'),
+            sortOrder: Joi.string().valid('asc', 'desc').default('asc'),
         })
         .custom((value, helpers) => {
             if (value.createdFrom && value.createdTo && value.createdFrom > value.createdTo) {
