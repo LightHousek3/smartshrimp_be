@@ -1,5 +1,6 @@
 generator client {
-  provider = "prisma-client-js"
+  provider        = "prisma-client-js"
+  previewFeatures = ["views"]
 }
 
 datasource db {
@@ -61,6 +62,8 @@ model User {
   updatedAt              DateTime                     @default(now()) @map("updated_at") @db.Timestamptz(6)
   refreshTokens          RefreshToken[]
   verificationChallenges EmailVerificationChallenge[]
+  managedByOwner         User?                        @relation("OwnerManagedUsers", fields: [managedByOwnerId], references: [id], onDelete: Restrict)
+  managedUsers           User[]                       @relation("OwnerManagedUsers")
 
   @@map("users")
 }
@@ -128,4 +131,15 @@ model SeasonPersonnelAssignment {
   unassignedAt DateTime? @map("unassigned_at") @db.Timestamptz(6)
 
   @@map("season_personnel_assignments")
+}
+
+/// Read-only KPI projection already created by smartshrimp.sql.
+view TechnicianKpi {
+  technicianId            String   @unique @map("technician_id") @db.Uuid
+  seasonsParticipated     BigInt?  @map("seasons_participated")
+  completedTasks          BigInt?  @map("completed_tasks")
+  onTimeCompletedTasks    BigInt?  @map("on_time_completed_tasks")
+  onTimeCompletionRatePct Decimal? @map("on_time_completion_rate_pct") @db.Decimal
+
+  @@map("v_technician_kpi")
 }
