@@ -6,6 +6,13 @@ const { httpStatus, messages, ACCOUNT_STATUS, USER_ROLE } = require('../constant
 const PROFILE_ROLES = [USER_ROLE.TECHNICIAN, USER_ROLE.FARM_OWNER, USER_ROLE.EXPERT];
 const PASSWORD_HASH_ROUNDS = 12;
 
+const PUBLIC_MANAGER_SELECT = {
+    id: true,
+    email: true,
+    fullName: true,
+    avatarUrl: true,
+};
+
 const PUBLIC_PROFILE_SELECT = {
     id: true,
     email: true,
@@ -19,6 +26,9 @@ const PUBLIC_PROFILE_SELECT = {
     lastLoginAt: true,
     createdAt: true,
     updatedAt: true,
+    managedByOwner: {
+        select: PUBLIC_MANAGER_SELECT,
+    },
 };
 
 const eligibleProfileWhere = (userId) => ({
@@ -26,6 +36,34 @@ const eligibleProfileWhere = (userId) => ({
     status: ACCOUNT_STATUS.ACTIVE,
     role: { in: PROFILE_ROLES },
 });
+
+const normalizeTechnicianKpi = (role, kpi) => {
+    if (role !== USER_ROLE.TECHNICIAN) return null;
+
+    return {
+        seasonsParticipated: Number(kpi?.seasonsParticipated ?? 0),
+        completedTasks: Number(kpi?.completedTasks ?? 0),
+        onTimeCompletedTasks: Number(kpi?.onTimeCompletedTasks ?? 0),
+        onTimeCompletionRatePct:
+            kpi?.onTimeCompletionRatePct == null
+                ? null
+                : Number(kpi.onTimeCompletionRatePct),
+    };
+};
+
+const withProfileDetails = async (database, profile) => {
+    const kpi =
+        profile.role === USER_ROLE.TECHNICIAN
+            ? await database.technicianKpi.findFirst({
+                where: { technicianId: profile.id },
+            })
+            : null;
+
+    return {
+        ...profile,
+        technicianKpi: normalizeTechnicianKpi(profile.role, kpi),
+    };
+};
 
 const getProfile = async (userId) => {
     const profile = await prisma.user.findFirst({
@@ -37,7 +75,7 @@ const getProfile = async (userId) => {
         throw new ApiError(httpStatus.NOT_FOUND, messages.PROFILE.NOT_FOUND);
     }
 
-    return profile;
+    return withProfileDetails(prisma, profile);
 };
 
 const updateProfile = async (userId, profileData) =>
@@ -60,7 +98,7 @@ const updateProfile = async (userId, profileData) =>
             throw new ApiError(httpStatus.CONFLICT, messages.PROFILE.UPDATE_CONFLICT);
         }
 
-        return profile;
+        return withProfileDetails(transaction, profile);
     });
 
 const changePassword = async (userId, currentPassword, newPassword) => {
@@ -111,4 +149,6 @@ module.exports = {
     updateProfile,
     changePassword,
     PUBLIC_PROFILE_SELECT,
+    PUBLIC_MANAGER_SELECT,
+    normalizeTechnicianKpi,
 };
