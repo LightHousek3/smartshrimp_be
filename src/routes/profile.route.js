@@ -2,10 +2,14 @@ const express = require('express');
 const { profileController } = require('../controllers');
 const { authenticate, authorize, validate } = require('../middlewares');
 const { profileValidator } = require('../validators');
-const { USER_ROLE } = require('../constants');
+const { ACCOUNT_ROLE } = require('../constants');
 
 const router = express.Router();
-const PROFILE_ROLES = [USER_ROLE.TECHNICIAN, USER_ROLE.FARM_OWNER, USER_ROLE.EXPERT];
+const PROFILE_ROLES = [
+    ACCOUNT_ROLE.TECHNICIAN,
+    ACCOUNT_ROLE.FARM_OWNER,
+    ACCOUNT_ROLE.EXPERT,
+];
 
 /**
  * @route   GET /api/v1/profile
@@ -21,7 +25,7 @@ router.get(
 
 /**
  * @route   PATCH /api/v1/profile
- * @desc    Update editable fields of the authenticated user's profile
+ * @desc    Update editable fields of the authenticated account's profile
  * @access  Private
  */
 router.patch(

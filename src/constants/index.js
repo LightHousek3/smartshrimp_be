@@ -4,7 +4,7 @@ const messages = require('./messages');
 /**
  * Enums matching the database schema
  */
-const USER_ROLE = {
+const ACCOUNT_ROLE = {
     ADMIN: 'ADMIN',
     FARM_OWNER: 'FARM_OWNER',
     TECHNICIAN: 'TECHNICIAN',
@@ -26,7 +26,7 @@ const VERIFICATION_PURPOSE = {
 module.exports = {
     httpStatus,
     messages,
-    USER_ROLE,
+    ACCOUNT_ROLE,
     ACCOUNT_STATUS,
     VERIFICATION_PURPOSE,
 };

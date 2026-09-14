@@ -5,7 +5,7 @@ const { ApiError } = require('../utils');
 const { httpStatus, messages, ACCOUNT_STATUS } = require('../constants');
 const tokenService = require('./token.service');
 
-const LOGIN_USER_SELECT = {
+const LOGIN_ACCOUNT_SELECT = {
     id: true,
     email: true,
     phone: true,
@@ -27,7 +27,7 @@ const ACCOUNT_STATUS_ERRORS = {
     [ACCOUNT_STATUS.INACTIVE]: messages.AUTH.ACCOUNT_INACTIVE,
 };
 
-const withoutPassword = ({ passwordHash, ...user }) => user;
+const withoutPassword = ({ passwordHash, ...account }) => account;
 
 /**
  * Login with email and password.
@@ -35,23 +35,23 @@ const withoutPassword = ({ passwordHash, ...user }) => user;
  * this endpoint to discover the status of an account without its password.
  */
 const login = async (email, password, deviceId) => {
-    const user = await prisma.user.findUnique({
+    const account = await prisma.account.findUnique({
         where: { email },
-        select: LOGIN_USER_SELECT,
+        select: LOGIN_ACCOUNT_SELECT,
     });
 
-    const passwordMatches = user?.passwordHash
-        ? await bcrypt.compare(password, user.passwordHash)
+    const passwordMatches = account?.passwordHash
+        ? await bcrypt.compare(password, account.passwordHash)
         : false;
 
-    if (!user || !passwordMatches) {
+    if (!account || !passwordMatches) {
         throw new ApiError(httpStatus.UNAUTHORIZED, messages.AUTH.INVALID_CREDENTIALS);
     }
 
-    if (user.status !== ACCOUNT_STATUS.ACTIVE) {
+    if (account.status !== ACCOUNT_STATUS.ACTIVE) {
         throw new ApiError(
             httpStatus.FORBIDDEN,
-            ACCOUNT_STATUS_ERRORS[user.status] || messages.AUTH.UNAUTHORIZED,
+            ACCOUNT_STATUS_ERRORS[account.status] || messages.AUTH.UNAUTHORIZED,
         );
     }
 
@@ -59,9 +59,9 @@ const login = async (email, password, deviceId) => {
     const resolvedDeviceId = deviceId || crypto.randomUUID();
 
     const tokens = await prisma.$transaction(async (transaction) => {
-        // The status predicate protects token issuance from a concurrent status change.
-        const updateResult = await transaction.user.updateMany({
-            where: { id: user.id, status: ACCOUNT_STATUS.ACTIVE },
+        // Keep the status predicate inside the transaction so a concurrent deactivation cannot race with token issuance.
+        const updateResult = await transaction.account.updateMany({
+            where: { id: account.id, status: ACCOUNT_STATUS.ACTIVE },
             data: { lastLoginAt: loginAt },
         });
 
@@ -69,11 +69,11 @@ const login = async (email, password, deviceId) => {
             throw new ApiError(httpStatus.FORBIDDEN, messages.AUTH.ACCOUNT_INACTIVE);
         }
 
-        return tokenService.generateAuthTokens(user, resolvedDeviceId, transaction);
+        return tokenService.generateAuthTokens(account, resolvedDeviceId, transaction);
     });
 
     return {
-        user: withoutPassword({ ...user, lastLoginAt: loginAt }),
+        account: withoutPassword({ ...account, lastLoginAt: loginAt }),
         tokens,
     };
 };

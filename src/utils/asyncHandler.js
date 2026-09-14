@@ -6,9 +6,9 @@
  * @returns {Function} Express middleware function
  *
  * @example
- * router.get('/users', asyncHandler(async (req, res) => {
- *   const users = await User.find();
- *   res.json(users);
+ * router.get('/accounts', asyncHandler(async (req, res) => {
+ *   const accounts = await accountService.list();
+ *   res.json(accounts);
  * }));
  */
 const asyncHandler = (fn) => (req, res, next) => {

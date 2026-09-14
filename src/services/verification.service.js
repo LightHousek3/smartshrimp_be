@@ -9,12 +9,16 @@ const { ApiError } = require('../utils');
 const {
     httpStatus,
     messages,
-    USER_ROLE,
+    ACCOUNT_ROLE,
     ACCOUNT_STATUS,
     VERIFICATION_PURPOSE,
 } = require('../constants');
 
-const ELIGIBLE_ROLES = [USER_ROLE.FARM_OWNER, USER_ROLE.TECHNICIAN, USER_ROLE.EXPERT];
+const ELIGIBLE_ROLES = [
+    ACCOUNT_ROLE.FARM_OWNER,
+    ACCOUNT_ROLE.TECHNICIAN,
+    ACCOUNT_ROLE.EXPERT,
+];
 const MAX_FAILED_ATTEMPTS = 5;
 
 /**
@@ -53,29 +57,29 @@ const isSameHash = (leftHash, rightHash) => {
 };
 
 /**
- * Check whether a user can use the requested verification flow.
+ * Check whether an account can use the requested verification flow.
  */
-const isEligibleUser = (user, purpose) => {
-    if (!user || !ELIGIBLE_ROLES.includes(user.role)) {
+const isEligibleAccount = (account, purpose) => {
+    if (!account || !ELIGIBLE_ROLES.includes(account.role)) {
         return false;
     }
 
     if (purpose === VERIFICATION_PURPOSE.ACCOUNT_ACTIVATION) {
         return (
-            user.status === ACCOUNT_STATUS.PENDING_ACTIVATION &&
-            user.activatedAt === null &&
-            user.passwordHash === null
+            account.status === ACCOUNT_STATUS.PENDING_ACTIVATION &&
+            account.activatedAt === null &&
+            account.passwordHash === null
         );
     }
 
-    return user.activatedAt !== null && user.passwordHash !== null;
+    return account.activatedAt !== null && account.passwordHash !== null;
 };
 
 /**
- * Load the user fields required by the verification flows.
+ * Load the account fields required by the verification flows.
  */
-const findVerificationUser = (email) =>
-    prisma.user.findUnique({
+const findVerificationAccount = (email) =>
+    prisma.account.findUnique({
         where: { email },
         select: {
             id: true,
@@ -92,8 +96,8 @@ const findVerificationUser = (email) =>
  * addresses return the same success result to prevent account enumeration.
  */
 const requestOtp = async (email, purpose) => {
-    const user = await findVerificationUser(email);
-    if (!isEligibleUser(user, purpose)) {
+    const account = await findVerificationAccount(email);
+    if (!isEligibleAccount(account, purpose)) {
         return;
     }
 
@@ -106,7 +110,7 @@ const requestOtp = async (email, purpose) => {
                 const currentChallenge =
                     await transaction.emailVerificationChallenge.findFirst({
                         where: {
-                            userId: user.id,
+                            accountId: account.id,
                             purpose,
                             consumedAt: null,
                             supersededAt: null,
@@ -123,7 +127,7 @@ const requestOtp = async (email, purpose) => {
 
                 await transaction.emailVerificationChallenge.updateMany({
                     where: {
-                        userId: user.id,
+                        accountId: account.id,
                         purpose,
                         consumedAt: null,
                         supersededAt: null,
@@ -133,7 +137,7 @@ const requestOtp = async (email, purpose) => {
 
                 return transaction.emailVerificationChallenge.create({
                     data: {
-                        userId: user.id,
+                        accountId: account.id,
                         purpose,
                         codeHash: hashOtp(code),
                         expiresAt: addMinutes(now, config.email.verificationExpiresMinutes),
@@ -151,7 +155,7 @@ const requestOtp = async (email, purpose) => {
     }
 
     try {
-        await emailService.sendOtp({ email: user.email, code, purpose });
+        await emailService.sendOtp({ email: account.email, code, purpose });
     } catch (error) {
         // Do not leave an unusable challenge blocking the next delivery attempt.
         await prisma.emailVerificationChallenge
@@ -173,8 +177,8 @@ const requestOtp = async (email, purpose) => {
  * Verify an OTP and exchange it for a short-lived, single-use action token.
  */
 const verifyOtp = async (email, code, purpose) => {
-    const user = await findVerificationUser(email);
-    if (!isEligibleUser(user, purpose)) {
+    const account = await findVerificationAccount(email);
+    if (!isEligibleAccount(account, purpose)) {
         throw new ApiError(httpStatus.BAD_REQUEST, messages.AUTH.INVALID_OTP);
     }
 
@@ -183,7 +187,7 @@ const verifyOtp = async (email, code, purpose) => {
         async (transaction) => {
             const challenge = await transaction.emailVerificationChallenge.findFirst({
                 where: {
-                    userId: user.id,
+                    accountId: account.id,
                     purpose,
                     consumedAt: null,
                     supersededAt: null,
@@ -276,7 +280,7 @@ const verifyOtp = async (email, code, purpose) => {
 const findActionChallenge = (actionToken, purpose) =>
     prisma.emailVerificationChallenge.findUnique({
         where: { actionTokenHash: hashActionToken(actionToken) },
-        include: { user: true },
+        include: { account: true },
     }).then((challenge) => {
         const now = new Date();
         if (
@@ -322,7 +326,7 @@ const activateAccount = async ({ actionToken, fullName, phone, password }) => {
         actionToken,
         VERIFICATION_PURPOSE.ACCOUNT_ACTIVATION,
     );
-    if (!isEligibleUser(challenge.user, VERIFICATION_PURPOSE.ACCOUNT_ACTIVATION)) {
+    if (!isEligibleAccount(challenge.account, VERIFICATION_PURPOSE.ACCOUNT_ACTIVATION)) {
         throw new ApiError(httpStatus.CONFLICT, messages.AUTH.ACCOUNT_ALREADY_ACTIVATED);
     }
 
@@ -331,9 +335,9 @@ const activateAccount = async ({ actionToken, fullName, phone, password }) => {
 
     await prisma.$transaction(async (transaction) => {
         await consumeActionChallenge(transaction, challenge.id, now);
-        const updateResult = await transaction.user.updateMany({
+        const updateResult = await transaction.account.updateMany({
             where: {
-                id: challenge.userId,
+                id: challenge.accountId,
                 role: { in: ELIGIBLE_ROLES },
                 status: ACCOUNT_STATUS.PENDING_ACTIVATION,
                 activatedAt: null,
@@ -362,7 +366,7 @@ const resetPassword = async ({ actionToken, password }) => {
         actionToken,
         VERIFICATION_PURPOSE.PASSWORD_RESET,
     );
-    if (!isEligibleUser(challenge.user, VERIFICATION_PURPOSE.PASSWORD_RESET)) {
+    if (!isEligibleAccount(challenge.account, VERIFICATION_PURPOSE.PASSWORD_RESET)) {
         throw new ApiError(httpStatus.BAD_REQUEST, messages.AUTH.INVALID_ACTION_TOKEN);
     }
 
@@ -371,9 +375,9 @@ const resetPassword = async ({ actionToken, password }) => {
 
     await prisma.$transaction(async (transaction) => {
         await consumeActionChallenge(transaction, challenge.id, now);
-        const updateResult = await transaction.user.updateMany({
+        const updateResult = await transaction.account.updateMany({
             where: {
-                id: challenge.userId,
+                id: challenge.accountId,
                 role: { in: ELIGIBLE_ROLES },
                 activatedAt: { not: null },
                 passwordHash: { not: null },
@@ -385,7 +389,7 @@ const resetPassword = async ({ actionToken, password }) => {
             throw new ApiError(httpStatus.BAD_REQUEST, messages.AUTH.INVALID_ACTION_TOKEN);
         }
 
-        await tokenService.revokeAllUserTokens(challenge.userId, transaction);
+        await tokenService.revokeAllAccountTokens(challenge.accountId, transaction);
     });
 };
 
