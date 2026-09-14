@@ -4,7 +4,7 @@ const prisma = require('../config/prisma');
 const { ApiError } = require('../utils');
 const { messages, ACCOUNT_STATUS } = require('../constants');
 
-const AUTHENTICATED_USER_SELECT = {
+const AUTHENTICATED_ACCOUNT_SELECT = {
     id: true,
     email: true,
     phone: true,
@@ -24,30 +24,30 @@ const getBearerToken = (authorization) => {
     return scheme === 'Bearer' && token ? token : null;
 };
 
-const loadActiveUser = async (token) => {
+const loadActiveAccount = async (token) => {
     const decoded = jwt.verify(token, config.jwt.accessSecret);
     if (decoded.type !== 'access' || !decoded.sub) {
         throw new jwt.JsonWebTokenError('Invalid access token');
     }
 
-    const user = await prisma.user.findUnique({
+    const account = await prisma.account.findUnique({
         where: { id: decoded.sub },
-        select: AUTHENTICATED_USER_SELECT,
+        select: AUTHENTICATED_ACCOUNT_SELECT,
     });
 
-    if (!user) {
+    if (!account) {
         throw ApiError.unauthorized(messages.AUTH.UNAUTHORIZED);
     }
 
-    if (user.status === ACCOUNT_STATUS.BLOCKED) {
+    if (account.status === ACCOUNT_STATUS.BLOCKED) {
         throw ApiError.forbidden(messages.AUTH.ACCOUNT_BLOCKED);
     }
 
-    if (user.status !== ACCOUNT_STATUS.ACTIVE) {
+    if (account.status !== ACCOUNT_STATUS.ACTIVE) {
         throw ApiError.forbidden(messages.AUTH.ACCOUNT_INACTIVE);
     }
 
-    return user;
+    return account;
 };
 
 const authenticate = async (req, res, next) => {
@@ -57,7 +57,7 @@ const authenticate = async (req, res, next) => {
             throw ApiError.unauthorized(messages.AUTH.UNAUTHORIZED);
         }
 
-        req.user = await loadActiveUser(token);
+        req.account = await loadActiveAccount(token);
         next();
     } catch (error) {
         if (error instanceof jwt.TokenExpiredError) {
@@ -73,11 +73,11 @@ const authenticate = async (req, res, next) => {
 };
 
 const authorize = (...roles) => (req, res, next) => {
-    if (!req.user) {
+    if (!req.account) {
         return next(ApiError.unauthorized(messages.AUTH.UNAUTHORIZED));
     }
 
-    if (!roles.includes(req.user.role)) {
+    if (!roles.includes(req.account.role)) {
         return next(ApiError.forbidden(messages.AUTH.FORBIDDEN));
     }
 
@@ -88,7 +88,7 @@ const optionalAuth = async (req, res, next) => {
     try {
         const token = getBearerToken(req.headers.authorization);
         if (token) {
-            req.user = await loadActiveUser(token);
+            req.account = await loadActiveAccount(token);
         }
     } catch (error) {
         // Optional authentication intentionally ignores invalid credentials.

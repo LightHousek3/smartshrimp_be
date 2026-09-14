@@ -8,14 +8,14 @@ const config = require('../config');
  */
 const login = asyncHandler(async (req, res) => {
     const { email, password, deviceId } = req.body;
-    const { user, tokens } = await authService.login(email, password, deviceId);
+    const { account, tokens } = await authService.login(email, password, deviceId);
 
     setRefreshTokenCookie(res, tokens.refreshToken);
 
     ResponseHandler.success(res, {
         message: messages.AUTH.LOGIN_SUCCESS,
         data: {
-            user,
+            account,
             tokens: {
                 accessToken: tokens.accessToken,
                 refreshToken: tokens.refreshToken,
@@ -33,9 +33,7 @@ const logout = asyncHandler(async (req, res) => {
     // Always remove the client credential, even if token revocation later fails.
     clearRefreshTokenCookie(res);
 
-    if (refreshToken) {
-        await authService.logout(refreshToken);
-    }
+    await authService.logout(refreshToken);
 
     ResponseHandler.success(res, {
         message: messages.AUTH.LOGOUT_SUCCESS,
@@ -50,7 +48,7 @@ const refreshTokens = asyncHandler(async (req, res) => {
     const {
         accessToken,
         refreshToken: newRefreshToken,
-        user,
+        account,
     } = await authService.refreshTokens(refreshToken);
 
     setRefreshTokenCookie(res, newRefreshToken);
@@ -58,7 +56,7 @@ const refreshTokens = asyncHandler(async (req, res) => {
     ResponseHandler.success(res, {
         message: messages.AUTH.TOKEN_REFRESHED,
         data: {
-            user,
+            account,
             accessToken,
             refreshToken: newRefreshToken,
         },

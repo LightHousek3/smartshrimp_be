@@ -9,14 +9,14 @@ const router = express.Router();
 
 /**
  * @route   POST /api/v1/auth/login
- * @desc    Login user (only ACTIVE accounts)
+ * @desc    Login account (only ACTIVE accounts)
  * @access  Public
  */
 router.post('/login', authLimiter, validate(authValidator.login), authController.login);
 
 /**
  * @route   POST /api/v1/auth/logout
- * @desc    Logout user (revoke refresh token)
+ * @desc    Logout account (revoke refresh token)
  * @access  Public
  */
 router.post('/logout', validate(authValidator.logout), authController.logout);

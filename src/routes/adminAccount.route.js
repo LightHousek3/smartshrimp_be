@@ -2,11 +2,11 @@ const express = require('express');
 const { adminAccountController } = require('../controllers');
 const { authenticate, authorize, validate } = require('../middlewares');
 const { adminAccountValidator } = require('../validators');
-const { USER_ROLE } = require('../constants');
+const { ACCOUNT_ROLE } = require('../constants');
 
 const router = express.Router();
 
-router.use(authenticate, authorize(USER_ROLE.ADMIN));
+router.use(authenticate, authorize(ACCOUNT_ROLE.ADMIN));
 
 /**
  * @route   GET /api/v1/admin/accounts

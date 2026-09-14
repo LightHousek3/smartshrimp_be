@@ -1,9 +1,13 @@
 const bcrypt = require('bcryptjs');
 const prisma = require('../config/prisma');
 const { ApiError } = require('../utils');
-const { httpStatus, messages, ACCOUNT_STATUS, USER_ROLE } = require('../constants');
+const { httpStatus, messages, ACCOUNT_STATUS, ACCOUNT_ROLE } = require('../constants');
 
-const PROFILE_ROLES = [USER_ROLE.TECHNICIAN, USER_ROLE.FARM_OWNER, USER_ROLE.EXPERT];
+const PROFILE_ROLES = [
+    ACCOUNT_ROLE.TECHNICIAN,
+    ACCOUNT_ROLE.FARM_OWNER,
+    ACCOUNT_ROLE.EXPERT,
+];
 const PASSWORD_HASH_ROUNDS = 12;
 
 const PUBLIC_MANAGER_SELECT = {
@@ -31,14 +35,14 @@ const PUBLIC_PROFILE_SELECT = {
     },
 };
 
-const eligibleProfileWhere = (userId) => ({
-    id: userId,
+const eligibleProfileWhere = (accountId) => ({
+    id: accountId,
     status: ACCOUNT_STATUS.ACTIVE,
     role: { in: PROFILE_ROLES },
 });
 
 const normalizeTechnicianKpi = (role, kpi) => {
-    if (role !== USER_ROLE.TECHNICIAN) return null;
+    if (role !== ACCOUNT_ROLE.TECHNICIAN) return null;
 
     return {
         seasonsParticipated: Number(kpi?.seasonsParticipated ?? 0),
@@ -53,7 +57,7 @@ const normalizeTechnicianKpi = (role, kpi) => {
 
 const withProfileDetails = async (database, profile) => {
     const kpi =
-        profile.role === USER_ROLE.TECHNICIAN
+        profile.role === ACCOUNT_ROLE.TECHNICIAN
             ? await database.technicianKpi.findFirst({
                 where: { technicianId: profile.id },
             })
@@ -65,9 +69,9 @@ const withProfileDetails = async (database, profile) => {
     };
 };
 
-const getProfile = async (userId) => {
-    const profile = await prisma.user.findFirst({
-        where: eligibleProfileWhere(userId),
+const getProfile = async (accountId) => {
+    const profile = await prisma.account.findFirst({
+        where: eligibleProfileWhere(accountId),
         select: PUBLIC_PROFILE_SELECT,
     });
 
@@ -78,10 +82,10 @@ const getProfile = async (userId) => {
     return withProfileDetails(prisma, profile);
 };
 
-const updateProfile = async (userId, profileData) =>
+const updateProfile = async (accountId, profileData) =>
     prisma.$transaction(async (transaction) => {
-        const updateResult = await transaction.user.updateMany({
-            where: eligibleProfileWhere(userId),
+        const updateResult = await transaction.account.updateMany({
+            where: eligibleProfileWhere(accountId),
             data: profileData,
         });
 
@@ -89,8 +93,8 @@ const updateProfile = async (userId, profileData) =>
             throw new ApiError(httpStatus.CONFLICT, messages.PROFILE.UPDATE_CONFLICT);
         }
 
-        const profile = await transaction.user.findUnique({
-            where: { id: userId },
+        const profile = await transaction.account.findUnique({
+            where: { id: accountId },
             select: PUBLIC_PROFILE_SELECT,
         });
 
@@ -101,22 +105,22 @@ const updateProfile = async (userId, profileData) =>
         return withProfileDetails(transaction, profile);
     });
 
-const changePassword = async (userId, currentPassword, newPassword) => {
-    const user = await prisma.user.findFirst({
-        where: eligibleProfileWhere(userId),
+const changePassword = async (accountId, currentPassword, newPassword) => {
+    const account = await prisma.account.findFirst({
+        where: eligibleProfileWhere(accountId),
         select: { id: true, passwordHash: true },
     });
 
-    if (!user?.passwordHash) {
+    if (!account?.passwordHash) {
         throw new ApiError(httpStatus.NOT_FOUND, messages.PROFILE.NOT_FOUND);
     }
 
-    const currentPasswordMatches = await bcrypt.compare(currentPassword, user.passwordHash);
+    const currentPasswordMatches = await bcrypt.compare(currentPassword, account.passwordHash);
     if (!currentPasswordMatches) {
         throw new ApiError(httpStatus.BAD_REQUEST, messages.PROFILE.CURRENT_PASSWORD_INCORRECT);
     }
 
-    const reusesCurrentPassword = await bcrypt.compare(newPassword, user.passwordHash);
+    const reusesCurrentPassword = await bcrypt.compare(newPassword, account.passwordHash);
     if (reusesCurrentPassword) {
         throw new ApiError(httpStatus.BAD_REQUEST, messages.PROFILE.PASSWORD_REUSE_NOT_ALLOWED);
     }
@@ -125,10 +129,10 @@ const changePassword = async (userId, currentPassword, newPassword) => {
     const changedAt = new Date();
 
     await prisma.$transaction(async (transaction) => {
-        const updateResult = await transaction.user.updateMany({
+        const updateResult = await transaction.account.updateMany({
             where: {
-                ...eligibleProfileWhere(userId),
-                passwordHash: user.passwordHash,
+                ...eligibleProfileWhere(accountId),
+                passwordHash: account.passwordHash,
             },
             data: { passwordHash },
         });
@@ -138,7 +142,7 @@ const changePassword = async (userId, currentPassword, newPassword) => {
         }
 
         await transaction.refreshToken.updateMany({
-            where: { userId, revokedAt: null },
+            where: { accountId, revokedAt: null },
             data: { revokedAt: changedAt },
         });
     });

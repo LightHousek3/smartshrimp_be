@@ -3,7 +3,7 @@ const { asyncHandler, ResponseHandler } = require('../utils');
 const { messages } = require('../constants');
 
 const getProfile = asyncHandler(async (req, res) => {
-    const profile = await profileService.getProfile(req.user.id);
+    const profile = await profileService.getProfile(req.account.id);
 
     ResponseHandler.success(res, {
         message: messages.PROFILE.FETCH_SUCCESS,
@@ -12,7 +12,7 @@ const getProfile = asyncHandler(async (req, res) => {
 });
 
 const updateProfile = asyncHandler(async (req, res) => {
-    const profile = await profileService.updateProfile(req.user.id, req.body);
+    const profile = await profileService.updateProfile(req.account.id, req.body);
 
     ResponseHandler.success(res, {
         message: messages.PROFILE.UPDATE_SUCCESS,
@@ -22,7 +22,7 @@ const updateProfile = asyncHandler(async (req, res) => {
 
 const changePassword = asyncHandler(async (req, res) => {
     const { currentPassword, newPassword } = req.body;
-    await profileService.changePassword(req.user.id, currentPassword, newPassword);
+    await profileService.changePassword(req.account.id, currentPassword, newPassword);
 
     ResponseHandler.success(res, {
         message: messages.PROFILE.PASSWORD_CHANGE_SUCCESS,

@@ -21,7 +21,7 @@ const actionToken = Joi.string()
     .max(128)
     .required();
 
-const newPassword = passwordSchema(8).required();
+const newPassword = passwordSchema(6).required();
 
 const login = {
     body: Joi.object().keys({

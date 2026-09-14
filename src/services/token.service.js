@@ -5,7 +5,7 @@ const prisma = require('../config/prisma');
 const { ApiError } = require('../utils');
 const { httpStatus, messages, ACCOUNT_STATUS } = require('../constants');
 
-const PUBLIC_USER_SELECT = {
+const PUBLIC_ACCOUNT_SELECT = {
     id: true,
     email: true,
     phone: true,
@@ -22,10 +22,10 @@ const PUBLIC_USER_SELECT = {
 
 const hashToken = (token) => crypto.createHash('sha256').update(token).digest('hex');
 
-const generateAccessToken = (user) => {
+const generateAccessToken = (account) => {
     const payload = {
-        sub: user.id,
-        role: user.role,
+        sub: account.id,
+        role: account.role,
         type: 'access',
     };
 
@@ -38,9 +38,9 @@ const generateAccessToken = (user) => {
  * Generate and persist a refresh token. Passing a transaction client lets the
  * caller make token creation atomic with other account updates.
  */
-const generateRefreshToken = async (user, deviceId, database = prisma) => {
+const generateRefreshToken = async (account, deviceId, database = prisma) => {
     const payload = {
-        sub: user.id,
+        sub: account.id,
         type: 'refresh',
         deviceId,
         jti: crypto.randomUUID(),
@@ -51,10 +51,10 @@ const generateRefreshToken = async (user, deviceId, database = prisma) => {
     const decoded = jwt.decode(token);
     const now = new Date();
 
-    // One active session per user/device; old rows are retained for traceability.
+    // One active session per account/device; old rows are retained for traceability.
     await database.refreshToken.updateMany({
         where: {
-            userId: user.id,
+            accountId: account.id,
             deviceId,
             revokedAt: null,
         },
@@ -63,7 +63,7 @@ const generateRefreshToken = async (user, deviceId, database = prisma) => {
 
     await database.refreshToken.create({
         data: {
-            userId: user.id,
+            accountId: account.id,
             tokenHash: hashToken(token),
             deviceId,
             expiresAt: new Date(decoded.exp * 1000),
@@ -73,9 +73,9 @@ const generateRefreshToken = async (user, deviceId, database = prisma) => {
     return token;
 };
 
-const generateAuthTokens = async (user, deviceId, database = prisma) => {
-    const accessToken = generateAccessToken(user);
-    const refreshToken = await generateRefreshToken(user, deviceId, database);
+const generateAuthTokens = async (account, deviceId, database = prisma) => {
+    const accessToken = generateAccessToken(account);
+    const refreshToken = await generateRefreshToken(account, deviceId, database);
     return { accessToken, refreshToken };
 };
 
@@ -108,7 +108,7 @@ const refreshAuthTokens = async (refreshToken) => {
 
         if (
             !storedToken ||
-            storedToken.userId !== decoded.sub ||
+            storedToken.accountId !== decoded.sub ||
             storedToken.deviceId !== decoded.deviceId ||
             storedToken.revokedAt ||
             storedToken.expiresAt <= now
@@ -116,12 +116,12 @@ const refreshAuthTokens = async (refreshToken) => {
             throw new ApiError(httpStatus.UNAUTHORIZED, messages.AUTH.INVALID_REFRESH_TOKEN);
         }
 
-        const user = await transaction.user.findUnique({
+        const account = await transaction.account.findUnique({
             where: { id: decoded.sub },
-            select: PUBLIC_USER_SELECT,
+            select: PUBLIC_ACCOUNT_SELECT,
         });
 
-        if (!user || user.status !== ACCOUNT_STATUS.ACTIVE) {
+        if (!account || account.status !== ACCOUNT_STATUS.ACTIVE) {
             throw new ApiError(httpStatus.UNAUTHORIZED, messages.AUTH.UNAUTHORIZED);
         }
 
@@ -134,8 +134,8 @@ const refreshAuthTokens = async (refreshToken) => {
             throw new ApiError(httpStatus.UNAUTHORIZED, messages.AUTH.INVALID_REFRESH_TOKEN);
         }
 
-        const tokens = await generateAuthTokens(user, storedToken.deviceId, transaction);
-        return { ...tokens, user };
+        const tokens = await generateAuthTokens(account, storedToken.deviceId, transaction);
+        return { ...tokens, account };
     });
 };
 
@@ -147,12 +147,12 @@ const revokeRefreshToken = async (refreshToken) => {
 };
 
 /**
- * Revoke every active refresh token for a user.
+ * Revoke every active refresh token for an account.
  * Uses the supplied database client when called inside a transaction.
  */
-const revokeAllUserTokens = async (userId, database = prisma) => {
+const revokeAllAccountTokens = async (accountId, database = prisma) => {
     await database.refreshToken.updateMany({
-        where: { userId, revokedAt: null },
+        where: { accountId, revokedAt: null },
         data: { revokedAt: new Date() },
     });
 };
@@ -163,6 +163,6 @@ module.exports = {
     generateAuthTokens,
     refreshAuthTokens,
     revokeRefreshToken,
-    revokeAllUserTokens,
+    revokeAllAccountTokens,
     hashToken,
 };

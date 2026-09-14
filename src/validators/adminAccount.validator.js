@@ -1,9 +1,13 @@
 const Joi = require('joi');
-const { USER_ROLE, ACCOUNT_STATUS } = require('../constants');
+const { ACCOUNT_ROLE, ACCOUNT_STATUS } = require('../constants');
 
 const accountId = Joi.string().uuid({ version: 'uuidv4' });
-const creatableRoles = [USER_ROLE.FARM_OWNER, USER_ROLE.TECHNICIAN, USER_ROLE.EXPERT];
-const staffRoles = [USER_ROLE.TECHNICIAN, USER_ROLE.EXPERT];
+const creatableRoles = [
+    ACCOUNT_ROLE.FARM_OWNER,
+    ACCOUNT_ROLE.TECHNICIAN,
+    ACCOUNT_ROLE.EXPERT,
+];
+const staffRoles = [ACCOUNT_ROLE.TECHNICIAN, ACCOUNT_ROLE.EXPERT];
 const changeableStatuses = [
     ACCOUNT_STATUS.ACTIVE,
     ACCOUNT_STATUS.INACTIVE,
@@ -15,7 +19,7 @@ const getListAccount = {
         .keys({
             cursor: accountId,
             limit: Joi.number().integer().min(1).max(100).default(20),
-            role: Joi.string().valid(...Object.values(USER_ROLE)),
+            role: Joi.string().valid(...Object.values(ACCOUNT_ROLE)),
             status: Joi.string().valid(...Object.values(ACCOUNT_STATUS)),
             managedByOwnerId: accountId,
             search: Joi.string().trim().max(255),

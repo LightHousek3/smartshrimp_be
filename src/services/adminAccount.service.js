@@ -2,7 +2,7 @@ const crypto = require('crypto');
 const prisma = require('../config/prisma');
 const config = require('../config');
 const { ApiError } = require('../utils');
-const { httpStatus, messages, USER_ROLE, ACCOUNT_STATUS } = require('../constants');
+const { httpStatus, messages, ACCOUNT_ROLE, ACCOUNT_STATUS } = require('../constants');
 const emailService = require('./email.service');
 const tokenService = require('./token.service');
 
@@ -111,7 +111,7 @@ const attachManagingOwners = async (accounts) => {
         }));
     }
 
-    const owners = await prisma.user.findMany({
+    const owners = await prisma.account.findMany({
         where: { id: { in: ownerIds } },
         select: OWNER_LIST_SELECT,
     });
@@ -144,14 +144,14 @@ const getListAccount = async ({
         createdTo,
     });
     const [rows, totalResults] = await Promise.all([
-        prisma.user.findMany({
+        prisma.account.findMany({
             where,
             select: ACCOUNT_LIST_SELECT,
             orderBy: buildAccountOrderBy(sortBy, sortOrder),
             take: limit + 1,
             ...(cursor && { cursor: { id: cursor }, skip: 1 }),
         }),
-        prisma.user.count({ where }),
+        prisma.account.count({ where }),
     ]);
 
     const hasNextPage = rows.length > limit;
@@ -170,7 +170,7 @@ const getListAccount = async ({
 };
 
 const getAccountById = async (accountId) => {
-    const account = await prisma.user.findUnique({
+    const account = await prisma.account.findUnique({
         where: { id: accountId },
         select: ACCOUNT_SELECT,
     });
@@ -181,30 +181,30 @@ const getAccountById = async (accountId) => {
 
     const [managedByOwner, managedStaffCount] = await Promise.all([
         account.managedByOwnerId
-            ? prisma.user.findUnique({
+            ? prisma.account.findUnique({
                 where: { id: account.managedByOwnerId },
                 select: OWNER_SUMMARY_SELECT,
             })
             : Promise.resolve(null),
-        prisma.user.count({ where: { managedByOwnerId: account.id } }),
+        prisma.account.count({ where: { managedByOwnerId: account.id } }),
     ]);
 
     return { ...account, managedByOwner, managedStaffCount };
 };
 
 const validateManagingOwner = async (database, role, managedByOwnerId) => {
-    const isStaff = role === USER_ROLE.TECHNICIAN || role === USER_ROLE.EXPERT;
+    const isStaff = role === ACCOUNT_ROLE.TECHNICIAN || role === ACCOUNT_ROLE.EXPERT;
 
     if (!isStaff) {
         return;
     }
 
-    const owner = await database.user.findUnique({
+    const owner = await database.account.findUnique({
         where: { id: managedByOwnerId },
         select: { id: true, role: true, status: true },
     });
 
-    if (!owner || owner.role !== USER_ROLE.FARM_OWNER) {
+    if (!owner || owner.role !== ACCOUNT_ROLE.FARM_OWNER) {
         throw new ApiError(httpStatus.BAD_REQUEST, messages.ACCOUNT.INVALID_MANAGING_OWNER);
     }
 
@@ -223,7 +223,7 @@ const buildActivationChallenge = async (
     const now = new Date();
     const activeChallenge = await prisma.emailVerificationChallenge.findFirst({
         where: {
-            userId: account.id,
+            accountId: account.id,
             purpose: ACTIVATION_PURPOSE,
             consumedAt: null,
             supersededAt: null,
@@ -248,7 +248,7 @@ const buildActivationChallenge = async (
         challenge = await prisma.$transaction(async (transaction) => {
             await transaction.emailVerificationChallenge.updateMany({
                 where: {
-                    userId: account.id,
+                    accountId: account.id,
                     purpose: ACTIVATION_PURPOSE,
                     consumedAt: null,
                     supersededAt: null,
@@ -258,7 +258,7 @@ const buildActivationChallenge = async (
 
             return transaction.emailVerificationChallenge.create({
                 data: {
-                    userId: account.id,
+                    accountId: account.id,
                     purpose: ACTIVATION_PURPOSE,
                     codeHash: hashActivationCode(code),
                     expiresAt,
@@ -311,7 +311,7 @@ const createAccount = async ({ email, role, managedByOwnerId }, adminId) => {
         account = await prisma.$transaction(async (transaction) => {
             await validateManagingOwner(transaction, role, managedByOwnerId);
 
-            return transaction.user.create({
+            return transaction.account.create({
                 data: {
                     email,
                     role,
@@ -344,7 +344,7 @@ const createAccount = async ({ email, role, managedByOwnerId }, adminId) => {
 };
 
 const findPendingActivationAccount = async (accountId) => {
-    const account = await prisma.user.findUnique({
+    const account = await prisma.account.findUnique({
         where: { id: accountId },
         select: { id: true, email: true, status: true },
     });
@@ -386,7 +386,7 @@ const countOpenOwnerSeasons = async (database, ownerId) => {
 
 const countOpenStaffAssignments = async (database, accountId) => {
     const assignments = await database.seasonPersonnelAssignment.findMany({
-        where: { userId: accountId, unassignedAt: null },
+        where: { accountId, unassignedAt: null },
         select: { seasonId: true },
     });
     if (assignments.length === 0) return 0;
@@ -400,9 +400,9 @@ const countOpenStaffAssignments = async (database, accountId) => {
 };
 
 const validateDeactivationEligibility = async (database, account) => {
-    if (account.role === USER_ROLE.FARM_OWNER) {
+    if (account.role === ACCOUNT_ROLE.FARM_OWNER) {
         const [activeStaffCount, openSeasonCount] = await Promise.all([
-            database.user.count({
+            database.account.count({
                 where: {
                     managedByOwnerId: account.id,
                     status: ACCOUNT_STATUS.ACTIVE,
@@ -428,7 +428,7 @@ const validateDeactivationEligibility = async (database, account) => {
 
 const updateAccountStatus = async (accountId, { status, reason }, adminId) =>
     prisma.$transaction(async (transaction) => {
-        const account = await transaction.user.findUnique({
+        const account = await transaction.account.findUnique({
             where: { id: accountId },
             select: { id: true, role: true, status: true },
         });
@@ -436,7 +436,7 @@ const updateAccountStatus = async (accountId, { status, reason }, adminId) =>
         if (!account) {
             throw new ApiError(httpStatus.NOT_FOUND, messages.ACCOUNT.NOT_FOUND);
         }
-        if (account.role === USER_ROLE.ADMIN) {
+        if (account.role === ACCOUNT_ROLE.ADMIN) {
             throw new ApiError(httpStatus.BAD_REQUEST, messages.ACCOUNT.ADMIN_STATUS_PROTECTED);
         }
         if (account.status === ACCOUNT_STATUS.PENDING_ACTIVATION) {
@@ -451,7 +451,7 @@ const updateAccountStatus = async (accountId, { status, reason }, adminId) =>
         }
 
         const changedAt = new Date();
-        const updatedAccount = await transaction.user.update({
+        const updatedAccount = await transaction.account.update({
             where: { id: account.id },
             data: {
                 status,
@@ -463,7 +463,7 @@ const updateAccountStatus = async (accountId, { status, reason }, adminId) =>
         });
 
         if (status !== ACCOUNT_STATUS.ACTIVE) {
-            await tokenService.revokeAllUserTokens(account.id, transaction);
+            await tokenService.revokeAllAccountTokens(account.id, transaction);
         }
 
         return updatedAccount;

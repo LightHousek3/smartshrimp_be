@@ -11,7 +11,7 @@ const pick = require('../utils/pick');
  * @returns {Function} Express middleware
  *
  * @example
- * router.post('/users', validate(userValidator.createUser), controller.createUser);
+ * router.post('/accounts', validate(accountValidator.createAccount), controller.createAccount);
  */
 const validate = (schema) => (req, res, next) => {
     const validSchema = pick(schema, ['params', 'query', 'body']);

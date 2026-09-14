@@ -22,7 +22,7 @@ const getAccount = asyncHandler(async (req, res) => {
 });
 
 const createAccount = asyncHandler(async (req, res) => {
-    const account = await adminAccountService.createAccount(req.body, req.user.id);
+    const account = await adminAccountService.createAccount(req.body, req.account.id);
 
     ResponseHandler.created(res, {
         message: messages.ACCOUNT.CREATED,
@@ -43,7 +43,7 @@ const updateAccountStatus = asyncHandler(async (req, res) => {
     const account = await adminAccountService.updateAccountStatus(
         req.params.accountId,
         req.body,
-        req.user.id,
+        req.account.id,
     );
 
     ResponseHandler.success(res, {
