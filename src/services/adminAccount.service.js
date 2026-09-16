@@ -281,13 +281,11 @@ const buildActivationChallenge = async (
 };
 
 const sendActivationEmail = async (account, options) => {
-    const { code, challenge } = await buildActivationChallenge(account, options);
+    const { challenge } = await buildActivationChallenge(account, options);
 
     try {
         await emailService.sendAccountActivationEmail({
             email: account.email,
-            code,
-            expiresInMinutes: config.email.verificationExpiresMinutes,
         });
     } catch (error) {
         await prisma.emailVerificationChallenge.updateMany({
@@ -362,6 +360,43 @@ const findPendingActivationAccount = async (accountId) => {
 
 const resendActivation = async (accountId) =>
     sendActivationEmail(await findPendingActivationAccount(accountId));
+
+const updatePendingAccount = async (accountId, { email }) => {
+    const account = await prisma.account.findUnique({
+        where: { id: accountId },
+        select: { id: true, email: true, status: true },
+    });
+
+    if (!account) {
+        throw new ApiError(httpStatus.NOT_FOUND, messages.ACCOUNT.NOT_FOUND);
+    }
+
+    if (account.status !== ACCOUNT_STATUS.PENDING_ACTIVATION) {
+        throw new ApiError(httpStatus.CONFLICT, messages.ACCOUNT.ONLY_PENDING_UPDATABLE);
+    }
+
+    const normalizedEmail = email.trim().toLowerCase();
+
+    let updatedAccount;
+    try {
+        updatedAccount = await prisma.$transaction(async (transaction) => {
+            return transaction.account.update({
+                where: { id: accountId },
+                data: { email: normalizedEmail },
+                select: ACCOUNT_SELECT,
+            });
+        });
+    } catch (error) {
+        if (error.code === 'P2002') {
+            throw new ApiError(httpStatus.CONFLICT, messages.ACCOUNT.EMAIL_ALREADY_EXISTS);
+        }
+        throw error;
+    }
+
+    const activation = await sendActivationEmail(updatedAccount, { enforceCooldown: false });
+
+    return { ...updatedAccount, activation };
+};
 
 const countOpenOwnerSeasons = async (database, ownerId) => {
     const farms = await database.farm.findMany({
@@ -476,5 +511,7 @@ module.exports = {
     getAccountById,
     createAccount,
     resendActivation,
+    updatePendingAccount,
     updateAccountStatus,
 };
+

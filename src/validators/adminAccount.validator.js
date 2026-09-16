@@ -60,6 +60,15 @@ const resendActivation = {
     }),
 };
 
+const updatePendingAccount = {
+    params: Joi.object().keys({
+        accountId: accountId.required(),
+    }),
+    body: Joi.object().keys({
+        email: Joi.string().trim().lowercase().email().max(320).required(),
+    }),
+};
+
 const updateAccountStatus = {
     params: Joi.object().keys({
         accountId: accountId.required(),
@@ -77,5 +86,7 @@ module.exports = {
     getAccount,
     createAccount,
     resendActivation,
+    updatePendingAccount,
     updateAccountStatus,
 };
+
