@@ -59,4 +59,16 @@ router.patch(
     adminAccountController.updateAccountStatus,
 );
 
+/**
+ * @route   PATCH /api/v1/admin/accounts/:accountId
+ * @desc    Update pending account email and resend activation email
+ * @access  Admin
+ */
+router.patch(
+    '/:accountId',
+    validate(adminAccountValidator.updatePendingAccount),
+    adminAccountController.updatePendingAccount,
+);
+
 module.exports = router;
+

@@ -159,11 +159,75 @@ const sendOtp = async ({ email, code, purpose }) => {
     });
 };
 
-const sendAccountActivationEmail = ({ email, code }) =>
-    sendOtp({ email, code, purpose: VERIFICATION_PURPOSE.ACCOUNT_ACTIVATION });
+const buildActivationInviteEmail = () => {
+    const subject = `Lời mời kích hoạt tài khoản ${BRAND_NAME}`;
+    const text = [
+        'Chào mừng bạn đến với SmartShrimp,',
+        'Tài khoản của bạn đã được khởi tạo thành công trên hệ thống quản lý nuôi tôm SmartShrimp.',
+        'Vui lòng truy cập hệ thống SmartShrimp (qua trình duyệt web hoặc ứng dụng di động) để tiến hành kích hoạt tài khoản và thiết lập mật khẩu đăng nhập.',
+        'Nếu bạn không rõ về lời mời này hoặc cần hỗ trợ, vui lòng liên hệ với quản trị viên trang trại.',
+        `${BRAND_NAME} Team`,
+    ].join('\n\n');
+
+    const html = `<!doctype html>
+<html lang="vi">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="color-scheme" content="light">
+  <title>${escapeHtml(subject)}</title>
+</head>
+<body style="margin:0;padding:0;background:#f2f7f5;color:#18352c;font-family:Arial,sans-serif;">
+  <table role="presentation" width="100%" cellspacing="0" cellpadding="0" style="width:100%;background:#f2f7f5;margin:0;padding:28px 12px;">
+    <tr>
+      <td align="center">
+        <table role="presentation" width="100%" cellspacing="0" cellpadding="0" style="max-width:600px;width:100%;background:#ffffff;border-radius:18px;overflow:hidden;border:1px solid #dceae5;box-shadow:0 16px 42px rgba(24,53,44,0.10);">
+          <tr>
+            <td style="background-image:linear-gradient(to top, #fff1eb 0%, #ace0f9 100%);padding:20px 0;">
+              <img src="${LOGO_URL}" width="220" alt="${BRAND_NAME}" draggable="false" style="display:block;margin:0 auto;width:220px;max-width:220px;height:auto;border:0;">
+            </td>
+          </tr>
+          <tr>
+            <td style="padding:34px 32px 16px 32px;">
+              <h2 style="margin:0 0 14px 0;font-size:24px;line-height:32px;color:#123b31;font-weight:800;">Chào mừng bạn đến với SmartShrimp!</h2>
+              <p style="margin:0 0 14px 0;font-size:16px;line-height:26px;color:#36574f;">Xin chào,</p>
+              <p style="margin:0 0 16px 0;font-size:16px;line-height:26px;color:#36574f;">Tài khoản của bạn đã được khởi tạo thành công trên hệ thống quản lý nuôi tôm <strong>SmartShrimp</strong>.</p>
+              <div style="background:#eefaf6;border:1px solid #bfe7db;border-radius:12px;padding:20px 24px;margin:20px 0;">
+                <p style="margin:0 0 8px 0;font-size:15px;line-height:24px;color:#0b6e5b;font-weight:700;">Hướng dẫn kích hoạt:</p>
+                <p style="margin:0;font-size:15px;line-height:24px;color:#36574f;">Vui lòng truy cập hệ thống <strong>SmartShrimp</strong> trên trình duyệt web hoặc ứng dụng di động để tiến hành kích hoạt tài khoản và hoàn tất thiết lập thông tin cá nhân cùng mật khẩu đăng nhập.</p>
+              </div>
+              <p style="margin:0;font-size:14px;line-height:22px;color:#5d786f;">Nếu bạn không rõ về lời mời này hoặc cần hỗ trợ, vui lòng liên hệ trực tiếp với quản trị viên trang trại của bạn.</p>
+            </td>
+          </tr>
+          <tr>
+            <td style="background:#f8fbfa;padding:20px 32px;text-align:center;border-top:1px solid #e5efeb;">
+              <p style="margin:0;font-size:13px;line-height:21px;color:#769188;">Email tự động từ ${BRAND_NAME}. Vui lòng không trả lời email này.</p>
+            </td>
+          </tr>
+        </table>
+      </td>
+    </tr>
+  </table>
+</body>
+</html>`;
+
+    return { subject, text, html };
+};
+
+const sendAccountActivationEmail = async ({ email }) => {
+    const emailContent = buildActivationInviteEmail();
+
+    await getTransporter().sendMail({
+        from: config.email.from,
+        to: email,
+        ...emailContent,
+    });
+};
 
 module.exports = {
     buildOtpEmail,
+    buildActivationInviteEmail,
     sendOtp,
     sendAccountActivationEmail,
 };
+

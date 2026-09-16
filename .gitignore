@@ -38,4 +38,6 @@ uploads/
 tests/
 
 # Docs
-docs/
+docs/*
+docs/unit-tests/
+

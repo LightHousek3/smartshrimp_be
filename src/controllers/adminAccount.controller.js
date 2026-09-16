@@ -39,6 +39,18 @@ const resendActivation = asyncHandler(async (req, res) => {
     });
 });
 
+const updatePendingAccount = asyncHandler(async (req, res) => {
+    const account = await adminAccountService.updatePendingAccount(
+        req.params.accountId,
+        req.body,
+    );
+
+    ResponseHandler.success(res, {
+        message: messages.ACCOUNT.PENDING_UPDATE_SUCCESS,
+        data: account,
+    });
+});
+
 const updateAccountStatus = asyncHandler(async (req, res) => {
     const account = await adminAccountService.updateAccountStatus(
         req.params.accountId,
@@ -57,5 +69,7 @@ module.exports = {
     getAccount,
     createAccount,
     resendActivation,
+    updatePendingAccount,
     updateAccountStatus,
 };
+

@@ -21,6 +21,8 @@ const messages = {
         STAFF_HAS_ACTIVE_ASSIGNMENT: 'Assigned staff must be replaced before deactivation',
         OWNER_HAS_ACTIVE_STAFF: 'Owner staff must be disabled or transferred before deactivation',
         OWNER_HAS_OPEN_SEASON: 'Owner with an open season cannot be deactivated',
+        ONLY_PENDING_UPDATABLE: 'Only pending accounts can be updated',
+        PENDING_UPDATE_SUCCESS: 'Account updated and activation invitation sent successfully',
     },
 
     // Auth
