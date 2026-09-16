@@ -39,5 +39,5 @@ tests/
 
 # Docs
 docs/*
-!docs/unit-tests/
-
+docs/unit-tests/
+
