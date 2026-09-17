@@ -1,16 +1,21 @@
 const app = require('./app');
+const { createServer } = require('node:http');
 const config = require('./config');
 const logger = require('./config/logger');
 const connectDB = require('./config/db');
 const prisma = require('./config/prisma');
+const { attachNotificationSocket } = require('./realtime/notification.socket');
 
 let server;
+let socketServer;
 
 const startServer = async () => {
     // Connect to Postgre
     await connectDB();
 
-    server = app.listen(config.port, () => {
+    server = createServer(app);
+    socketServer = attachNotificationSocket(server);
+    server.listen(config.port, () => {
         logger.info(`
     ╔═══════════════════════════════════════════════════╗
     ║   Smart Shrimp                                    ║
@@ -26,7 +31,7 @@ const startServer = async () => {
 process.on('unhandledRejection', (reason) => {
     logger.error('UNHANDLED REJECTION! Shutting down...', reason);
     if (server) {
-        server.close(() => {
+        socketServer.close(() => {
             process.exit(1);
         });
     } else {
@@ -44,7 +49,7 @@ process.on('uncaughtException', (error) => {
 process.on('SIGTERM', () => {
     logger.info('SIGTERM received. Shutting down gracefully...');
     if (server) {
-        server.close(async () => {
+        socketServer.close(async () => {
             await prisma.$disconnect();
             logger.info('Process terminated');
         });

@@ -1,5 +1,6 @@
 const httpStatus = require('./httpStatus');
 const messages = require('./messages');
+const NOTIFICATION_TYPE = require('./notificationType');
 
 /**
  * Enums matching the database schema
@@ -29,4 +30,5 @@ module.exports = {
     ACCOUNT_ROLE,
     ACCOUNT_STATUS,
     VERIFICATION_PURPOSE,
+    NOTIFICATION_TYPE,
 };

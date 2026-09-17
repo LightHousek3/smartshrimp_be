@@ -42,6 +42,44 @@ enum SeasonStatus {
   @@map("season_status")
 }
 
+enum NotificationType {
+  SYSTEM                       @map("system")
+  MANAGED_ACCOUNT_ACTIVATED    @map("managed_account_activated")
+  ACCOUNT_STATUS_CHANGED       @map("account_status_changed")
+  SEASON_ASSIGNMENT_CREATED    @map("season_assignment_created")
+  SEASON_ASSIGNMENT_REPLACED   @map("season_assignment_replaced")
+  SEASON_STATUS_CHANGED        @map("season_status_changed")
+  OPERATION_DUE                @map("operation_due")
+  OPERATION_OVERDUE            @map("operation_overdue")
+  OPERATION_CANCELLED          @map("operation_cancelled")
+  SCHEDULE_GENERATION_FAILED   @map("schedule_generation_failed")
+  WATER_THRESHOLD_EXCEEDED     @map("water_threshold_exceeded")
+  TASK_ASSIGNED                @map("task_assigned")
+  TASK_UPDATED                 @map("task_updated")
+  TASK_DUE_SOON                @map("task_due_soon")
+  TASK_OVERDUE                 @map("task_overdue")
+  TASK_COMPLETED               @map("task_completed")
+  DISEASE_CASE_CREATED         @map("disease_case_created")
+  DISEASE_CASE_RESPONSE        @map("disease_case_response")
+  DISEASE_CASE_WAITING_INFO    @map("disease_case_waiting_info")
+  DISEASE_CASE_MONITORING      @map("disease_case_monitoring")
+  DISEASE_CASE_RESOLVED        @map("disease_case_resolved")
+  PRODUCTION_PROTOCOL_PENDING  @map("production_protocol_pending")
+  PRODUCTION_PROTOCOL_REVIEWED @map("production_protocol_reviewed")
+  TREATMENT_PROTOCOL_PENDING   @map("treatment_protocol_pending")
+  TREATMENT_PROTOCOL_REVIEWED  @map("treatment_protocol_reviewed")
+  TREATMENT_PROTOCOL_ABORTED   @map("treatment_protocol_aborted")
+  EMERGENCY_CASE_UPDATE        @map("emergency_case_update")
+  TREATMENT_SCHEDULE_READY     @map("treatment_schedule_ready")
+  TREATMENT_SCHEDULE_COMPLETED @map("treatment_schedule_completed")
+  INVENTORY_LOW                @map("inventory_low")
+  INVENTORY_INSUFFICIENT       @map("inventory_insufficient")
+  HARVEST_DUE                  @map("harvest_due")
+  SEASON_COMPLETED             @map("season_completed")
+
+  @@map("notification_type")
+}
+
 model Account {
   id                     String                       @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
   email                  String                       @unique @db.Citext
@@ -62,10 +100,26 @@ model Account {
   updatedAt              DateTime                     @default(now()) @map("updated_at") @db.Timestamptz(6)
   refreshTokens          RefreshToken[]
   verificationChallenges EmailVerificationChallenge[]
+  notifications          Notification[]
   managedByOwner         Account?                     @relation("OwnerManagedAccounts", fields: [managedByOwnerId], references: [id], onDelete: Restrict)
   managedAccounts        Account[]                    @relation("OwnerManagedAccounts")
 
   @@map("accounts")
+}
+
+model Notification {
+  id            String           @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  accountId     String           @map("account_id") @db.Uuid
+  title         String           @db.VarChar(500)
+  content       String?
+  type          NotificationType
+  referenceType String?          @map("reference_type") @db.VarChar(50)
+  referenceId   String?          @map("reference_id") @db.Uuid
+  readAt        DateTime?        @map("read_at") @db.Timestamptz(6)
+  createdAt     DateTime         @default(now()) @map("created_at") @db.Timestamptz(6)
+  account       Account          @relation(fields: [accountId], references: [id], onDelete: Cascade)
+
+  @@map("notifications")
 }
 
 model EmailVerificationChallenge {

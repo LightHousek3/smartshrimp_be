@@ -101,4 +101,5 @@ module.exports = {
     authenticate,
     authorize,
     optionalAuth,
+    loadActiveAccount,
 };

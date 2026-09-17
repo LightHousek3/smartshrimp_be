@@ -23,6 +23,13 @@ const messages = {
         OWNER_HAS_OPEN_SEASON: 'Owner with an open season cannot be deactivated',
     },
 
+    NOTIFICATION: {
+        LIST_FETCHED: 'Lấy danh sách thông báo thành công',
+        FETCHED: 'Lấy chi tiết thông báo thành công',
+        NOT_FOUND: 'Không tìm thấy thông báo',
+        INVALID_CURSOR: 'Không tìm thấy mốc phân trang thông báo',
+    },
+
     // Auth
     AUTH: {
         LOGIN_SUCCESS: 'Đăng nhập thành công',
