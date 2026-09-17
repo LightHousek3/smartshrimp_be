@@ -1,16 +1,9 @@
 const Joi = require('joi');
-
-const passwordSchema = (minimumLength) =>
-    Joi.string()
-        .min(minimumLength)
-        .max(72)
-        .custom((value, helpers) => {
-            if (Buffer.byteLength(value, 'utf8') > 72) {
-                return helpers.error('string.maxBytes');
-            }
-            return value;
-        })
-        .messages({ 'string.maxBytes': '"password" must not exceed 72 bytes' });
+const {
+    fullNameField,
+    passwordField,
+    vietnamesePhoneField,
+} = require('./accountFields.validator');
 
 const email = Joi.string().trim().lowercase().email().max(320).required();
 
@@ -21,12 +14,12 @@ const actionToken = Joi.string()
     .max(128)
     .required();
 
-const newPassword = passwordSchema(6).required();
+const newPassword = passwordField();
 
 const login = {
     body: Joi.object().keys({
         email,
-        password: passwordSchema(1).required(),
+        password: passwordField({ minimumLength: 1 }),
         deviceId: Joi.string().uuid({ version: 'uuidv4' }),
     }),
 };
@@ -47,11 +40,8 @@ const verifyOtp = {
 const activateAccount = {
     body: Joi.object().keys({
         actionToken,
-        fullName: Joi.string().trim().min(1).max(255).required(),
-        phone: Joi.string()
-            .trim()
-            .pattern(/^\+?[0-9]{8,15}$/)
-            .required(),
+        fullName: fullNameField({ required: true }),
+        phone: vietnamesePhoneField({ required: true }),
         password: newPassword,
     }),
 };

@@ -1,5 +1,5 @@
 const { profileService } = require('../services');
-const { asyncHandler, ResponseHandler } = require('../utils');
+const { asyncHandler, ResponseHandler, setRefreshTokenCookie } = require('../utils');
 const { messages } = require('../constants');
 
 const getProfile = asyncHandler(async (req, res) => {
@@ -21,11 +21,19 @@ const updateProfile = asyncHandler(async (req, res) => {
 });
 
 const changePassword = asyncHandler(async (req, res) => {
-    const { currentPassword, newPassword } = req.body;
-    await profileService.changePassword(req.account.id, currentPassword, newPassword);
+    const { currentPassword, newPassword, deviceId } = req.body;
+    const { account, tokens } = await profileService.changePassword(
+        req.account.id,
+        currentPassword,
+        newPassword,
+        deviceId,
+    );
+
+    setRefreshTokenCookie(res, tokens.refreshToken);
 
     ResponseHandler.success(res, {
         message: messages.PROFILE.PASSWORD_CHANGE_SUCCESS,
+        data: { account, tokens },
     });
 });
 

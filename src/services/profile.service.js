@@ -2,12 +2,9 @@ const bcrypt = require('bcryptjs');
 const prisma = require('../config/prisma');
 const { ApiError } = require('../utils');
 const { httpStatus, messages, ACCOUNT_STATUS, ACCOUNT_ROLE } = require('../constants');
+const tokenService = require('./token.service');
 
-const PROFILE_ROLES = [
-    ACCOUNT_ROLE.TECHNICIAN,
-    ACCOUNT_ROLE.FARM_OWNER,
-    ACCOUNT_ROLE.EXPERT,
-];
+const PROFILE_ROLES = [ACCOUNT_ROLE.TECHNICIAN, ACCOUNT_ROLE.FARM_OWNER, ACCOUNT_ROLE.EXPERT];
 const PASSWORD_HASH_ROUNDS = 12;
 
 const PUBLIC_MANAGER_SELECT = {
@@ -35,37 +32,88 @@ const PUBLIC_PROFILE_SELECT = {
     },
 };
 
+const CHANGE_PASSWORD_SELECT = {
+    id: true,
+    email: true,
+    phone: true,
+    passwordHash: true,
+    fullName: true,
+    avatarUrl: true,
+    role: true,
+    status: true,
+    managedByOwnerId: true,
+    activatedAt: true,
+    lastLoginAt: true,
+    createdAt: true,
+    updatedAt: true,
+};
+
 const eligibleProfileWhere = (accountId) => ({
     id: accountId,
     status: ACCOUNT_STATUS.ACTIVE,
     role: { in: PROFILE_ROLES },
 });
 
-const normalizeTechnicianKpi = (role, kpi) => {
-    if (role !== ACCOUNT_ROLE.TECHNICIAN) return null;
+const numberOrZero = (value) => Number(value ?? 0);
+const nullableNumber = (value) => (value == null ? null : Number(value));
 
-    return {
-        seasonsParticipated: Number(kpi?.seasonsParticipated ?? 0),
-        completedTasks: Number(kpi?.completedTasks ?? 0),
-        onTimeCompletedTasks: Number(kpi?.onTimeCompletedTasks ?? 0),
-        onTimeCompletionRatePct:
-            kpi?.onTimeCompletionRatePct == null
-                ? null
-                : Number(kpi.onTimeCompletionRatePct),
-    };
-};
+const normalizeTechnicianKpi = (kpi) => ({
+    seasonsParticipated: numberOrZero(kpi?.seasonsParticipated),
+    completedTasks: numberOrZero(kpi?.completedTasks),
+    onTimeCompletedTasks: numberOrZero(kpi?.onTimeCompletedTasks),
+    onTimeCompletionRatePct: nullableNumber(kpi?.onTimeCompletionRatePct),
+});
+
+const normalizeExpertKpi = (kpi) => ({
+    seasonsParticipated: numberOrZero(kpi?.seasonsParticipated),
+    diseaseCasesHandled: numberOrZero(kpi?.diseaseCasesHandled),
+    diseaseCasesResolved: numberOrZero(kpi?.diseaseCasesResolved),
+    avgResolutionHours: nullableNumber(kpi?.avgResolutionHours),
+});
+
+const normalizeFarmOwnerKpi = (kpi) => ({
+    farmsOwned: numberOrZero(kpi?.farmsOwned),
+    pondsManaged: numberOrZero(kpi?.pondsManaged),
+    activeSeasons: numberOrZero(kpi?.activeSeasons),
+});
+
+const EMPTY_PROFILE_KPIS = Object.freeze({
+    technicianKpi: null,
+    expertKpi: null,
+    farmOwnerKpi: null,
+});
+
+const KPI_CONFIG_BY_ROLE = Object.freeze({
+    [ACCOUNT_ROLE.TECHNICIAN]: {
+        delegate: 'technicianKpi',
+        idField: 'technicianId',
+        responseField: 'technicianKpi',
+        normalize: normalizeTechnicianKpi,
+    },
+    [ACCOUNT_ROLE.EXPERT]: {
+        delegate: 'expertKpi',
+        idField: 'expertId',
+        responseField: 'expertKpi',
+        normalize: normalizeExpertKpi,
+    },
+    [ACCOUNT_ROLE.FARM_OWNER]: {
+        delegate: 'farmOwnerKpi',
+        idField: 'farmOwnerId',
+        responseField: 'farmOwnerKpi',
+        normalize: normalizeFarmOwnerKpi,
+    },
+});
 
 const withProfileDetails = async (database, profile) => {
-    const kpi =
-        profile.role === ACCOUNT_ROLE.TECHNICIAN
-            ? await database.technicianKpi.findFirst({
-                where: { technicianId: profile.id },
-            })
-            : null;
+    const config = KPI_CONFIG_BY_ROLE[profile.role];
+    const kpi = await database[config.delegate].findUnique({
+        where: { [config.idField]: profile.id },
+    });
 
     return {
         ...profile,
-        technicianKpi: normalizeTechnicianKpi(profile.role, kpi),
+        ...EMPTY_PROFILE_KPIS,
+        [config.responseField]: config.normalize(kpi),
     };
 };
 
@@ -105,10 +153,10 @@ const updateProfile = async (accountId, profileData) =>
         return withProfileDetails(transaction, profile);
     });
 
-const changePassword = async (accountId, currentPassword, newPassword) => {
+const changePassword = async (accountId, currentPassword, newPassword, deviceId) => {
     const account = await prisma.account.findFirst({
         where: eligibleProfileWhere(accountId),
-        select: { id: true, passwordHash: true },
+        select: CHANGE_PASSWORD_SELECT,
     });
 
     if (!account?.passwordHash) {
@@ -127,25 +175,26 @@ const changePassword = async (accountId, currentPassword, newPassword) => {
 
     const passwordHash = await bcrypt.hash(newPassword, PASSWORD_HASH_ROUNDS);
     const changedAt = new Date();
+    const publicAccount = { ...account };
+    delete publicAccount.passwordHash;
 
-    await prisma.$transaction(async (transaction) => {
-        const updateResult = await transaction.account.updateMany({
+    const tokens = await prisma.$transaction(async (transaction) => {
+        await transaction.account.update({
             where: {
-                ...eligibleProfileWhere(accountId),
-                passwordHash: account.passwordHash,
+                id: accountId,
             },
             data: { passwordHash },
         });
-
-        if (updateResult.count !== 1) {
-            throw new ApiError(httpStatus.CONFLICT, messages.PROFILE.UPDATE_CONFLICT);
-        }
 
         await transaction.refreshToken.updateMany({
             where: { accountId, revokedAt: null },
             data: { revokedAt: changedAt },
         });
+
+        return tokenService.generateAuthTokens(publicAccount, deviceId, transaction);
     });
+
+    return { account: publicAccount, tokens };
 };
 
 module.exports = {
@@ -155,4 +204,6 @@ module.exports = {
     PUBLIC_PROFILE_SELECT,
     PUBLIC_MANAGER_SELECT,
     normalizeTechnicianKpi,
+    normalizeExpertKpi,
+    normalizeFarmOwnerKpi,
 };

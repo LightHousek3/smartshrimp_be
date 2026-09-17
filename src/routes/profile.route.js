@@ -38,7 +38,7 @@ router.patch(
 
 /**
  * @route   PATCH /api/v1/profile/password
- * @desc    Change password and revoke every refresh-token session
+ * @desc    Change password, revoke every session, and renew the current session
  * @access  Private
  */
 router.patch(
