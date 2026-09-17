@@ -47,7 +47,7 @@ model Account {
   email                  String                       @unique @db.Citext
   phone                  String?                      @db.VarChar(20)
   passwordHash           String?                      @map("password_hash") @db.VarChar(255)
-  fullName               String?                      @map("full_name") @db.VarChar(255)
+  fullName               String?                      @map("full_name") @db.VarChar(50)
   avatarUrl              String?                      @map("avatar_url")
   role                   AccountRole
   status                 AccountStatus                @default(PENDING_ACTIVATION)
@@ -142,4 +142,25 @@ view TechnicianKpi {
   onTimeCompletionRatePct Decimal? @map("on_time_completion_rate_pct") @db.Decimal
 
   @@map("v_technician_kpi")
+}
+
+/// Read-only Expert KPI projection created by smartshrimp.sql.
+view ExpertKpi {
+  expertId             String   @unique @map("expert_id") @db.Uuid
+  seasonsParticipated  BigInt?  @map("seasons_participated")
+  diseaseCasesHandled  BigInt?  @map("disease_cases_handled")
+  diseaseCasesResolved BigInt?  @map("disease_cases_resolved")
+  avgResolutionHours   Decimal? @map("avg_resolution_hours") @db.Decimal
+
+  @@map("v_expert_kpi")
+}
+
+/// Read-only Farm Owner KPI projection created by smartshrimp.sql.
+view FarmOwnerKpi {
+  farmOwnerId   String  @unique @map("farm_owner_id") @db.Uuid
+  farmsOwned    BigInt? @map("farms_owned")
+  pondsManaged  BigInt? @map("ponds_managed")
+  activeSeasons BigInt? @map("active_seasons")
+
+  @@map("v_farm_owner_kpi")
 }

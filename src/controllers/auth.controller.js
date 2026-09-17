@@ -1,5 +1,10 @@
 const { authService, verificationService } = require('../services');
-const { asyncHandler, ResponseHandler } = require('../utils');
+const {
+    asyncHandler,
+    ResponseHandler,
+    setRefreshTokenCookie,
+    clearRefreshTokenCookie,
+} = require('../utils');
 const { messages, VERIFICATION_PURPOSE } = require('../constants');
 const config = require('../config');
 
@@ -126,39 +131,6 @@ const resetPassword = asyncHandler(async (req, res) => {
 });
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
-
-/**
- * Set refresh token as httpOnly cookie
- */
-const setRefreshTokenCookie = (res, token) => {
-    res.cookie(config.cookie.refreshTokenName, token, getRefreshTokenCookieOptions());
-};
-
-/**
- * Clear refresh token cookie
- */
-const clearRefreshTokenCookie = (res) => {
-    const options = getRefreshTokenCookieOptions();
-    delete options.maxAge;
-    res.clearCookie(config.cookie.refreshTokenName, options);
-};
-
-const getRefreshTokenCookieOptions = (overrides = {}) => {
-    const options = {
-        httpOnly: true,
-        secure: config.cookie.secure,
-        sameSite: config.cookie.sameSite,
-        maxAge: config.cookie.refreshTokenMaxAgeMs,
-        path: '/',
-        ...overrides,
-    };
-
-    if (config.cookie.domain) {
-        options.domain = config.cookie.domain;
-    }
-
-    return options;
-};
 
 module.exports = {
     login,
