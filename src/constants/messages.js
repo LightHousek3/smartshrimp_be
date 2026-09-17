@@ -69,6 +69,22 @@ const messages = {
         UPDATE_CONFLICT: 'Hồ sơ đã thay đổi. Vui lòng tải lại và thử lại',
     },
 
+    FARM: {
+        LIST_FETCHED: 'Lấy danh sách trang trại thành công',
+        FETCHED: 'Lấy chi tiết trang trại thành công',
+        CREATED: 'Tạo trang trại thành công',
+        UPDATED: 'Cập nhật trang trại thành công',
+        ARCHIVED: 'Lưu trữ trang trại thành công',
+        RESTORED: 'Khôi phục trang trại thành công',
+        NOT_FOUND: 'Không tìm thấy trang trại',
+        NAME_ALREADY_EXISTS: 'Tên trang trại đã tồn tại trong danh sách đang hoạt động',
+        OWNER_NOT_ELIGIBLE: 'Chỉ chủ trang trại đang hoạt động mới có thể tạo trang trại',
+        ALREADY_ARCHIVED: 'Trang trại đã được lưu trữ',
+        NOT_ARCHIVED: 'Trang trại chưa được lưu trữ',
+        HAS_OPEN_SEASON: 'Không thể lưu trữ trang trại đang có vụ nuôi ở trạng thái lập kế hoạch hoặc đang hoạt động',
+        CHANGE_CONFLICT: 'Trạng thái trang trại đã thay đổi. Vui lòng tải lại và thử lại',
+    },
+
     // Generic CRUD
     CRUD: {
         CREATED: (resource) => `Tạo ${resource} thành công`,

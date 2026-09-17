@@ -42,6 +42,21 @@ enum SeasonStatus {
   @@map("season_status")
 }
 
+enum PondStatus {
+  AVAILABLE   @map("available")
+  MAINTENANCE @map("maintenance")
+  INACTIVE    @map("inactive")
+
+  @@map("pond_status")
+}
+
+enum PondType {
+  AQUACULTURE    @map("aquaculture")
+  WATER_TREATMENT @map("water_treatment")
+
+  @@map("pond_type")
+}
+
 enum NotificationType {
   SYSTEM                       @map("system")
   MANAGED_ACCOUNT_ACTIVATED    @map("managed_account_activated")
@@ -103,6 +118,7 @@ model Account {
   notifications          Notification[]
   managedByOwner         Account?                     @relation("OwnerManagedAccounts", fields: [managedByOwnerId], references: [id], onDelete: Restrict)
   managedAccounts        Account[]                    @relation("OwnerManagedAccounts")
+  ownedFarms             Farm[]
 
   @@map("accounts")
 }
@@ -155,25 +171,47 @@ model RefreshToken {
   @@map("refresh_tokens")
 }
 
-// Minimal mappings for account-status eligibility checks against the existing database.
 model Farm {
-  id      String @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
-  ownerId String @map("owner_id") @db.Uuid
+  id                String    @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  ownerId           String    @map("owner_id") @db.Uuid
+  name              String    @db.VarChar(255)
+  address           String?
+  latitude          Decimal?  @db.Decimal(10, 8)
+  longitude         Decimal?  @db.Decimal(11, 8)
+  totalAreaHectares Decimal?  @map("total_area_hectares") @db.Decimal(10, 2)
+  archivedAt        DateTime? @map("archived_at") @db.Timestamptz(6)
+  createdAt         DateTime  @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt         DateTime  @default(now()) @map("updated_at") @db.Timestamptz(6)
+  owner             Account   @relation(fields: [ownerId], references: [id], onDelete: Restrict)
+  ponds             Pond[]
 
   @@map("farms")
 }
 
 model Pond {
-  id     String @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
-  farmId String @map("farm_id") @db.Uuid
+  id         String              @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  farmId     String              @map("farm_id") @db.Uuid
+  name       String              @db.VarChar(255)
+  areaM2     Decimal?            @map("area_m2") @db.Decimal(12, 2)
+  depthM     Decimal?            @map("depth_m") @db.Decimal(6, 2)
+  volumeM3   Decimal?            @map("volume_m3") @db.Decimal(14, 2)
+  type       PondType            @default(AQUACULTURE)
+  status     PondStatus          @default(AVAILABLE)
+  archivedAt DateTime?           @map("archived_at") @db.Timestamptz(6)
+  createdAt  DateTime            @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt  DateTime            @default(now()) @map("updated_at") @db.Timestamptz(6)
+  farm       Farm                @relation(fields: [farmId], references: [id], onDelete: Restrict)
+  seasons    AquacultureSeason[]
 
   @@map("ponds")
 }
 
 model AquacultureSeason {
-  id     String       @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
-  pondId String       @map("pond_id") @db.Uuid
-  status SeasonStatus
+  id           String       @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  pondId       String       @map("pond_id") @db.Uuid
+  stockingDate DateTime?    @map("stocking_date") @db.Date
+  status       SeasonStatus
+  pond         Pond         @relation(fields: [pondId], references: [id], onDelete: Restrict)
 
   @@map("aquaculture_seasons")
 }
