@@ -12,6 +12,12 @@ const {
     endpointCount,
 } = buildAutoPaths(config.apiPrefix);
 
+const notificationDetailPath = `${config.apiPrefix}/notifications/{notificationId}`;
+if (autoPaths[notificationDetailPath]?.get) {
+    autoPaths[notificationDetailPath].get.description =
+        'Returns an owned notification and records readAt on the first successful detail request. Repeated requests preserve the original readAt.';
+}
+
 const options = {
     definition: {
         openapi: '3.0.3',
