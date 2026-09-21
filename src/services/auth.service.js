@@ -59,15 +59,10 @@ const login = async (email, password, deviceId) => {
     const resolvedDeviceId = deviceId || crypto.randomUUID();
 
     const tokens = await prisma.$transaction(async (transaction) => {
-        // Keep the status predicate inside the transaction so a concurrent deactivation cannot race with token issuance.
-        const updateResult = await transaction.account.updateMany({
-            where: { id: account.id, status: ACCOUNT_STATUS.ACTIVE },
+        await transaction.account.update({
+            where: { id: account.id },
             data: { lastLoginAt: loginAt },
         });
-
-        if (updateResult.count !== 1) {
-            throw new ApiError(httpStatus.FORBIDDEN, messages.AUTH.ACCOUNT_INACTIVE);
-        }
 
         return tokenService.generateAuthTokens(account, resolvedDeviceId, transaction);
     });

@@ -97,7 +97,7 @@ enum NotificationType {
 
 model Account {
   id                     String                       @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
-  email                  String                       @unique @db.Citext
+  email                  String                       @unique @db.VarChar(320)
   phone                  String?                      @db.VarChar(20)
   passwordHash           String?                      @map("password_hash") @db.VarChar(255)
   fullName               String?                      @map("full_name") @db.VarChar(50)
