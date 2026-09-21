@@ -41,7 +41,7 @@ const activateAccount = {
     body: Joi.object().keys({
         actionToken,
         fullName: fullNameField({ required: true }),
-        phone: vietnamesePhoneField({ required: true }),
+        phone: vietnamesePhoneField({ allowNull: true }),
         password: newPassword,
     }),
 };

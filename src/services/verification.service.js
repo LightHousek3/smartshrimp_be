@@ -345,7 +345,7 @@ const activateAccount = async ({ actionToken, fullName, phone, password }) => {
             },
             data: {
                 fullName,
-                phone,
+                phone: phone ?? null,
                 passwordHash,
                 status: ACCOUNT_STATUS.ACTIVE,
                 activatedAt: now,
