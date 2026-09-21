@@ -85,6 +85,23 @@ const messages = {
         CHANGE_CONFLICT: 'Trạng thái trang trại đã thay đổi. Vui lòng tải lại và thử lại',
     },
 
+    POND: {
+        LIST_FETCHED: 'Lấy danh sách ao thành công',
+        FETCHED: 'Lấy chi tiết ao thành công',
+        CREATED: 'Tạo ao thành công',
+        UPDATED: 'Cập nhật ao thành công',
+        ARCHIVED: 'Lưu trữ ao thành công',
+        RESTORED: 'Khôi phục ao thành công',
+        NOT_FOUND: 'Không tìm thấy ao',
+        NAME_ALREADY_EXISTS: 'Tên ao đã tồn tại trong danh sách đang hoạt động của trang trại',
+        FARM_ARCHIVED: 'Không thể thay đổi ao thuộc trang trại đã lưu trữ',
+        ARCHIVED_UPDATE_FORBIDDEN: 'Hãy khôi phục ao trước khi cập nhật nội dung',
+        HAS_OPEN_SEASON: 'Không thể lưu trữ ao đang có vụ nuôi lập kế hoạch hoặc hoạt động',
+        OPEN_SEASON_RESTRICTS_UPDATE: 'Vụ nuôi đang mở không cho phép thay đổi loại ao, ngừng hoạt động hoặc thay đổi thể tích',
+        VOLUME_OUT_OF_RANGE: 'Thể tích tính từ diện tích và độ sâu vượt quá giới hạn cho phép',
+        CHANGE_CONFLICT: 'Trạng thái ao đã thay đổi. Vui lòng tải lại và thử lại',
+    },
+
     // Generic CRUD
     CRUD: {
         CREATED: (resource) => `Tạo ${resource} thành công`,

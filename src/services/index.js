@@ -4,6 +4,7 @@ const verificationService = require('./verification.service');
 const profileService = require('./profile.service');
 const farmService = require('./farm.service');
 const notificationService = require('./notification.service');
+const pondService = require('./pond.service');
 
 module.exports = {
     authService,
@@ -12,4 +13,5 @@ module.exports = {
     profileService,
     farmService,
     notificationService,
+    pondService,
 };
