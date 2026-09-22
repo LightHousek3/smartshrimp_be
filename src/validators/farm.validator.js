@@ -45,5 +45,5 @@ module.exports = {
     getFarm,
     createFarm,
     updateFarm,
-    changeArchiveStatus: getFarm,
+    deleteFarm: getFarm,
 };

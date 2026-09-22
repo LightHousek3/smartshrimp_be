@@ -51,10 +51,67 @@ enum PondStatus {
 }
 
 enum PondType {
-  AQUACULTURE    @map("aquaculture")
+  AQUACULTURE     @map("aquaculture")
   WATER_TREATMENT @map("water_treatment")
 
   @@map("pond_type")
+}
+
+enum ShrimpType {
+  WHITELEG    @map("whiteleg")
+  BLACK_TIGER @map("black_tiger")
+
+  @@map("shrimp_type")
+}
+
+enum ProductCategory {
+  FEED     @map("feed")
+  MEDICINE @map("medicine")
+  MINERAL  @map("mineral")
+  CHEMICAL @map("chemical")
+  OTHER    @map("other")
+
+  @@map("product_category")
+}
+
+enum ProductUnit {
+  KG     @map("kg")
+  G      @map("g")
+  L      @map("l")
+  ML     @map("ml")
+  PACK   @map("pack")
+  BOTTLE @map("bottle")
+  PCS    @map("pcs")
+
+  @@map("product_unit")
+}
+
+enum ConversionUnit {
+  MG @map("mg")
+  G  @map("g")
+  KG @map("kg")
+  ML @map("ml")
+  L  @map("l")
+
+  @@map("conversion_unit")
+}
+
+enum TaskPriority {
+  LOW    @map("low")
+  NORMAL @map("normal")
+  HIGH   @map("high")
+  URGENT @map("urgent")
+
+  @@map("task_priority")
+}
+
+enum TaskStatus {
+  PENDING     @map("pending")
+  IN_PROGRESS @map("in_progress")
+  COMPLETED   @map("completed")
+  CANCELLED   @map("cancelled")
+
+  @@map("task_status")
 }
 
 enum NotificationType {
@@ -179,7 +236,8 @@ model Farm {
   latitude          Decimal?  @db.Decimal(10, 8)
   longitude         Decimal?  @db.Decimal(11, 8)
   totalAreaHectares Decimal?  @map("total_area_hectares") @db.Decimal(10, 2)
-  archivedAt        DateTime? @map("archived_at") @db.Timestamptz(6)
+  isDeleted         Boolean   @default(false) @map("is_deleted")
+  deletedAt         DateTime? @map("deleted_at") @db.Timestamptz(6)
   createdAt         DateTime  @default(now()) @map("created_at") @db.Timestamptz(6)
   updatedAt         DateTime  @default(now()) @map("updated_at") @db.Timestamptz(6)
   owner             Account   @relation(fields: [ownerId], references: [id], onDelete: Restrict)
@@ -198,6 +256,8 @@ model Pond {
   type       PondType            @default(AQUACULTURE)
   status     PondStatus          @default(AVAILABLE)
   archivedAt DateTime?           @map("archived_at") @db.Timestamptz(6)
+  isDeleted  Boolean             @default(false) @map("is_deleted")
+  deletedAt  DateTime?           @map("deleted_at") @db.Timestamptz(6)
   createdAt  DateTime            @default(now()) @map("created_at") @db.Timestamptz(6)
   updatedAt  DateTime            @default(now()) @map("updated_at") @db.Timestamptz(6)
   farm       Farm                @relation(fields: [farmId], references: [id], onDelete: Restrict)
@@ -214,6 +274,64 @@ model AquacultureSeason {
   pond         Pond         @relation(fields: [pondId], references: [id], onDelete: Restrict)
 
   @@map("aquaculture_seasons")
+}
+
+model Product {
+  id                 String          @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  farmId             String          @map("farm_id") @db.Uuid
+  name               String          @db.VarChar(255)
+  category           ProductCategory
+  unit               ProductUnit
+  conversionQuantity Decimal?        @map("conversion_quantity") @db.Decimal(14, 4)
+  conversionUnit     ConversionUnit? @map("conversion_unit")
+  minAlertQuantity   Decimal         @default(0) @map("min_alert_quantity") @db.Decimal(14, 3)
+  description        String?
+  archivedAt         DateTime?       @map("archived_at") @db.Timestamptz(6)
+  isDeleted          Boolean         @default(false) @map("is_deleted")
+  deletedAt          DateTime?       @map("deleted_at") @db.Timestamptz(6)
+  createdAt          DateTime        @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt          DateTime        @default(now()) @map("updated_at") @db.Timestamptz(6)
+
+  @@map("products")
+}
+
+model ProductionProtocolTemplate {
+  id                 String      @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  farmId             String      @map("farm_id") @db.Uuid
+  title              String      @db.VarChar(500)
+  description        String?
+  shrimpType         ShrimpType? @map("shrimp_type")
+  allowedVariancePct Decimal     @default(10) @map("allowed_variance_pct") @db.Decimal(5, 2)
+  createdBy          String      @map("created_by") @db.Uuid
+  archivedAt         DateTime?   @map("archived_at") @db.Timestamptz(6)
+  isDeleted          Boolean     @default(false) @map("is_deleted")
+  deletedAt          DateTime?   @map("deleted_at") @db.Timestamptz(6)
+  createdAt          DateTime    @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt          DateTime    @default(now()) @map("updated_at") @db.Timestamptz(6)
+
+  @@map("production_protocol_templates")
+}
+
+model Task {
+  id                 String       @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  farmId             String       @map("farm_id") @db.Uuid
+  seasonId           String?      @map("season_id") @db.Uuid
+  assignedBy         String       @map("assigned_by") @db.Uuid
+  assignedTo         String       @map("assigned_to") @db.Uuid
+  title              String       @db.VarChar(500)
+  description        String?
+  priority           TaskPriority @default(NORMAL)
+  status             TaskStatus   @default(PENDING)
+  dueAt              DateTime?    @map("due_at") @db.Timestamptz(6)
+  startedAt          DateTime?    @map("started_at") @db.Timestamptz(6)
+  completedAt        DateTime?    @map("completed_at") @db.Timestamptz(6)
+  cancellationReason String?      @map("cancellation_reason")
+  isDeleted          Boolean      @default(false) @map("is_deleted")
+  deletedAt          DateTime?    @map("deleted_at") @db.Timestamptz(6)
+  createdAt          DateTime     @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt          DateTime     @default(now()) @map("updated_at") @db.Timestamptz(6)
+
+  @@map("tasks")
 }
 
 model SeasonPersonnelAssignment {
