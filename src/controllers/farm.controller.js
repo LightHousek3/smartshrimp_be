@@ -38,20 +38,11 @@ const updateFarm = asyncHandler(async (req, res) => {
     });
 });
 
-const archiveFarm = asyncHandler(async (req, res) => {
-    const farm = await farmService.archiveFarm(req.params.farmId, req.account.id);
+const deleteFarm = asyncHandler(async (req, res) => {
+    const farm = await farmService.deleteFarm(req.params.farmId, req.account.id);
 
     ResponseHandler.success(res, {
-        message: messages.FARM.ARCHIVED,
-        data: farm,
-    });
-});
-
-const restoreFarm = asyncHandler(async (req, res) => {
-    const farm = await farmService.restoreFarm(req.params.farmId, req.account.id);
-
-    ResponseHandler.success(res, {
-        message: messages.FARM.RESTORED,
+        message: messages.FARM.DELETED,
         data: farm,
     });
 });
@@ -61,6 +52,5 @@ module.exports = {
     getFarm,
     createFarm,
     updateFarm,
-    archiveFarm,
-    restoreFarm,
+    deleteFarm,
 };

@@ -6,6 +6,7 @@ const {
     ACCOUNT_ROLE,
     ACCOUNT_STATUS,
 } = require('../constants');
+const { dataAccess } = require('../plugins');
 
 const OPEN_SEASON_STATUSES = ['PLANNING', 'ACTIVE'];
 
@@ -17,7 +18,8 @@ const FARM_SELECT = {
     latitude: true,
     longitude: true,
     totalAreaHectares: true,
-    archivedAt: true,
+    isDeleted: true,
+    deletedAt: true,
     createdAt: true,
     updatedAt: true,
 };
@@ -31,6 +33,7 @@ const OPEN_SEASON_SELECT = {
 const FARM_LIST_SELECT = {
     ...FARM_SELECT,
     ponds: {
+        where: dataAccess.notDeleted(),
         select: {
             id: true,
             archivedAt: true,
@@ -45,6 +48,7 @@ const FARM_LIST_SELECT = {
 const FARM_DETAIL_SELECT = {
     ...FARM_SELECT,
     ponds: {
+        where: dataAccess.notDeleted(),
         orderBy: [{ createdAt: 'asc' }, { id: 'asc' }],
         select: {
             id: true,
@@ -99,14 +103,13 @@ const dayOfCulture = (stockingDate) => {
 
 const normalizeFarmSummary = (farm, { includePonds = false } = {}) => {
     const { ponds = [], ...baseFarm } = farm;
-    const openSeasons = ponds.flatMap((pond) => pond.seasons || []);
     const activePonds = ponds.filter((pond) => pond.archivedAt == null);
-    const activePondSeasons = activePonds.flatMap((pond) => pond.seasons || []);
+    const openSeasons = ponds.flatMap((pond) => pond.seasons || []);
     const normalized = {
         ...normalizeFarm(baseFarm),
         pondCount: activePonds.length,
-        activeSeasonCount: activePondSeasons.filter((season) => season.status === 'ACTIVE').length,
-        canArchive: openSeasons.length === 0,
+        activeSeasonCount: openSeasons.filter((season) => season.status === 'ACTIVE').length,
+        canDelete: openSeasons.length === 0,
     };
 
     if (!includePonds) return normalized;
@@ -136,7 +139,7 @@ const normalizeFarmSummary = (farm, { includePonds = false } = {}) => {
 
 const getListFarm = async (ownerId) => {
     const farms = await prisma.farm.findMany({
-        where: { ownerId },
+        where: dataAccess.notDeleted({ ownerId }),
         select: FARM_LIST_SELECT,
         orderBy: [{ createdAt: 'desc' }, { id: 'desc' }],
     });
@@ -146,7 +149,7 @@ const getListFarm = async (ownerId) => {
 
 const getFarmById = async (farmId, ownerId) => {
     const farm = await prisma.farm.findFirst({
-        where: { id: farmId, ownerId },
+        where: dataAccess.notDeleted({ id: farmId, ownerId }),
         select: FARM_DETAIL_SELECT,
     });
 
@@ -204,7 +207,7 @@ const updateFarm = async (farmId, farmData, ownerId) => {
         const farm = await prisma.$transaction(
             async (transaction) => {
                 const currentFarm = await transaction.farm.findFirst({
-                    where: { id: farmId, ownerId },
+                    where: dataAccess.notDeleted({ id: farmId, ownerId }),
                     select: { id: true },
                 });
 
@@ -212,7 +215,7 @@ const updateFarm = async (farmId, farmData, ownerId) => {
                     throw new ApiError(httpStatus.NOT_FOUND, messages.FARM.NOT_FOUND);
                 }
                 const result = await transaction.farm.updateMany({
-                    where: { id: farmId, ownerId },
+                    where: dataAccess.notDeleted({ id: farmId, ownerId }),
                     data: farmData,
                 });
 
@@ -234,20 +237,17 @@ const updateFarm = async (farmId, farmData, ownerId) => {
     }
 };
 
-const archiveFarm = async (farmId, ownerId) => {
+const deleteFarm = async (farmId, ownerId) => {
     try {
         const farm = await prisma.$transaction(
             async (transaction) => {
                 const currentFarm = await transaction.farm.findFirst({
-                    where: { id: farmId, ownerId },
-                    select: { id: true, archivedAt: true },
+                    where: dataAccess.notDeleted({ id: farmId, ownerId }),
+                    select: { id: true },
                 });
 
                 if (!currentFarm) {
                     throw new ApiError(httpStatus.NOT_FOUND, messages.FARM.NOT_FOUND);
-                }
-                if (currentFarm.archivedAt) {
-                    throw new ApiError(httpStatus.CONFLICT, messages.FARM.ALREADY_ARCHIVED);
                 }
 
                 const openSeasonCount = await transaction.aquacultureSeason.count({
@@ -261,49 +261,25 @@ const archiveFarm = async (farmId, ownerId) => {
                     throw new ApiError(httpStatus.CONFLICT, messages.FARM.HAS_OPEN_SEASON);
                 }
 
-                const archivedAt = new Date();
-                const result = await transaction.farm.updateMany({
-                    where: { id: farmId, ownerId, archivedAt: null },
-                    data: { archivedAt },
-                });
-
-                if (result.count !== 1) {
-                    throw new ApiError(httpStatus.CONFLICT, messages.FARM.CHANGE_CONFLICT);
+                const deletedAt = new Date();
+                const mutableChildren = [
+                    transaction.pond,
+                    transaction.product,
+                    transaction.productionProtocolTemplate,
+                    transaction.task,
+                ];
+                for (const delegate of mutableChildren) {
+                    await dataAccess.softDeleteMany({
+                        delegate,
+                        where: { farmId },
+                        deletedAt,
+                    });
                 }
 
-                return transaction.farm.findUnique({
-                    where: { id: farmId },
-                    select: FARM_SELECT,
-                });
-            },
-            { isolationLevel: 'Serializable' },
-        );
-
-        return normalizeFarm(farm);
-    } catch (error) {
-        return mapWriteError(error);
-    }
-};
-
-const restoreFarm = async (farmId, ownerId) => {
-    try {
-        const farm = await prisma.$transaction(
-            async (transaction) => {
-                const currentFarm = await transaction.farm.findFirst({
+                const result = await dataAccess.softDeleteMany({
+                    delegate: transaction.farm,
                     where: { id: farmId, ownerId },
-                    select: { id: true, archivedAt: true },
-                });
-
-                if (!currentFarm) {
-                    throw new ApiError(httpStatus.NOT_FOUND, messages.FARM.NOT_FOUND);
-                }
-                if (!currentFarm.archivedAt) {
-                    throw new ApiError(httpStatus.CONFLICT, messages.FARM.NOT_ARCHIVED);
-                }
-
-                const result = await transaction.farm.updateMany({
-                    where: { id: farmId, ownerId, archivedAt: { not: null } },
-                    data: { archivedAt: null },
+                    deletedAt,
                 });
 
                 if (result.count !== 1) {
@@ -332,6 +308,5 @@ module.exports = {
     getFarmById,
     createFarm,
     updateFarm,
-    archiveFarm,
-    restoreFarm,
+    deleteFarm,
 };
