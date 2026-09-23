@@ -30,7 +30,6 @@ const getPonds = {
         search: Joi.string().trim().max(255).allow('').default(''),
         status: Joi.string().valid(...POND_STATUSES),
         type: Joi.string().valid(...POND_TYPES),
-        archived: Joi.boolean().truthy('true').falsy('false').default(false),
     }),
 };
 
@@ -56,5 +55,5 @@ module.exports = {
     getPond,
     createPond,
     updatePond,
-    changeArchiveStatus: getPond,
+    deletePond: getPond,
 };
