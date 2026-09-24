@@ -6,6 +6,8 @@ const { dataAccess } = require('../plugins');
 const OPEN_SEASON_STATUSES = ['PLANNING', 'ACTIVE'];
 const MAX_VOLUME_M3 = 999999999999.99;
 
+const normalizePondNameKey = (name) => name.replace(/\s+/gu, '').toLocaleLowerCase('vi');
+
 const calculateVolumeM3 = (areaM2, depthM) => {
     if (areaM2 == null || depthM == null) return null;
     const volumeM3 = Math.round(Number(areaM2) * Number(depthM) * 100) / 100;
@@ -61,6 +63,20 @@ const requireOwnedFarm = async (client, farmId, ownerId) => {
     });
     if (!farm) throw new ApiError(httpStatus.NOT_FOUND, messages.POND.NOT_FOUND);
     return farm;
+};
+
+const requireUniquePondName = async (client, farmId, name, excludedPondId) => {
+    const ponds = await client.pond.findMany({
+        where: dataAccess.notDeleted({
+            farmId,
+            ...(excludedPondId && { id: { not: excludedPondId } }),
+        }),
+        select: { name: true },
+    });
+    const nameKey = normalizePondNameKey(name);
+    if (ponds.some((pond) => normalizePondNameKey(pond.name) === nameKey)) {
+        throw new ApiError(httpStatus.CONFLICT, messages.POND.NAME_ALREADY_EXISTS);
+    }
 };
 
 const getPonds = async (farmId, ownerId, query) => {
@@ -123,6 +139,7 @@ const createPond = async (farmId, pondData, ownerId) => {
     try {
         const pond = await prisma.$transaction(async (transaction) => {
             await requireOwnedFarm(transaction, farmId, ownerId);
+            await requireUniquePondName(transaction, farmId, pondData.name);
             return transaction.pond.create({
                 data: {
                     ...pondData,
@@ -153,6 +170,9 @@ const updatePond = async (farmId, pondId, pondData, ownerId) => {
                     take: 1,
                 } },
             );
+            if (pondData.name !== undefined) {
+                await requireUniquePondName(transaction, farmId, pondData.name, pondId);
+            }
             const nextAreaM2 = Object.hasOwn(pondData, 'areaM2')
                 ? pondData.areaM2
                 : current.areaM2;
