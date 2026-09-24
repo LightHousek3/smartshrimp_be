@@ -32,6 +32,13 @@ const messages = {
         INVALID_CURSOR: 'Không tìm thấy mốc phân trang thông báo',
     },
 
+    PERSONNEL: {
+        LIST_FETCHED: 'Lấy danh sách nhân sự thành công',
+        FETCHED: 'Lấy chi tiết nhân sự thành công',
+        NOT_FOUND: 'Không tìm thấy nhân sự',
+        INVALID_CURSOR: 'Không tìm thấy mốc phân trang nhân sự',
+    },
+
     // Auth
     AUTH: {
         LOGIN_SUCCESS: 'Đăng nhập thành công',

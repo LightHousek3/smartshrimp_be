@@ -5,6 +5,7 @@ const profileService = require('./profile.service');
 const farmService = require('./farm.service');
 const notificationService = require('./notification.service');
 const pondService = require('./pond.service');
+const personnelService = require('./personnel.service');
 
 module.exports = {
     authService,
@@ -14,4 +15,5 @@ module.exports = {
     farmService,
     notificationService,
     pondService,
+    personnelService,
 };

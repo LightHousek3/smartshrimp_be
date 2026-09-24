@@ -5,6 +5,7 @@ const profileRoute = require('./profile.route');
 const farmRoute = require('./farm.route');
 const notificationRoute = require('./notification.route');
 const pondRoute = require('./pond.route');
+const personnelRoute = require('./personnel.route');
 
 const router = express.Router();
 
@@ -14,6 +15,7 @@ const routes = [
     { path: '/profile', route: profileRoute },
     { path: '/owner/farms', route: farmRoute },
     { path: '/owner/farms/:farmId/ponds', route: pondRoute },
+    { path: '/owner/personnel', route: personnelRoute },
     { path: '/notifications', route: notificationRoute },
 ];
 
