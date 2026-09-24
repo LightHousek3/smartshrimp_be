@@ -4,7 +4,11 @@ const verificationService = require('./verification.service');
 const profileService = require('./profile.service');
 const farmService = require('./farm.service');
 const notificationService = require('./notification.service');
+<<<<<<< Updated upstream
 const pondService = require('./pond.service');
+=======
+const personnelService = require('./personnel.service');
+>>>>>>> Stashed changes
 
 module.exports = {
     authService,
@@ -13,5 +17,9 @@ module.exports = {
     profileService,
     farmService,
     notificationService,
+<<<<<<< Updated upstream
     pondService,
+=======
+    personnelService,
+>>>>>>> Stashed changes
 };
