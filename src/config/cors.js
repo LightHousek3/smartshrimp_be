@@ -1,14 +1,17 @@
 const config = require('./index');
 
+const LOCAL_DEVELOPMENT_ORIGIN =
+    /^https?:\/\/(?:localhost|127\.0\.0\.1|\[::1\])(?::\d{1,5})?$/;
+
 const corsOptions = {
     origin: (origin, callback) => {
         // Allow requests with no origin (mobile apps, curl, etc.)
         if (!origin) return callback(null, true);
 
-        // In development, allow all origins to simplify testing from local frontends
-        // if (config.env !== 'production') return callback(null, true);
+        const isLocalDevelopmentOrigin =
+            config.env === 'development' && LOCAL_DEVELOPMENT_ORIGIN.test(origin);
 
-        if (config.cors.origin.includes(origin)) {
+        if (config.cors.origin.includes(origin) || isLocalDevelopmentOrigin) {
             callback(null, true);
         } else {
             callback(new Error('Not allowed by CORS'));

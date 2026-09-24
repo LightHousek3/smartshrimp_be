@@ -4,6 +4,7 @@ const profileController = require('./profile.controller');
 const farmController = require('./farm.controller');
 const notificationController = require('./notification.controller');
 const pondController = require('./pond.controller');
+const personnelController = require('./personnel.controller');
 
 module.exports = {
     authController,
@@ -12,4 +13,5 @@ module.exports = {
     farmController,
     notificationController,
     pondController,
+    personnelController,
 };

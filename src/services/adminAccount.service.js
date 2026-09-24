@@ -336,9 +336,19 @@ const createAccount = async ({ email, role, managedByOwnerId }, adminId) => {
         throw error;
     }
 
-    const activation = await sendActivationEmail(account, { enforceCooldown: false });
-
-    return { ...account, activation };
+    try {
+        const activation = await sendActivationEmail(account, { enforceCooldown: false });
+        return { ...account, activation, activationEmailSent: true };
+    } catch (error) {
+        // The account transaction has already committed. Report that fact so an
+        // administrator can resend the invitation instead of retrying creation.
+        if (error instanceof ApiError
+            && error.statusCode === httpStatus.SERVICE_UNAVAILABLE
+            && error.message === messages.ACCOUNT.ACTIVATION_EMAIL_FAILED) {
+            return { ...account, activation: null, activationEmailSent: false };
+        }
+        throw error;
+    }
 };
 
 const findPendingActivationAccount = async (accountId) => {
