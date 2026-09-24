@@ -36,7 +36,6 @@ const FARM_LIST_SELECT = {
         where: dataAccess.notDeleted(),
         select: {
             id: true,
-            archivedAt: true,
             seasons: {
                 where: { status: { in: OPEN_SEASON_STATUSES } },
                 select: { id: true, status: true },
@@ -58,7 +57,6 @@ const FARM_DETAIL_SELECT = {
             volumeM3: true,
             type: true,
             status: true,
-            archivedAt: true,
             seasons: {
                 where: { status: { in: OPEN_SEASON_STATUSES } },
                 select: OPEN_SEASON_SELECT,
@@ -103,11 +101,10 @@ const dayOfCulture = (stockingDate) => {
 
 const normalizeFarmSummary = (farm, { includePonds = false } = {}) => {
     const { ponds = [], ...baseFarm } = farm;
-    const activePonds = ponds.filter((pond) => pond.archivedAt == null);
     const openSeasons = ponds.flatMap((pond) => pond.seasons || []);
     const normalized = {
         ...normalizeFarm(baseFarm),
-        pondCount: activePonds.length,
+        pondCount: ponds.length,
         activeSeasonCount: openSeasons.filter((season) => season.status === 'ACTIVE').length,
         canDelete: openSeasons.length === 0,
     };
@@ -115,7 +112,7 @@ const normalizeFarmSummary = (farm, { includePonds = false } = {}) => {
     if (!includePonds) return normalized;
     return {
         ...normalized,
-        ponds: activePonds.map(({ seasons = [], ...pond }) => {
+        ponds: ponds.map(({ seasons = [], ...pond }) => {
             const currentSeason = seasons[0] || null;
             return {
                 ...pond,

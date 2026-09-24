@@ -31,14 +31,9 @@ const updatePond = asyncHandler(async (req, res) => {
     ResponseHandler.success(res, { message: messages.POND.UPDATED, data: pond });
 });
 
-const archivePond = asyncHandler(async (req, res) => {
-    const pond = await pondService.archivePond(req.params.farmId, req.params.pondId, req.account.id);
-    ResponseHandler.success(res, { message: messages.POND.ARCHIVED, data: pond });
+const deletePond = asyncHandler(async (req, res) => {
+    const pond = await pondService.deletePond(req.params.farmId, req.params.pondId, req.account.id);
+    ResponseHandler.success(res, { message: messages.POND.DELETED, data: pond });
 });
 
-const restorePond = asyncHandler(async (req, res) => {
-    const pond = await pondService.restorePond(req.params.farmId, req.params.pondId, req.account.id);
-    ResponseHandler.success(res, { message: messages.POND.RESTORED, data: pond });
-});
-
-module.exports = { getPonds, getPond, createPond, updatePond, archivePond, restorePond };
+module.exports = { getPonds, getPond, createPond, updatePond, deletePond };

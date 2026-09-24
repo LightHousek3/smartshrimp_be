@@ -1,9 +1,12 @@
 const prisma = require('../config/prisma');
 const { ApiError } = require('../utils');
 const { httpStatus, messages } = require('../constants');
+const { dataAccess } = require('../plugins');
 
 const OPEN_SEASON_STATUSES = ['PLANNING', 'ACTIVE'];
 const MAX_VOLUME_M3 = 999999999999.99;
+
+const normalizePondNameKey = (name) => name.replace(/\s+/gu, '').toLocaleLowerCase('vi');
 
 const calculateVolumeM3 = (areaM2, depthM) => {
     if (areaM2 == null || depthM == null) return null;
@@ -23,7 +26,7 @@ const POND_SELECT = {
     volumeM3: true,
     type: true,
     status: true,
-    archivedAt: true,
+    deletedAt: true,
     createdAt: true,
     updatedAt: true,
 };
@@ -31,7 +34,7 @@ const POND_SELECT = {
 const POND_DETAIL_SELECT = {
     ...POND_SELECT,
     farm: {
-        select: { id: true, name: true, archivedAt: true },
+        select: { id: true, name: true },
     },
     seasons: {
         where: { status: { in: OPEN_SEASON_STATUSES } },
@@ -53,28 +56,38 @@ const normalizePondDetail = ({ seasons = [], ...pond }) => ({
     currentSeason: seasons[0] || null,
 });
 
-const requireOwnedFarm = async (client, farmId, ownerId, { active = false } = {}) => {
+const requireOwnedFarm = async (client, farmId, ownerId) => {
     const farm = await client.farm.findFirst({
-        where: { id: farmId, ownerId },
-        select: { id: true, archivedAt: true },
+        where: dataAccess.notDeleted({ id: farmId, ownerId }),
+        select: { id: true },
     });
     if (!farm) throw new ApiError(httpStatus.NOT_FOUND, messages.POND.NOT_FOUND);
-    if (active && farm.archivedAt) {
-        throw new ApiError(httpStatus.CONFLICT, messages.POND.FARM_ARCHIVED);
-    }
     return farm;
+};
+
+const requireUniquePondName = async (client, farmId, name, excludedPondId) => {
+    const ponds = await client.pond.findMany({
+        where: dataAccess.notDeleted({
+            farmId,
+            ...(excludedPondId && { id: { not: excludedPondId } }),
+        }),
+        select: { name: true },
+    });
+    const nameKey = normalizePondNameKey(name);
+    if (ponds.some((pond) => normalizePondNameKey(pond.name) === nameKey)) {
+        throw new ApiError(httpStatus.CONFLICT, messages.POND.NAME_ALREADY_EXISTS);
+    }
 };
 
 const getPonds = async (farmId, ownerId, query) => {
     await requireOwnedFarm(prisma, farmId, ownerId);
-    const { page, limit, search, status, type, archived } = query;
-    const where = {
+    const { page, limit, search, status, type } = query;
+    const where = dataAccess.notDeleted({
         farmId,
-        archivedAt: archived ? { not: null } : null,
         ...(search && { name: { contains: search, mode: 'insensitive' } }),
         ...(status && { status }),
         ...(type && { type }),
-    };
+    });
     const [ponds, totalResults] = await Promise.all([
         prisma.pond.findMany({
             where,
@@ -99,7 +112,7 @@ const getPonds = async (farmId, ownerId, query) => {
 
 const findOwnedPond = async (client, farmId, pondId, ownerId, select) => {
     const pond = await client.pond.findFirst({
-        where: { id: pondId, farmId, farm: { ownerId } },
+        where: dataAccess.notDeleted({ id: pondId, farmId, farm: dataAccess.notDeleted({ ownerId }) }),
         select,
     });
     if (!pond) throw new ApiError(httpStatus.NOT_FOUND, messages.POND.NOT_FOUND);
@@ -125,7 +138,8 @@ const mapWriteError = (error) => {
 const createPond = async (farmId, pondData, ownerId) => {
     try {
         const pond = await prisma.$transaction(async (transaction) => {
-            await requireOwnedFarm(transaction, farmId, ownerId, { active: true });
+            await requireOwnedFarm(transaction, farmId, ownerId);
+            await requireUniquePondName(transaction, farmId, pondData.name);
             return transaction.pond.create({
                 data: {
                     ...pondData,
@@ -144,7 +158,7 @@ const createPond = async (farmId, pondData, ownerId) => {
 const updatePond = async (farmId, pondId, pondData, ownerId) => {
     try {
         const pond = await prisma.$transaction(async (transaction) => {
-            await requireOwnedFarm(transaction, farmId, ownerId, { active: true });
+            await requireOwnedFarm(transaction, farmId, ownerId);
             const current = await findOwnedPond(
                 transaction,
                 farmId,
@@ -156,8 +170,8 @@ const updatePond = async (farmId, pondId, pondData, ownerId) => {
                     take: 1,
                 } },
             );
-            if (current.archivedAt) {
-                throw new ApiError(httpStatus.CONFLICT, messages.POND.ARCHIVED_UPDATE_FORBIDDEN);
+            if (pondData.name !== undefined) {
+                await requireUniquePondName(transaction, farmId, pondData.name, pondId);
             }
             const nextAreaM2 = Object.hasOwn(pondData, 'areaM2')
                 ? pondData.areaM2
@@ -184,7 +198,7 @@ const updatePond = async (farmId, pondId, pondData, ownerId) => {
                 throw new ApiError(httpStatus.CONFLICT, messages.POND.OPEN_SEASON_RESTRICTS_UPDATE);
             }
             const result = await transaction.pond.updateMany({
-                where: { id: pondId, farmId, archivedAt: null },
+                where: dataAccess.notDeleted({ id: pondId, farmId }),
                 data: updateData,
             });
             if (result.count !== 1) {
@@ -198,27 +212,26 @@ const updatePond = async (farmId, pondId, pondData, ownerId) => {
     }
 };
 
-const archivePond = async (farmId, pondId, ownerId) => {
+const deletePond = async (farmId, pondId, ownerId) => {
     try {
         const pond = await prisma.$transaction(async (transaction) => {
-            await requireOwnedFarm(transaction, farmId, ownerId, { active: true });
-            const current = await findOwnedPond(
+            await requireOwnedFarm(transaction, farmId, ownerId);
+            await findOwnedPond(
                 transaction,
                 farmId,
                 pondId,
                 ownerId,
                 POND_SELECT,
             );
-            if (current.archivedAt) return current;
             const openSeasonCount = await transaction.aquacultureSeason.count({
                 where: { pondId, status: { in: OPEN_SEASON_STATUSES } },
             });
             if (openSeasonCount > 0) {
                 throw new ApiError(httpStatus.CONFLICT, messages.POND.HAS_OPEN_SEASON);
             }
-            const result = await transaction.pond.updateMany({
-                where: { id: pondId, farmId, archivedAt: null },
-                data: { archivedAt: new Date() },
+            const result = await dataAccess.softDeleteMany({
+                delegate: transaction.pond,
+                where: { id: pondId, farmId },
             });
             if (result.count !== 1) {
                 throw new ApiError(httpStatus.CONFLICT, messages.POND.CHANGE_CONFLICT);
@@ -231,31 +244,4 @@ const archivePond = async (farmId, pondId, ownerId) => {
     }
 };
 
-const restorePond = async (farmId, pondId, ownerId) => {
-    try {
-        const pond = await prisma.$transaction(async (transaction) => {
-            await requireOwnedFarm(transaction, farmId, ownerId, { active: true });
-            const current = await findOwnedPond(
-                transaction,
-                farmId,
-                pondId,
-                ownerId,
-                POND_SELECT,
-            );
-            if (!current.archivedAt) return current;
-            const result = await transaction.pond.updateMany({
-                where: { id: pondId, farmId, archivedAt: { not: null } },
-                data: { archivedAt: null },
-            });
-            if (result.count !== 1) {
-                throw new ApiError(httpStatus.CONFLICT, messages.POND.CHANGE_CONFLICT);
-            }
-            return transaction.pond.findUnique({ where: { id: pondId }, select: POND_SELECT });
-        }, { isolationLevel: 'Serializable' });
-        return normalizePond(pond);
-    } catch (error) {
-        return mapWriteError(error);
-    }
-};
-
-module.exports = { getPonds, getPond, createPond, updatePond, archivePond, restorePond };
+module.exports = { getPonds, getPond, createPond, updatePond, deletePond };
