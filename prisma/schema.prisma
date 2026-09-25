@@ -42,6 +42,13 @@ enum SeasonStatus {
   @@map("season_status")
 }
 
+enum PersonnelRole {
+  TECHNICIAN @map("technician")
+  EXPERT     @map("expert")
+
+  @@map("personnel_role")
+}
+
 enum PondStatus {
   AVAILABLE   @map("available")
   MAINTENANCE @map("maintenance")
@@ -175,6 +182,7 @@ model Account {
   notifications          Notification[]
   managedByOwner         Account?                     @relation("OwnerManagedAccounts", fields: [managedByOwnerId], references: [id], onDelete: Restrict)
   managedAccounts        Account[]                    @relation("OwnerManagedAccounts")
+  seasonAssignments      SeasonPersonnelAssignment[]  @relation("SeasonAssignedAccount")
   ownedFarms             Farm[]
 
   @@map("accounts")
@@ -267,12 +275,26 @@ model Pond {
 }
 
 model AquacultureSeason {
-  id           String       @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
-  pondId       String       @map("pond_id") @db.Uuid
-  stockingDate DateTime?    @map("stocking_date") @db.Date
-  status       SeasonStatus
-  pond         Pond         @relation(fields: [pondId], references: [id], onDelete: Restrict)
+  id                   String                      @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  pondId               String                      @map("pond_id") @db.Uuid
+  name                 String                      @db.VarChar(255)
+  shrimpType           ShrimpType                  @map("shrimp_type")
+  stockingDate         DateTime?                   @map("stocking_date") @db.Date
+  expectedEndDate      DateTime?                   @map("expected_end_date") @db.Date
+  actualEndDate        DateTime?                   @map("actual_end_date") @db.Date
+  initialQuantity      BigInt?                     @map("initial_quantity") @db.BigInt
+  initialAvgWeightG    Decimal?                    @map("initial_avg_weight_g") @db.Decimal(10, 3)
+  initialBiomassKg     Decimal?                    @map("initial_biomass_kg") @db.Decimal(14, 3)
+  initialDensityPerM2  Decimal?                    @map("initial_density_per_m2") @db.Decimal(12, 2)
+  status               SeasonStatus                @default(PLANNING)
+  cancellationReason   String?                     @map("cancellation_reason")
+  createdBy            String                      @map("created_by") @db.Uuid
+  createdAt            DateTime                    @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt            DateTime                    @default(now()) @map("updated_at") @db.Timestamptz(6)
+  pond                 Pond                        @relation(fields: [pondId], references: [id], onDelete: Restrict)
+  personnelAssignments SeasonPersonnelAssignment[]
 
+  @@index([pondId, status], map: "idx_seasons_pond_status")
   @@map("aquaculture_seasons")
 }
 
@@ -335,11 +357,20 @@ model Task {
 }
 
 model SeasonPersonnelAssignment {
-  id           String    @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
-  seasonId     String    @map("season_id") @db.Uuid
-  accountId    String    @map("account_id") @db.Uuid
-  unassignedAt DateTime? @map("unassigned_at") @db.Timestamptz(6)
+  id                     String            @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  seasonId               String            @map("season_id") @db.Uuid
+  role                   PersonnelRole
+  accountId              String            @map("account_id") @db.Uuid
+  assignedBy             String            @map("assigned_by") @db.Uuid
+  assignedAt             DateTime          @default(now()) @map("assigned_at") @db.Timestamptz(6)
+  unassignedAt           DateTime?         @map("unassigned_at") @db.Timestamptz(6)
+  unassignedBy           String?           @map("unassigned_by") @db.Uuid
+  replacementReason      String?           @map("replacement_reason")
+  replacedByAssignmentId String?           @map("replaced_by_assignment_id") @db.Uuid
+  season                 AquacultureSeason @relation(fields: [seasonId], references: [id], onDelete: Restrict)
+  account                Account           @relation("SeasonAssignedAccount", fields: [accountId], references: [id], onDelete: Restrict)
 
+  @@index([accountId, role], map: "idx_season_assignments_account_active")
   @@map("season_personnel_assignments")
 }
 

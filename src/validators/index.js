@@ -5,6 +5,7 @@ const farmValidator = require('./farm.validator');
 const notificationValidator = require('./notification.validator');
 const pondValidator = require('./pond.validator');
 const personnelValidator = require('./personnel.validator');
+const seasonValidator = require('./season.validator');
 
 module.exports = {
     authValidator,
@@ -14,4 +15,5 @@ module.exports = {
     notificationValidator,
     pondValidator,
     personnelValidator,
+    seasonValidator,
 };
