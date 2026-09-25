@@ -103,6 +103,30 @@ const messages = {
         CHANGE_CONFLICT: 'Trạng thái ao đã thay đổi. Vui lòng tải lại và thử lại',
     },
 
+    SEASON: {
+        LIST_FETCHED: 'Lấy danh sách vụ nuôi thành công',
+        FETCHED: 'Lấy chi tiết vụ nuôi thành công',
+        CREATED: 'Tạo vụ nuôi thành công',
+        UPDATED: 'Cập nhật vụ nuôi thành công',
+        ACTIVATED: 'Kích hoạt vụ nuôi thành công',
+        CANCELLED: 'Hủy vụ nuôi thành công',
+        NOT_FOUND: 'Không tìm thấy vụ nuôi',
+        POND_NOT_FOUND: 'Không tìm thấy ao thuộc trang trại của bạn',
+        INVALID_CURSOR: 'Không tìm thấy mốc phân trang vụ nuôi',
+        FARM_ARCHIVED: 'Không thể tạo vụ nuôi trong trang trại đã lưu trữ',
+        POND_ARCHIVED: 'Không thể tạo vụ nuôi trong ao đã lưu trữ',
+        POND_NOT_AVAILABLE: 'Chỉ có thể tạo vụ nuôi trong ao đang sẵn sàng',
+        POND_NOT_AQUACULTURE: 'Chỉ có thể tạo vụ nuôi trong ao nuôi thủy sản',
+        OPEN_SEASON_EXISTS: 'Ao đã có một vụ nuôi đang lập kế hoạch hoặc hoạt động',
+        PLANNING_UPDATE_ONLY: 'Chỉ có thể cập nhật vụ nuôi ở trạng thái lập kế hoạch',
+        INVALID_DATE_RANGE: 'Ngày dự kiến kết thúc phải từ ngày thả giống trở đi',
+        DERIVED_VALUE_OUT_OF_RANGE: 'Sinh khối hoặc mật độ ban đầu vượt quá giới hạn cho phép',
+        ACTIVATION_REQUIRES_PLANNING: 'Chỉ có thể kích hoạt vụ nuôi đang lập kế hoạch',
+        ACTIVATION_CONDITIONS_NOT_MET: 'Vụ nuôi chưa đáp ứng đủ điều kiện kích hoạt',
+        CANCELLATION_NOT_ALLOWED: 'Chỉ có thể hủy vụ nuôi đang lập kế hoạch hoặc đang hoạt động',
+        CHANGE_CONFLICT: 'Vụ nuôi đã thay đổi. Vui lòng tải lại và thử lại',
+    },
+
     // Generic CRUD
     CRUD: {
         CREATED: (resource) => `Tạo ${resource} thành công`,
