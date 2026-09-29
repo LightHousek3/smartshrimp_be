@@ -28,6 +28,7 @@ const messages = {
     NOTIFICATION: {
         LIST_FETCHED: 'Lấy danh sách thông báo thành công',
         FETCHED: 'Lấy chi tiết thông báo thành công',
+        ALL_MARKED_READ: 'Đã đánh dấu tất cả thông báo là đã đọc',
         NOT_FOUND: 'Không tìm thấy thông báo',
         INVALID_CURSOR: 'Không tìm thấy mốc phân trang thông báo',
     },

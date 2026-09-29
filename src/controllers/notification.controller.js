@@ -28,7 +28,17 @@ const getNotification = asyncHandler(async (req, res) => {
     });
 });
 
+const markAllAsRead = asyncHandler(async (req, res) => {
+    const result = await notificationService.markAllAsRead(req.account.id);
+
+    ResponseHandler.success(res, {
+        message: messages.NOTIFICATION.ALL_MARKED_READ,
+        data: result,
+    });
+});
+
 module.exports = {
     getListNotification,
     getNotification,
+    markAllAsRead,
 };

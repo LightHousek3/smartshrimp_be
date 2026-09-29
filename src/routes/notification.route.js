@@ -24,6 +24,16 @@ router.get(
 );
 
 /**
+ * @route   PATCH /api/v1/notifications/read-all
+ * @desc    Mark all unread notifications owned by the authenticated account as read
+ * @access  Technician, Expert, Owner
+ */
+router.patch(
+    '/read-all',
+    notificationController.markAllAsRead,
+);
+
+/**
  * @route   GET /api/v1/notifications/:notificationId
  * @desc    Get an owned notification and record its first read time
  * @access  Technician, Expert, Owner
