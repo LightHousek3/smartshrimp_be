@@ -39,7 +39,7 @@ const POND_DETAIL_SELECT = {
     seasons: {
         where: { status: { in: OPEN_SEASON_STATUSES } },
         orderBy: { id: 'asc' },
-        select: { id: true, status: true, stockingDate: true },
+        select: { id: true, name: true, status: true, stockingDate: true },
         take: 1,
     },
 };
