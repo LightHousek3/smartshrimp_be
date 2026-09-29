@@ -111,8 +111,25 @@ const getNotificationById = async (accountId, notificationId) => {
     return notification;
 };
 
+const markAllAsRead = async (accountId) => {
+    const readAt = new Date();
+    const { count: updatedCount } = await prisma.notification.updateMany({
+        where: { accountId, readAt: null },
+        data: { readAt },
+    });
+
+    if (updatedCount > 0) {
+        emitNotification(accountId, 'notification:read-all', {
+            updatedCount,
+            readAt,
+        });
+    }
+    return { updatedCount, readAt };
+};
+
 module.exports = {
     createNotification,
     getListNotification,
     getNotificationById,
+    markAllAsRead,
 };

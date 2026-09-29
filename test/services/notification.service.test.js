@@ -62,3 +62,31 @@ test('does not reveal another account notification or emit read event', async ()
     }));
     expect(emitNotification).not.toHaveBeenCalled();
 });
+
+test('marks every unread notification owned by the account with one update', async () => {
+    prisma.notification.updateMany.mockResolvedValue({ count: 3 });
+
+    const result = await notificationService.markAllAsRead('owner-id');
+
+    expect(prisma.notification.updateMany).toHaveBeenCalledWith({
+        where: { accountId: 'owner-id', readAt: null },
+        data: { readAt: expect.any(Date) },
+    });
+    expect(result).toEqual({
+        updatedCount: 3,
+        readAt: expect.any(Date),
+    });
+    expect(emitNotification).toHaveBeenCalledWith('owner-id', 'notification:read-all', {
+        updatedCount: 3,
+        readAt: result.readAt,
+    });
+});
+
+test('does not emit a read-all event when no unread notification exists', async () => {
+    prisma.notification.updateMany.mockResolvedValue({ count: 0 });
+
+    const result = await notificationService.markAllAsRead('owner-id');
+
+    expect(result.updatedCount).toBe(0);
+    expect(emitNotification).not.toHaveBeenCalled();
+});
