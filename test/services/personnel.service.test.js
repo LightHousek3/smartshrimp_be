@@ -6,6 +6,8 @@ jest.mock('../../src/config/prisma', () => ({
     },
     seasonPersonnelAssignment: { findMany: jest.fn() },
     aquacultureSeason: { findMany: jest.fn() },
+    technicianKpi: { findUnique: jest.fn() },
+    expertKpi: { findUnique: jest.fn() },
 }));
 
 const prisma = require('../../src/config/prisma');
@@ -27,6 +29,8 @@ beforeEach(() => {
     jest.clearAllMocks();
     prisma.seasonPersonnelAssignment.findMany.mockResolvedValue([]);
     prisma.aquacultureSeason.findMany.mockResolvedValue([]);
+    prisma.technicianKpi.findUnique.mockResolvedValue(null);
+    prisma.expertKpi.findUnique.mockResolvedValue(null);
 });
 
 test('lists only staff managed by the owner with pagination and open assignment counts', async () => {
@@ -89,14 +93,107 @@ test('does not reveal another owner\'s personnel detail', async () => {
     }));
 });
 
-test('returns owned personnel detail with current assignment count', async () => {
+test('returns technician detail with KPI, current assignments, and history', async () => {
     prisma.account.findFirst.mockResolvedValue(staff);
     prisma.seasonPersonnelAssignment.findMany.mockResolvedValue([
-        { accountId: staffId, seasonId: 'season-1' },
-        { accountId: staffId, seasonId: 'season-2' },
+        {
+            id: 'assignment-current',
+            role: 'TECHNICIAN',
+            assignedAt: new Date('2026-02-01T00:00:00Z'),
+            unassignedAt: null,
+            replacementReason: null,
+            season: {
+                id: 'season-1',
+                name: 'Vụ Đông Xuân 2026',
+                status: 'ACTIVE',
+                pond: {
+                    id: 'pond-1',
+                    name: 'Ao A5',
+                    farm: { id: 'farm-1', name: 'Trang trại Của Lập' },
+                },
+            },
+        },
+        {
+            id: 'assignment-history',
+            role: 'TECHNICIAN',
+            assignedAt: new Date('2025-06-25T00:00:00Z'),
+            unassignedAt: new Date('2025-09-30T00:00:00Z'),
+            replacementReason: 'Điều chuyển nhân sự',
+            season: {
+                id: 'season-2',
+                name: 'Vụ Hè Thu 2025',
+                status: 'COMPLETED',
+                pond: {
+                    id: 'pond-2',
+                    name: 'Ao A3',
+                    farm: { id: 'farm-1', name: 'Trang trại Của Lập' },
+                },
+            },
+        },
     ]);
-    prisma.aquacultureSeason.findMany.mockResolvedValue([{ id: 'season-1' }]);
+    prisma.technicianKpi.findUnique.mockResolvedValue({
+        technicianId: staffId,
+        seasonsParticipated: 3n,
+        completedTasks: 12n,
+        onTimeCompletedTasks: 10n,
+        onTimeCompletionRatePct: 83.33,
+    });
 
     const result = await personnelService.getPersonnelById(ownerId, staffId);
-    expect(result).toEqual({ ...staff, currentSeasonAssignments: 1 });
+    expect(prisma.seasonPersonnelAssignment.findMany).toHaveBeenCalledWith(
+        expect.objectContaining({
+            where: {
+                accountId: staffId,
+                role: 'TECHNICIAN',
+                season: { pond: { farm: { ownerId } } },
+            },
+        }),
+    );
+    expect(result).toMatchObject({
+        ...staff,
+        currentSeasonAssignments: 1,
+        kpi: {
+            seasonsParticipated: 3,
+            completedTasks: 12,
+            onTimeCompletedTasks: 10,
+            onTimeCompletionRatePct: 83.33,
+        },
+        currentAssignments: [
+            expect.objectContaining({
+                id: 'assignment-current',
+                seasonId: 'season-1',
+                seasonName: 'Vụ Đông Xuân 2026',
+                pondId: 'pond-1',
+                pondName: 'Ao A5',
+                farmId: 'farm-1',
+                farmName: 'Trang trại Của Lập',
+            }),
+        ],
+        assignmentHistory: [
+            expect.objectContaining({
+                id: 'assignment-history',
+                seasonId: 'season-2',
+                pondName: 'Ao A3',
+                replacementReason: 'Điều chuyển nhân sự',
+            }),
+        ],
+    });
+});
+
+test('returns zeroed expert KPI when no projection exists', async () => {
+    prisma.account.findFirst.mockResolvedValue({ ...staff, role: 'EXPERT' });
+
+    const result = await personnelService.getPersonnelById(ownerId, staffId);
+
+    expect(prisma.expertKpi.findUnique).toHaveBeenCalledWith({
+        where: { expertId: staffId },
+    });
+    expect(result.kpi).toEqual({
+        seasonsParticipated: 0,
+        diseaseCasesHandled: 0,
+        diseaseCasesResolved: 0,
+        avgResolutionHours: null,
+    });
+    expect(result.currentAssignments).toEqual([]);
+    expect(result.assignmentHistory).toEqual([]);
 });

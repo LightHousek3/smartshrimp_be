@@ -8,6 +8,7 @@ const positiveDecimal = (max, precision) =>
 
 const SHRIMP_TYPES = ['WHITELEG', 'BLACK_TIGER'];
 const SEASON_STATUSES = ['PLANNING', 'ACTIVE', 'COMPLETED', 'CANCELLED'];
+const PERSONNEL_ROLES = ['TECHNICIAN', 'EXPERT'];
 const EDITABLE_FIELDS = [
     'name',
     'shrimpType',
@@ -52,6 +53,10 @@ const validateDateRange = (value, helpers) => {
 };
 
 const seasonParams = Joi.object({ seasonId: uuid.required() });
+const assignmentParams = Joi.object({
+    seasonId: uuid.required(),
+    role: Joi.string().valid(...PERSONNEL_ROLES).required(),
+});
 
 const getSeasons = {
     query: Joi.object({
@@ -65,6 +70,23 @@ const getSeasons = {
 };
 
 const getSeason = { params: seasonParams };
+
+const assignPersonnel = {
+    params: seasonParams,
+    body: Joi.object({
+        accountId: uuid.required(),
+        role: Joi.string().valid(...PERSONNEL_ROLES).required(),
+    }),
+};
+
+const replacePersonnel = {
+    params: assignmentParams,
+    body: Joi.object({
+        accountId: uuid.required(),
+        expectedAssignmentId: uuid.required(),
+        reason: Joi.string().trim().min(1).max(2000).required(),
+    }),
+};
 
 const createSeason = {
     body: Joi.object({
@@ -103,6 +125,8 @@ const cancelSeason = {
 module.exports = {
     getSeasons,
     getSeason,
+    assignPersonnel,
+    replacePersonnel,
     createSeason,
     updateSeason,
     activateSeason,
