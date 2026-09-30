@@ -7,6 +7,7 @@ const notificationRoute = require('./notification.route');
 const pondRoute = require('./pond.route');
 const personnelRoute = require('./personnel.route');
 const seasonRoute = require('./season.route');
+const assignedSeasonRoute = require('./assignedSeason.route');
 
 const router = express.Router();
 
@@ -18,6 +19,7 @@ const routes = [
     { path: '/owner/farms/:farmId/ponds', route: pondRoute },
     { path: '/owner/personnel', route: personnelRoute },
     { path: '/owner/seasons', route: seasonRoute },
+    { path: '/me/seasons', route: assignedSeasonRoute },
     { path: '/notifications', route: notificationRoute },
 ];
 

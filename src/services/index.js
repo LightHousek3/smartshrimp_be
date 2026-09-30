@@ -7,6 +7,7 @@ const notificationService = require('./notification.service');
 const pondService = require('./pond.service');
 const personnelService = require('./personnel.service');
 const seasonService = require('./season.service');
+const assignedSeasonService = require('./assignedSeason.service');
 
 module.exports = {
     authService,
@@ -18,4 +19,5 @@ module.exports = {
     pondService,
     personnelService,
     seasonService,
+    assignedSeasonService,
 };
