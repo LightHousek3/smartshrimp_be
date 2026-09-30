@@ -14,6 +14,7 @@ const {
 const MAX_INITIAL_BIOMASS_KG = 99999999999.999;
 const MAX_INITIAL_DENSITY_PER_M2 = 9999999999.99;
 const CANCELLABLE_STATUSES = [SEASON_STATUS.PLANNING, SEASON_STATUS.ACTIVE];
+const API_TIMESTAMP_PRECISION_MS = 1;
 
 const SEASON_BASE_SELECT = {
     id: true,
@@ -61,12 +62,12 @@ const SEASON_LIST_SELECT = {
 const SEASON_DETAIL_SELECT = {
     ...SEASON_LIST_SELECT,
     personnelAssignments: {
-        where: { unassignedAt: null },
         orderBy: [{ assignedAt: 'desc' }, { id: 'desc' }],
         select: {
             id: true,
             role: true,
             assignedAt: true,
+            unassignedAt: true,
             account: {
                 select: {
                     id: true,
@@ -89,6 +90,17 @@ const vietnamDateFormatter = new Intl.DateTimeFormat('en-US', {
 
 const toDateOnly = (value) => (value ? value.toISOString().slice(0, 10) : null);
 const parseDateOnly = (value) => (value == null ? null : new Date(`${value}T00:00:00.000Z`));
+
+// PostgreSQL keeps microseconds, but JavaScript dates and JSON only keep
+// milliseconds. Match the millisecond represented by the API timestamp so a
+// current record is not mistaken for a concurrent update.
+const updatedAtApiWindow = (value) => {
+    const start = value instanceof Date ? value : new Date(value);
+    return {
+        gte: start,
+        lt: new Date(start.getTime() + API_TIMESTAMP_PRECISION_MS),
+    };
+};
 
 const dayOfCulture = (stockingDate) => {
     if (!stockingDate) return null;
@@ -137,19 +149,26 @@ const normalizeSeasonSummary = ({ pond, ...season }) => ({
 const getActiveAssignment = (assignments, role) =>
     assignments.find(
         (assignment) =>
-            assignment.role === role && assignment.account.status === ACCOUNT_STATUS.ACTIVE,
+            assignment.role === role
+            && assignment.unassignedAt == null
+            && assignment.account.status === ACCOUNT_STATUS.ACTIVE,
     ) || null;
+
+const getLatestAssignment = (assignments, role) =>
+    assignments.find((assignment) => assignment.role === role) || null;
 
 const buildActivationEligibility = (season) => {
     const missingConditions = [];
     const activeTechnicians = season.personnelAssignments.filter(
         (assignment) =>
             assignment.role === PERSONNEL_ROLE.TECHNICIAN
+            && assignment.unassignedAt == null
             && assignment.account.status === ACCOUNT_STATUS.ACTIVE,
     );
     const activeExperts = season.personnelAssignments.filter(
         (assignment) =>
             assignment.role === PERSONNEL_ROLE.EXPERT
+            && assignment.unassignedAt == null
             && assignment.account.status === ACCOUNT_STATUS.ACTIVE,
     );
 
@@ -196,6 +215,13 @@ const normalizeSeasonDetail = ({
         personnel: {
             technician,
             expert,
+        },
+        lastAssignedPersonnel: {
+            technician: getLatestAssignment(
+                personnelAssignments,
+                PERSONNEL_ROLE.TECHNICIAN,
+            ),
+            expert: getLatestAssignment(personnelAssignments, PERSONNEL_ROLE.EXPERT),
         },
         approvedProductionProtocol: protocols[0] || null,
         activationEligibility,
@@ -497,7 +523,7 @@ const updateSeason = async (seasonId, seasonData, ownerId) => {
                 where: {
                     id: seasonId,
                     status: SEASON_STATUS.PLANNING,
-                    updatedAt: expectedUpdatedAt,
+                    updatedAt: updatedAtApiWindow(expectedUpdatedAt),
                 },
                 data: buildUpdateData(editableData, current),
             });
@@ -516,7 +542,11 @@ const updateSeason = async (seasonId, seasonData, ownerId) => {
 const buildStatusNotifications = (season, content) => {
     const accountIds = [...new Set(
         season.personnelAssignments
-            .filter((assignment) => assignment.account.status === ACCOUNT_STATUS.ACTIVE)
+            .filter(
+                (assignment) =>
+                    assignment.unassignedAt == null
+                    && assignment.account.status === ACCOUNT_STATUS.ACTIVE,
+            )
             .map((assignment) => assignment.account.id),
     )];
     return {
@@ -563,6 +593,22 @@ const cancelPlannedOperationSchedules = async (
     );
 };
 
+const unassignCurrentSeasonPersonnel = async (
+    client,
+    seasonId,
+    ownerId,
+    unassignedAt,
+) => client.seasonPersonnelAssignment.updateMany({
+    where: {
+        seasonId,
+        unassignedAt: null,
+    },
+    data: {
+        unassignedAt,
+        unassignedBy: ownerId,
+    },
+});
+
 const activateSeason = async (seasonId, { expectedUpdatedAt }, ownerId) => {
     try {
         const result = await prisma.$transaction(async (transaction) => {
@@ -585,7 +631,7 @@ const activateSeason = async (seasonId, { expectedUpdatedAt }, ownerId) => {
                 where: {
                     id: seasonId,
                     status: SEASON_STATUS.PLANNING,
-                    updatedAt: expectedUpdatedAt,
+                    updatedAt: updatedAtApiWindow(expectedUpdatedAt),
                 },
                 data: { status: SEASON_STATUS.ACTIVE },
             });
@@ -624,7 +670,7 @@ const cancelSeason = async (seasonId, { reason, expectedUpdatedAt }, ownerId) =>
                 where: {
                     id: seasonId,
                     status: current.status,
-                    updatedAt: expectedUpdatedAt,
+                    updatedAt: updatedAtApiWindow(expectedUpdatedAt),
                 },
                 data: {
                     status: SEASON_STATUS.CANCELLED,
@@ -635,6 +681,12 @@ const cancelSeason = async (seasonId, { reason, expectedUpdatedAt }, ownerId) =>
                 throw new ApiError(httpStatus.CONFLICT, messages.SEASON.CHANGE_CONFLICT);
             }
 
+            await unassignCurrentSeasonPersonnel(
+                transaction,
+                seasonId,
+                ownerId,
+                cancelledAt,
+            );
             const cancelledScheduleCount = await cancelPlannedOperationSchedules(
                 transaction,
                 seasonId,

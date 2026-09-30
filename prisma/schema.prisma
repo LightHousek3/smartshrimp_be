@@ -263,7 +263,6 @@ model Pond {
   volumeM3   Decimal?            @map("volume_m3") @db.Decimal(14, 2)
   type       PondType            @default(AQUACULTURE)
   status     PondStatus          @default(AVAILABLE)
-  archivedAt DateTime?           @map("archived_at") @db.Timestamptz(6)
   isDeleted  Boolean             @default(false) @map("is_deleted")
   deletedAt  DateTime?           @map("deleted_at") @db.Timestamptz(6)
   createdAt  DateTime            @default(now()) @map("created_at") @db.Timestamptz(6)
