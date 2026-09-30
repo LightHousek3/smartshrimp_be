@@ -146,6 +146,13 @@ const messages = {
         CHANGE_CONFLICT: 'Vụ nuôi đã thay đổi. Vui lòng tải lại và thử lại',
     },
 
+    ASSIGNED_SEASON: {
+        LIST_FETCHED: 'Lấy danh sách vụ nuôi được phân công thành công',
+        FETCHED: 'Lấy chi tiết vụ nuôi được phân công thành công',
+        NOT_FOUND: 'Không tìm thấy vụ nuôi được phân công',
+        INVALID_CURSOR: 'Mốc phân trang vụ nuôi không hợp lệ',
+    },
+
     // Generic CRUD
     CRUD: {
         CREATED: (resource) => `Tạo ${resource} thành công`,
