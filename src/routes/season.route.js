@@ -10,6 +10,16 @@ router.use(authenticate, authorize(ACCOUNT_ROLE.FARM_OWNER));
 
 router.get('/', validate(seasonValidator.getSeasons), seasonController.getSeasons);
 router.post('/', validate(seasonValidator.createSeason), seasonController.createSeason);
+router.post(
+    '/:seasonId/personnel-assignments',
+    validate(seasonValidator.assignPersonnel),
+    seasonController.assignPersonnel,
+);
+router.post(
+    '/:seasonId/personnel-assignments/:role/replace',
+    validate(seasonValidator.replacePersonnel),
+    seasonController.replacePersonnel,
+);
 router.get('/:seasonId', validate(seasonValidator.getSeason), seasonController.getSeason);
 router.patch(
     '/:seasonId/activate',

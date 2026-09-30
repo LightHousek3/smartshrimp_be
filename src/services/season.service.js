@@ -15,6 +15,8 @@ const MAX_INITIAL_BIOMASS_KG = 99999999999.999;
 const MAX_INITIAL_DENSITY_PER_M2 = 9999999999.99;
 const CANCELLABLE_STATUSES = [SEASON_STATUS.PLANNING, SEASON_STATUS.ACTIVE];
 const API_TIMESTAMP_PRECISION_MS = 1;
+const ASSIGNABLE_STATUSES = [SEASON_STATUS.PLANNING, SEASON_STATUS.ACTIVE];
+const OPEN_TASK_STATUSES = ['PENDING', 'IN_PROGRESS'];
 
 const SEASON_BASE_SELECT = {
     id: true,
@@ -77,6 +79,22 @@ const SEASON_DETAIL_SELECT = {
                     status: true,
                 },
             },
+        },
+    },
+};
+
+const ASSIGNMENT_SELECT = {
+    id: true,
+    seasonId: true,
+    role: true,
+    assignedAt: true,
+    account: {
+        select: {
+            id: true,
+            email: true,
+            fullName: true,
+            phone: true,
+            status: true,
         },
     },
 };
@@ -466,6 +484,301 @@ const createSeason = async (seasonData, ownerId) => {
     }
 };
 
+const assignmentRoleLabel = (role) => (
+    role === PERSONNEL_ROLE.TECHNICIAN ? 'Kỹ thuật viên' : 'Chuyên gia thủy sản'
+);
+
+const requireEligiblePersonnel = async (client, accountId, role, ownerId) => {
+    const account = await client.account.findFirst({
+        where: {
+            id: accountId,
+            managedByOwnerId: ownerId,
+            role,
+            status: ACCOUNT_STATUS.ACTIVE,
+        },
+        select: { id: true },
+    });
+    if (!account) {
+        throw new ApiError(
+            httpStatus.NOT_FOUND,
+            messages.SEASON.ASSIGNMENT_PERSONNEL_NOT_ELIGIBLE,
+        );
+    }
+    return account;
+};
+
+const mapPersonnelAssignmentWriteError = (error, conflictMessage) => {
+    if (error instanceof ApiError) throw error;
+    if (error.code === 'P2002' || error.code === 'P2003' || error.code === 'P2034') {
+        throw new ApiError(httpStatus.CONFLICT, conflictMessage);
+    }
+    throw error;
+};
+
+const requireAssignableSeason = async (client, seasonId, ownerId) => {
+    const season = await findOwnedSeason(client, seasonId, ownerId, {
+        id: true,
+        name: true,
+        status: true,
+    });
+    if (!ASSIGNABLE_STATUSES.includes(season.status)) {
+        throw new ApiError(httpStatus.CONFLICT, messages.SEASON.ASSIGNMENT_NOT_ALLOWED);
+    }
+    return season;
+};
+
+const assignPersonnel = async (seasonId, { accountId, role }, ownerId) => {
+    try {
+        const result = await prisma.$transaction(async (transaction) => {
+            const season = await requireAssignableSeason(transaction, seasonId, ownerId);
+            await requireEligiblePersonnel(transaction, accountId, role, ownerId);
+
+            const currentAssignments = await transaction.seasonPersonnelAssignment.findMany({
+                where: {
+                    seasonId,
+                    unassignedAt: null,
+                    OR: [{ role }, { accountId }],
+                },
+                select: { role: true, accountId: true },
+            });
+            if (currentAssignments.some((assignment) => assignment.role === role)) {
+                throw new ApiError(
+                    httpStatus.CONFLICT,
+                    messages.SEASON.ASSIGNMENT_ROLE_OCCUPIED,
+                );
+            }
+            if (currentAssignments.some((assignment) => assignment.accountId === accountId)) {
+                throw new ApiError(
+                    httpStatus.CONFLICT,
+                    messages.SEASON.ASSIGNMENT_PERSONNEL_ALREADY_ASSIGNED,
+                );
+            }
+
+            const assignment = await transaction.seasonPersonnelAssignment.create({
+                data: {
+                    seasonId,
+                    role,
+                    accountId,
+                    assignedBy: ownerId,
+                },
+                select: ASSIGNMENT_SELECT,
+            });
+            const notification = await transaction.notification.create({
+                data: {
+                    accountId,
+                    title: 'Bạn được phân công vào vụ nuôi',
+                    content:
+                        `Bạn đã được phân công làm ${assignmentRoleLabel(role)} `
+                        + `cho vụ nuôi ${season.name}.`,
+                    type: NOTIFICATION_TYPE.SEASON_ASSIGNMENT_CREATED,
+                    referenceType: 'aquaculture_season',
+                    referenceId: seasonId,
+                },
+                select: { id: true },
+            });
+
+            return { assignment, notificationId: notification.id };
+        }, { isolationLevel: 'Serializable' });
+
+        emitNotification(accountId, 'notification:new', {
+            id: result.notificationId,
+            referenceId: seasonId,
+        });
+        return result.assignment;
+    } catch (error) {
+        return mapPersonnelAssignmentWriteError(
+            error,
+            messages.SEASON.ASSIGNMENT_CONFLICT,
+        );
+    }
+};
+
+const transferReplacementWork = async (
+    client,
+    { seasonId, role, previousAccountId, replacementAccountId, replacedAt },
+) => {
+    if (role === PERSONNEL_ROLE.TECHNICIAN) {
+        const result = await client.task.updateMany({
+            where: {
+                seasonId,
+                assignedTo: previousAccountId,
+                status: { in: OPEN_TASK_STATUSES },
+            },
+            data: {
+                assignedTo: replacementAccountId,
+                updatedAt: replacedAt,
+            },
+        });
+        return { transferredTaskCount: result.count, transferredDiseaseCaseCount: 0 };
+    }
+
+    const transferredDiseaseCaseCount = await client.$executeRawUnsafe(
+        `UPDATE disease_cases
+            SET expert_id = $1::uuid,
+                updated_at = $2
+          WHERE season_id = $3::uuid
+            AND expert_id = $4::uuid
+            AND status <> 'resolved'`,
+        replacementAccountId,
+        replacedAt,
+        seasonId,
+        previousAccountId,
+    );
+    return { transferredTaskCount: 0, transferredDiseaseCaseCount };
+};
+
+const replacePersonnel = async (
+    seasonId,
+    role,
+    { accountId, expectedAssignmentId, reason },
+    ownerId,
+) => {
+    try {
+        const result = await prisma.$transaction(async (transaction) => {
+            const season = await requireAssignableSeason(transaction, seasonId, ownerId);
+            const currentAssignment = await transaction.seasonPersonnelAssignment.findFirst({
+                where: {
+                    id: expectedAssignmentId,
+                    seasonId,
+                    role,
+                    unassignedAt: null,
+                },
+                select: { id: true, accountId: true },
+            });
+            if (!currentAssignment) {
+                throw new ApiError(
+                    httpStatus.CONFLICT,
+                    messages.SEASON.REPLACEMENT_CURRENT_ASSIGNMENT_CHANGED,
+                );
+            }
+            if (currentAssignment.accountId === accountId) {
+                throw new ApiError(
+                    httpStatus.CONFLICT,
+                    messages.SEASON.REPLACEMENT_SAME_PERSONNEL,
+                );
+            }
+
+            await requireEligiblePersonnel(transaction, accountId, role, ownerId);
+            const existingAssignment = await transaction.seasonPersonnelAssignment.findFirst({
+                where: { seasonId, accountId, unassignedAt: null },
+                select: { id: true },
+            });
+            if (existingAssignment) {
+                throw new ApiError(
+                    httpStatus.CONFLICT,
+                    messages.SEASON.ASSIGNMENT_PERSONNEL_ALREADY_ASSIGNED,
+                );
+            }
+
+            const replacedAt = new Date();
+            const closeResult = await transaction.seasonPersonnelAssignment.updateMany({
+                where: {
+                    id: currentAssignment.id,
+                    seasonId,
+                    role,
+                    unassignedAt: null,
+                    replacedByAssignmentId: null,
+                },
+                data: {
+                    unassignedAt: replacedAt,
+                    unassignedBy: ownerId,
+                    replacementReason: reason,
+                },
+            });
+            if (closeResult.count !== 1) {
+                throw new ApiError(
+                    httpStatus.CONFLICT,
+                    messages.SEASON.REPLACEMENT_CURRENT_ASSIGNMENT_CHANGED,
+                );
+            }
+
+            const assignment = await transaction.seasonPersonnelAssignment.create({
+                data: {
+                    seasonId,
+                    role,
+                    accountId,
+                    assignedBy: ownerId,
+                },
+                select: ASSIGNMENT_SELECT,
+            });
+            const linkResult = await transaction.seasonPersonnelAssignment.updateMany({
+                where: {
+                    id: currentAssignment.id,
+                    replacedByAssignmentId: null,
+                },
+                data: { replacedByAssignmentId: assignment.id },
+            });
+            if (linkResult.count !== 1) {
+                throw new ApiError(httpStatus.CONFLICT, messages.SEASON.REPLACEMENT_CONFLICT);
+            }
+
+            const transferResult = await transferReplacementWork(transaction, {
+                seasonId,
+                role,
+                previousAccountId: currentAssignment.accountId,
+                replacementAccountId: accountId,
+                replacedAt,
+            });
+            await transaction.notification.createMany({
+                data: [
+                    {
+                        accountId: currentAssignment.accountId,
+                        title: 'Phân công vụ nuôi đã được thay đổi',
+                        content:
+                            `Bạn không còn phụ trách vai trò ${assignmentRoleLabel(role)} `
+                            + `cho vụ nuôi ${season.name}. Lý do: ${reason}`,
+                        type: NOTIFICATION_TYPE.SEASON_ASSIGNMENT_REPLACED,
+                        referenceType: 'aquaculture_season',
+                        referenceId: seasonId,
+                    },
+                    {
+                        accountId,
+                        title: 'Bạn được phân công thay thế nhân sự',
+                        content:
+                            `Bạn đã được phân công làm ${assignmentRoleLabel(role)} `
+                            + `cho vụ nuôi ${season.name}.`,
+                        type: NOTIFICATION_TYPE.SEASON_ASSIGNMENT_REPLACED,
+                        referenceType: 'aquaculture_season',
+                        referenceId: seasonId,
+                    },
+                ],
+            });
+
+            return {
+                assignment,
+                replacedAssignment: {
+                    id: currentAssignment.id,
+                    role,
+                    accountId: currentAssignment.accountId,
+                    unassignedAt: replacedAt,
+                    unassignedBy: ownerId,
+                    replacementReason: reason,
+                    replacedByAssignmentId: assignment.id,
+                },
+                ...transferResult,
+                notificationAccountIds: [currentAssignment.accountId, accountId],
+            };
+        }, { isolationLevel: 'Serializable' });
+
+        result.notificationAccountIds.forEach((notificationAccountId) => {
+            emitNotification(notificationAccountId, 'notification:new', {
+                referenceId: seasonId,
+            });
+        });
+        return {
+            assignment: result.assignment,
+            replacedAssignment: result.replacedAssignment,
+            transferredTaskCount: result.transferredTaskCount,
+            transferredDiseaseCaseCount: result.transferredDiseaseCaseCount,
+        };
+    } catch (error) {
+        return mapPersonnelAssignmentWriteError(
+            error,
+            messages.SEASON.REPLACEMENT_CONFLICT,
+        );
+    }
+};
+
 const buildUpdateData = (seasonData, current) => {
     const data = {};
     for (const key of ['name', 'shrimpType']) {
@@ -723,6 +1036,8 @@ module.exports = {
     getSeasons,
     getSeason,
     createSeason,
+    assignPersonnel,
+    replacePersonnel,
     updateSeason,
     activateSeason,
     cancelSeason,

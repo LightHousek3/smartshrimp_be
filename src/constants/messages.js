@@ -108,6 +108,8 @@ const messages = {
         LIST_FETCHED: 'Lấy danh sách vụ nuôi thành công',
         FETCHED: 'Lấy chi tiết vụ nuôi thành công',
         CREATED: 'Tạo vụ nuôi thành công',
+        PERSONNEL_ASSIGNED: 'Phân công nhân sự vào vụ nuôi thành công',
+        PERSONNEL_REPLACED: 'Thay nhân sự phụ trách vụ nuôi thành công',
         UPDATED: 'Cập nhật vụ nuôi thành công',
         ACTIVATED: 'Kích hoạt vụ nuôi thành công',
         CANCELLED: 'Hủy vụ nuôi thành công',
@@ -125,6 +127,22 @@ const messages = {
         ACTIVATION_REQUIRES_PLANNING: 'Chỉ có thể kích hoạt vụ nuôi đang lập kế hoạch',
         ACTIVATION_CONDITIONS_NOT_MET: 'Vụ nuôi chưa đáp ứng đủ điều kiện kích hoạt',
         CANCELLATION_NOT_ALLOWED: 'Chỉ có thể hủy vụ nuôi đang lập kế hoạch hoặc đang hoạt động',
+        ASSIGNMENT_NOT_ALLOWED:
+            'Chỉ có thể phân công nhân sự cho vụ nuôi đang lập kế hoạch hoặc đang hoạt động',
+        ASSIGNMENT_PERSONNEL_NOT_ELIGIBLE:
+            'Không tìm thấy nhân sự đang hoạt động, đúng vai trò và thuộc quyền quản lý của bạn',
+        ASSIGNMENT_ROLE_OCCUPIED:
+            'Vai trò này đã có nhân sự phụ trách. Vui lòng sử dụng chức năng thay nhân sự',
+        ASSIGNMENT_PERSONNEL_ALREADY_ASSIGNED:
+            'Nhân sự này đã được phân công vào vụ nuôi',
+        ASSIGNMENT_CONFLICT:
+            'Phân công nhân sự đã thay đổi. Vui lòng tải lại và thử lại',
+        REPLACEMENT_CURRENT_ASSIGNMENT_CHANGED:
+            'Nhân sự phụ trách hiện tại đã thay đổi. Vui lòng tải lại và thử lại',
+        REPLACEMENT_SAME_PERSONNEL:
+            'Nhân sự thay thế phải khác nhân sự đang phụ trách',
+        REPLACEMENT_CONFLICT:
+            'Việc thay nhân sự bị xung đột. Vui lòng tải lại và thử lại',
         CHANGE_CONFLICT: 'Vụ nuôi đã thay đổi. Vui lòng tải lại và thử lại',
     },
 

@@ -21,6 +21,31 @@ const createSeason = asyncHandler(async (req, res) => {
     ResponseHandler.created(res, { message: messages.SEASON.CREATED, data: season });
 });
 
+const assignPersonnel = asyncHandler(async (req, res) => {
+    const assignment = await seasonService.assignPersonnel(
+        req.params.seasonId,
+        req.body,
+        req.account.id,
+    );
+    ResponseHandler.created(res, {
+        message: messages.SEASON.PERSONNEL_ASSIGNED,
+        data: assignment,
+    });
+});
+
+const replacePersonnel = asyncHandler(async (req, res) => {
+    const result = await seasonService.replacePersonnel(
+        req.params.seasonId,
+        req.params.role,
+        req.body,
+        req.account.id,
+    );
+    ResponseHandler.success(res, {
+        message: messages.SEASON.PERSONNEL_REPLACED,
+        data: result,
+    });
+});
+
 const updateSeason = asyncHandler(async (req, res) => {
     const season = await seasonService.updateSeason(
         req.params.seasonId,
@@ -52,6 +77,8 @@ module.exports = {
     getSeasons,
     getSeason,
     createSeason,
+    assignPersonnel,
+    replacePersonnel,
     updateSeason,
     activateSeason,
     cancelSeason,

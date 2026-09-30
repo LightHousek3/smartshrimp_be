@@ -5,6 +5,33 @@ const { httpStatus, messages, ACCOUNT_ROLE } = require('../constants');
 const STAFF_ROLES = [ACCOUNT_ROLE.TECHNICIAN, ACCOUNT_ROLE.EXPERT];
 const OPEN_SEASON_STATUSES = ['PLANNING', 'ACTIVE'];
 
+const KPI_CONFIG_BY_ROLE = Object.freeze({
+    [ACCOUNT_ROLE.TECHNICIAN]: {
+        delegate: 'technicianKpi',
+        idField: 'technicianId',
+        normalize: (kpi) => ({
+            seasonsParticipated: Number(kpi?.seasonsParticipated ?? 0),
+            completedTasks: Number(kpi?.completedTasks ?? 0),
+            onTimeCompletedTasks: Number(kpi?.onTimeCompletedTasks ?? 0),
+            onTimeCompletionRatePct:
+                kpi?.onTimeCompletionRatePct == null
+                    ? null
+                    : Number(kpi.onTimeCompletionRatePct),
+        }),
+    },
+    [ACCOUNT_ROLE.EXPERT]: {
+        delegate: 'expertKpi',
+        idField: 'expertId',
+        normalize: (kpi) => ({
+            seasonsParticipated: Number(kpi?.seasonsParticipated ?? 0),
+            diseaseCasesHandled: Number(kpi?.diseaseCasesHandled ?? 0),
+            diseaseCasesResolved: Number(kpi?.diseaseCasesResolved ?? 0),
+            avgResolutionHours:
+                kpi?.avgResolutionHours == null ? null : Number(kpi.avgResolutionHours),
+        }),
+    },
+});
+
 const PERSONNEL_SELECT = {
     id: true,
     email: true,
@@ -79,6 +106,72 @@ const attachAssignmentCounts = async (accounts) => {
     }));
 };
 
+const assignmentSummary = ({ season, ...assignment }) => ({
+    ...assignment,
+    seasonId: season.id,
+    seasonName: season.name,
+    farmId: season.pond.farm.id,
+    farmName: season.pond.farm.name,
+    pondId: season.pond.id,
+    pondName: season.pond.name,
+});
+
+const getPersonnelDetails = async (account, ownerId) => {
+    const kpiConfig = KPI_CONFIG_BY_ROLE[account.role];
+    const [assignments, kpi] = await Promise.all([
+        prisma.seasonPersonnelAssignment.findMany({
+            where: {
+                accountId: account.id,
+                role: account.role,
+                season: { pond: { farm: { ownerId } } },
+            },
+            select: {
+                id: true,
+                role: true,
+                assignedAt: true,
+                unassignedAt: true,
+                replacementReason: true,
+                season: {
+                    select: {
+                        id: true,
+                        name: true,
+                        status: true,
+                        pond: {
+                            select: {
+                                id: true,
+                                name: true,
+                                farm: { select: { id: true, name: true } },
+                            },
+                        },
+                    },
+                },
+            },
+            orderBy: [{ assignedAt: 'desc' }, { id: 'desc' }],
+        }),
+        prisma[kpiConfig.delegate].findUnique({
+            where: { [kpiConfig.idField]: account.id },
+        }),
+    ]);
+
+    const currentAssignments = assignments.filter(
+        (assignment) =>
+            assignment.unassignedAt == null
+            && OPEN_SEASON_STATUSES.includes(assignment.season.status),
+    );
+    const assignmentHistory = assignments.filter(
+        (assignment) => assignment.unassignedAt != null,
+    );
+
+    return {
+        ...account,
+        currentSeasonAssignments:
+            new Set(currentAssignments.map((assignment) => assignment.season.id)).size,
+        kpi: kpiConfig.normalize(kpi),
+        currentAssignments: currentAssignments.map(assignmentSummary),
+        assignmentHistory: assignmentHistory.map(assignmentSummary),
+    };
+};
+
 const getListPersonnel = async (ownerId, {
     cursor,
     limit = 20,
@@ -135,8 +228,7 @@ const getPersonnelById = async (ownerId, personnelId) => {
     if (!account) {
         throw new ApiError(httpStatus.NOT_FOUND, messages.PERSONNEL.NOT_FOUND);
     }
-    const [personnel] = await attachAssignmentCounts([account]);
-    return personnel;
+    return getPersonnelDetails(account, ownerId);
 };
 
 module.exports = { getListPersonnel, getPersonnelById };
