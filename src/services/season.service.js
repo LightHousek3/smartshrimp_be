@@ -11,7 +11,6 @@ const {
     SEASON_STATUS,
 } = require('../constants');
 
-const MAX_INITIAL_BIOMASS_KG = 99999999999.999;
 const MAX_INITIAL_DENSITY_PER_M2 = 9999999999.99;
 const CANCELLABLE_STATUSES = [SEASON_STATUS.PLANNING, SEASON_STATUS.ACTIVE];
 const API_TIMESTAMP_PRECISION_MS = 1;
@@ -27,8 +26,6 @@ const SEASON_BASE_SELECT = {
     expectedEndDate: true,
     actualEndDate: true,
     initialQuantity: true,
-    initialAvgWeightG: true,
-    initialBiomassKg: true,
     initialDensityPerM2: true,
     status: true,
     cancellationReason: true,
@@ -149,10 +146,6 @@ const normalizeSeasonBase = (season) => ({
     expectedEndDate: toDateOnly(season.expectedEndDate),
     actualEndDate: toDateOnly(season.actualEndDate),
     initialQuantity: season.initialQuantity == null ? null : season.initialQuantity.toString(),
-    initialAvgWeightG:
-        season.initialAvgWeightG == null ? null : Number(season.initialAvgWeightG),
-    initialBiomassKg:
-        season.initialBiomassKg == null ? null : Number(season.initialBiomassKg),
     initialDensityPerM2:
         season.initialDensityPerM2 == null ? null : Number(season.initialDensityPerM2),
     dayOfCulture:
@@ -197,8 +190,6 @@ const buildActivationEligibility = (season) => {
     if (season.pond.type !== 'AQUACULTURE') missingConditions.push('POND_NOT_AQUACULTURE');
     if (!season.stockingDate) missingConditions.push('STOCKING_DATE_REQUIRED');
     if (season.initialQuantity == null) missingConditions.push('INITIAL_QUANTITY_REQUIRED');
-    if (season.initialAvgWeightG == null) missingConditions.push('INITIAL_AVG_WEIGHT_REQUIRED');
-    if (season.initialBiomassKg == null) missingConditions.push('INITIAL_BIOMASS_REQUIRED');
     if (season.initialDensityPerM2 == null) missingConditions.push('INITIAL_DENSITY_REQUIRED');
     if (activeTechnicians.length !== 1) missingConditions.push('ACTIVE_TECHNICIAN_REQUIRED');
     if (activeExperts.length !== 1) missingConditions.push('ACTIVE_EXPERT_REQUIRED');
@@ -354,28 +345,14 @@ const getSeason = async (seasonId, ownerId) => {
     return normalizeSeasonDetail(season);
 };
 
-const calculateInitialMetrics = (initialQuantity, initialAvgWeightG, areaM2) => {
-    if (initialQuantity == null || initialAvgWeightG == null) {
-        return { initialBiomassKg: null, initialDensityPerM2: null };
-    }
+const calculateInitialDensity = (initialQuantity, areaM2) => {
+    if (initialQuantity == null || areaM2 == null) return null;
 
-    const initialBiomassKg = Math.round(
-        (Number(initialQuantity) * Number(initialAvgWeightG) / 1000) * 1000,
-    ) / 1000;
-    const initialDensityPerM2 = areaM2 == null
-        ? null
-        : Math.round((Number(initialQuantity) / Number(areaM2)) * 100) / 100;
-
-    if (
-        initialBiomassKg <= 0
-        || initialBiomassKg > MAX_INITIAL_BIOMASS_KG
-        || (initialDensityPerM2 != null && initialDensityPerM2 <= 0)
-        || initialDensityPerM2 > MAX_INITIAL_DENSITY_PER_M2
-    ) {
+    const density = Math.round((Number(initialQuantity) / Number(areaM2)) * 100) / 100;
+    if (density <= 0 || density > MAX_INITIAL_DENSITY_PER_M2) {
         throw new ApiError(httpStatus.BAD_REQUEST, messages.SEASON.DERIVED_VALUE_OUT_OF_RANGE);
     }
-
-    return { initialBiomassKg, initialDensityPerM2 };
+    return density;
 };
 
 const assertDateRange = (stockingDate, expectedEndDate) => {
@@ -388,12 +365,6 @@ const buildCreateData = (seasonData, ownerId, areaM2) => {
     const stockingDate = parseDateOnly(seasonData.stockingDate);
     const expectedEndDate = parseDateOnly(seasonData.expectedEndDate);
     assertDateRange(stockingDate, expectedEndDate);
-    const metrics = calculateInitialMetrics(
-        seasonData.initialQuantity,
-        seasonData.initialAvgWeightG,
-        areaM2,
-    );
-
     return {
         pondId: seasonData.pondId,
         name: seasonData.name,
@@ -402,8 +373,7 @@ const buildCreateData = (seasonData, ownerId, areaM2) => {
         expectedEndDate,
         initialQuantity:
             seasonData.initialQuantity == null ? null : BigInt(seasonData.initialQuantity),
-        initialAvgWeightG: seasonData.initialAvgWeightG ?? null,
-        ...metrics,
+        initialDensityPerM2: calculateInitialDensity(seasonData.initialQuantity, areaM2),
         status: SEASON_STATUS.PLANNING,
         createdBy: ownerId,
     };
@@ -795,10 +765,6 @@ const buildUpdateData = (seasonData, current) => {
             ? null
             : BigInt(seasonData.initialQuantity);
     }
-    if (Object.hasOwn(seasonData, 'initialAvgWeightG')) {
-        data.initialAvgWeightG = seasonData.initialAvgWeightG;
-    }
-
     const nextStockingDate = Object.hasOwn(data, 'stockingDate')
         ? data.stockingDate
         : current.stockingDate;
@@ -807,17 +773,11 @@ const buildUpdateData = (seasonData, current) => {
         : current.expectedEndDate;
     assertDateRange(nextStockingDate, nextExpectedEndDate);
 
-    if (
-        Object.hasOwn(seasonData, 'initialQuantity')
-        || Object.hasOwn(seasonData, 'initialAvgWeightG')
-    ) {
-        const nextQuantity = Object.hasOwn(data, 'initialQuantity')
-            ? data.initialQuantity
-            : current.initialQuantity;
-        const nextWeight = Object.hasOwn(data, 'initialAvgWeightG')
-            ? data.initialAvgWeightG
-            : current.initialAvgWeightG;
-        Object.assign(data, calculateInitialMetrics(nextQuantity, nextWeight, current.pond.areaM2));
+    if (Object.hasOwn(seasonData, 'initialQuantity')) {
+        data.initialDensityPerM2 = calculateInitialDensity(
+            data.initialQuantity,
+            current.pond.areaM2,
+        );
     }
 
     return data;
