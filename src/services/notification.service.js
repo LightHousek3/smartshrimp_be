@@ -1,6 +1,6 @@
 const prisma = require('../config/prisma');
 const { ApiError } = require('../utils');
-const { httpStatus, messages } = require('../constants');
+const { httpStatus, messages, NOTIFICATION_TYPE } = require('../constants');
 const { emitNotification } = require('../realtime/notification.socket');
 
 const NOTIFICATION_LIST_SELECT = {
@@ -11,6 +11,7 @@ const NOTIFICATION_LIST_SELECT = {
     referenceId: true,
     readAt: true,
     createdAt: true,
+    content: true,
 };
 
 const NOTIFICATION_SELECT = {
@@ -18,10 +19,16 @@ const NOTIFICATION_SELECT = {
     content: true,
 };
 
+const WARNING_NOTIFICATION_TYPES = [
+    NOTIFICATION_TYPE.WATER_THRESHOLD_EXCEEDED,
+    NOTIFICATION_TYPE.SCHEDULE_GENERATION_FAILED,
+];
+
 const getListNotification = async (accountId, {
     cursor,
     limit = 20,
     readStatus = 'all',
+    category,
     type,
     createdFrom,
     createdTo,
@@ -30,6 +37,8 @@ const getListNotification = async (accountId, {
         accountId,
         ...(readStatus === 'unread' && { readAt: null }),
         ...(readStatus === 'read' && { readAt: { not: null } }),
+        ...(category === 'action' && { referenceId: { not: null } }),
+        ...(category === 'warning' && { type: { in: WARNING_NOTIFICATION_TYPES } }),
         ...(type && { type }),
         ...((createdFrom || createdTo) && {
             createdAt: {
