@@ -1,6 +1,7 @@
 const prisma = require('../config/prisma');
 const { ApiError } = require('../utils');
 const { httpStatus, messages, ACCOUNT_ROLE } = require('../constants');
+const { dataAccess } = require('../plugins');
 
 const STAFF_ROLES = [ACCOUNT_ROLE.TECHNICIAN, ACCOUNT_ROLE.EXPERT];
 const OPEN_SEASON_STATUSES = ['PLANNING', 'ACTIVE'];
@@ -123,7 +124,11 @@ const getPersonnelDetails = async (account, ownerId) => {
             where: {
                 accountId: account.id,
                 role: account.role,
-                season: { pond: { farm: { ownerId } } },
+                season: {
+                    pond: dataAccess.notDeleted({
+                        farm: dataAccess.notDeleted({ ownerId }),
+                    }),
+                },
             },
             select: {
                 id: true,
