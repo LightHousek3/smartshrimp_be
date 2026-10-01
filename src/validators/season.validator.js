@@ -3,8 +3,6 @@ const Joi = require('joi');
 const uuid = Joi.string().uuid({ version: 'uuidv4' });
 const normalizeWhitespace = (value) => value.trim().replace(/\s+/gu, ' ');
 const name = Joi.string().custom(normalizeWhitespace).min(1).max(255);
-const positiveDecimal = (max, precision) =>
-    Joi.number().positive().max(max).precision(precision).strict();
 
 const SHRIMP_TYPES = ['WHITELEG', 'BLACK_TIGER'];
 const SEASON_STATUSES = ['PLANNING', 'ACTIVE', 'COMPLETED', 'CANCELLED'];
@@ -15,7 +13,6 @@ const EDITABLE_FIELDS = [
     'stockingDate',
     'expectedEndDate',
     'initialQuantity',
-    'initialAvgWeightG',
 ];
 
 const dateOnly = Joi.string()
@@ -38,7 +35,6 @@ const seasonFields = {
     stockingDate: dateOnly.allow(null),
     expectedEndDate: dateOnly.allow(null),
     initialQuantity: Joi.number().integer().positive().max(Number.MAX_SAFE_INTEGER).strict().allow(null),
-    initialAvgWeightG: positiveDecimal(9999999.999, 3).allow(null),
 };
 
 const validateDateRange = (value, helpers) => {

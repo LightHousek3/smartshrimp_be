@@ -282,8 +282,6 @@ model AquacultureSeason {
   expectedEndDate      DateTime?                   @map("expected_end_date") @db.Date
   actualEndDate        DateTime?                   @map("actual_end_date") @db.Date
   initialQuantity      BigInt?                     @map("initial_quantity") @db.BigInt
-  initialAvgWeightG    Decimal?                    @map("initial_avg_weight_g") @db.Decimal(10, 3)
-  initialBiomassKg     Decimal?                    @map("initial_biomass_kg") @db.Decimal(14, 3)
   initialDensityPerM2  Decimal?                    @map("initial_density_per_m2") @db.Decimal(12, 2)
   status               SeasonStatus                @default(PLANNING)
   cancellationReason   String?                     @map("cancellation_reason")
