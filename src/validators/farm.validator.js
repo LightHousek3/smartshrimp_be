@@ -33,12 +33,12 @@ const createFarm = {
     body: Joi.object().keys({
         ...farmFields,
         name: farmFields.name.required(),
-    }),
+    }).and('latitude', 'longitude'),
 };
 
 const updateFarm = {
     params: getFarm.params,
-    body: Joi.object().keys(farmFields).min(1),
+    body: Joi.object().keys(farmFields).and('latitude', 'longitude').min(1),
 };
 
 module.exports = {
