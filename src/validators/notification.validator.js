@@ -12,6 +12,7 @@ const getListNotification = {
             cursor: notificationId,
             limit: Joi.number().integer().min(1).max(100).default(20),
             readStatus: Joi.string().valid('all', 'read', 'unread').default('all'),
+            category: Joi.string().valid('action', 'warning'),
             type: Joi.string().valid(...Object.values(NOTIFICATION_TYPE)),
             createdFrom: Joi.date().iso(),
             createdTo: Joi.date().iso(),
