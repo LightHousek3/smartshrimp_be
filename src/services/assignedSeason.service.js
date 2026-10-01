@@ -49,7 +49,7 @@ const listSelect = {
     season: {
         select: {
             id: true, name: true, status: true, shrimpType: true,
-            stockingDate: true, expectedEndDate: true, initialBiomassKg: true,
+            stockingDate: true, expectedEndDate: true,
             pond: { select: {
                 id: true, name: true, status: true,
                 farm: { select: { id: true, name: true } },
@@ -62,8 +62,6 @@ const normalizeListItem = (assignment) => ({
     ...assignment.season,
     stockingDate: assignment.season.stockingDate?.toISOString().slice(0, 10) ?? null,
     expectedEndDate: assignment.season.expectedEndDate?.toISOString().slice(0, 10) ?? null,
-    initialBiomassKg: assignment.season.initialBiomassKg == null
-        ? null : Number(assignment.season.initialBiomassKg),
     pond: {
         id: assignment.season.pond.id,
         name: assignment.season.pond.name,
@@ -128,7 +126,7 @@ const getAssignedSeason = async (accountId, seasonId) => {
             season: { select: {
                 id: true, name: true, status: true, shrimpType: true,
                 stockingDate: true, expectedEndDate: true, initialQuantity: true,
-                initialAvgWeightG: true, initialBiomassKg: true, initialDensityPerM2: true,
+                initialDensityPerM2: true,
                 pond: { select: {
                     id: true, name: true, type: true, status: true,
                     areaM2: true, depthM: true, volumeM3: true,
@@ -142,11 +140,22 @@ const getAssignedSeason = async (accountId, seasonId) => {
                     },
                     orderBy: [{ role: 'asc' }, { assignedAt: 'desc' }],
                 },
+                healthLogs: {
+                    where: { isVoided: false },
+                    select: { estimatedBiomassKg: true },
+                    orderBy: [{ recordedAt: 'desc' }, { id: 'desc' }],
+                    take: 1,
+                },
             } },
         },
     });
     if (!assignment) throw ApiError.notFound(messages.ASSIGNED_SEASON.NOT_FOUND);
-    const { pond, personnelAssignments, ...season } = assignment.season;
+    const {
+        pond,
+        personnelAssignments,
+        healthLogs,
+        ...season
+    } = assignment.season;
     const otherAssignments = await prisma.seasonPersonnelAssignment.findMany({
         where: {
             accountId,
@@ -183,9 +192,8 @@ const getAssignedSeason = async (accountId, seasonId) => {
         stockingDate: season.stockingDate?.toISOString().slice(0, 10) ?? null,
         expectedEndDate: season.expectedEndDate?.toISOString().slice(0, 10) ?? null,
         initialQuantity: season.initialQuantity == null ? null : Number(season.initialQuantity),
-        initialAvgWeightG: number(season.initialAvgWeightG),
-        initialBiomassKg: number(season.initialBiomassKg),
         initialDensityPerM2: number(season.initialDensityPerM2),
+        currentBiomassKg: number(healthLogs[0]?.estimatedBiomassKg),
         pond: {
             id: pond.id, name: pond.name, type: pond.type, status: pond.status,
             areaM2: number(pond.areaM2), depthM: number(pond.depthM), volumeM3: number(pond.volumeM3),

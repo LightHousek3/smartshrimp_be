@@ -71,6 +71,15 @@ enum ShrimpType {
   @@map("shrimp_type")
 }
 
+enum HealthStatus {
+  EXCELLENT @map("excellent")
+  GOOD      @map("good")
+  WARNING   @map("warning")
+  CRITICAL  @map("critical")
+
+  @@map("health_status")
+}
+
 enum ProductCategory {
   FEED     @map("feed")
   MEDICINE @map("medicine")
@@ -290,9 +299,23 @@ model AquacultureSeason {
   updatedAt            DateTime                    @default(now()) @map("updated_at") @db.Timestamptz(6)
   pond                 Pond                        @relation(fields: [pondId], references: [id], onDelete: Restrict)
   personnelAssignments SeasonPersonnelAssignment[]
+  healthLogs            ShrimpHealthLog[]
 
   @@index([pondId, status], map: "idx_seasons_pond_status")
   @@map("aquaculture_seasons")
+}
+
+model ShrimpHealthLog {
+  id                 String            @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  seasonId           String            @map("season_id") @db.Uuid
+  recordedAt         DateTime          @map("recorded_at") @db.Timestamptz(6)
+  estimatedBiomassKg Decimal?          @map("estimated_biomass_kg") @db.Decimal(14, 3)
+  healthStatus       HealthStatus      @default(GOOD) @map("health_status")
+  isVoided           Boolean           @default(false) @map("is_voided")
+  season             AquacultureSeason @relation(fields: [seasonId], references: [id], onDelete: Restrict)
+
+  @@index([seasonId, recordedAt(sort: Desc)], map: "idx_shrimp_health_season_date")
+  @@map("shrimp_health_logs")
 }
 
 model Product {

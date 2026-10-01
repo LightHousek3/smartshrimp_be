@@ -101,6 +101,7 @@ const messages = {
         HAS_OPEN_SEASON: 'Không thể xóa ao đang có vụ nuôi lập kế hoạch hoặc hoạt động',
         OPEN_SEASON_RESTRICTS_UPDATE: 'Vụ nuôi đang mở không cho phép thay đổi loại ao, ngừng hoạt động hoặc thay đổi thể tích',
         VOLUME_OUT_OF_RANGE: 'Thể tích tính từ diện tích và độ sâu vượt quá giới hạn cho phép',
+        VOLUME_EXCEEDS_CAPACITY: 'Thể tích không được vượt quá diện tích nhân với độ sâu của ao',
         CHANGE_CONFLICT: 'Trạng thái ao đã thay đổi. Vui lòng tải lại và thử lại',
     },
 
@@ -123,7 +124,7 @@ const messages = {
         OPEN_SEASON_EXISTS: 'Ao đã có một vụ nuôi đang lập kế hoạch hoặc hoạt động',
         PLANNING_UPDATE_ONLY: 'Chỉ có thể cập nhật vụ nuôi ở trạng thái lập kế hoạch',
         INVALID_DATE_RANGE: 'Ngày dự kiến kết thúc phải từ ngày thả giống trở đi',
-        DERIVED_VALUE_OUT_OF_RANGE: 'Sinh khối hoặc mật độ ban đầu vượt quá giới hạn cho phép',
+        DERIVED_VALUE_OUT_OF_RANGE: 'Mật độ ban đầu vượt quá giới hạn cho phép',
         ACTIVATION_REQUIRES_PLANNING: 'Chỉ có thể kích hoạt vụ nuôi đang lập kế hoạch',
         ACTIVATION_CONDITIONS_NOT_MET: 'Vụ nuôi chưa đáp ứng đủ điều kiện kích hoạt',
         CANCELLATION_NOT_ALLOWED: 'Chỉ có thể hủy vụ nuôi đang lập kế hoạch hoặc đang hoạt động',

@@ -18,6 +18,7 @@ const pondFields = {
     name,
     areaM2: positiveDecimal(9999999999.99),
     depthM: positiveDecimal(9999.99),
+    volumeM3: positiveDecimal(999999999999.99),
     type: Joi.string().valid(...POND_TYPES),
     status: Joi.string().valid(...POND_STATUSES),
 };

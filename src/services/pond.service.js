@@ -17,6 +17,16 @@ const calculateVolumeM3 = (areaM2, depthM) => {
     return volumeM3;
 };
 
+const resolveVolumeM3 = (areaM2, depthM, suppliedVolumeM3) => {
+    const calculatedVolumeM3 = calculateVolumeM3(areaM2, depthM);
+    if (suppliedVolumeM3 === undefined) return calculatedVolumeM3;
+    const volumeM3 = Number(suppliedVolumeM3);
+    if (volumeM3 > calculatedVolumeM3) {
+        throw new ApiError(httpStatus.BAD_REQUEST, messages.POND.VOLUME_EXCEEDS_CAPACITY);
+    }
+    return volumeM3;
+};
+
 const POND_SELECT = {
     id: true,
     farmId: true,
@@ -144,7 +154,11 @@ const createPond = async (farmId, pondData, ownerId) => {
                 data: {
                     ...pondData,
                     farmId,
-                    volumeM3: calculateVolumeM3(pondData.areaM2, pondData.depthM),
+                    volumeM3: resolveVolumeM3(
+                        pondData.areaM2,
+                        pondData.depthM,
+                        pondData.volumeM3,
+                    ),
                 },
                 select: POND_SELECT,
             });
@@ -179,12 +193,17 @@ const updatePond = async (farmId, pondId, pondData, ownerId) => {
             const nextDepthM = Object.hasOwn(pondData, 'depthM')
                 ? pondData.depthM
                 : current.depthM;
-            const recalculatesVolume = Object.hasOwn(pondData, 'areaM2')
-                || Object.hasOwn(pondData, 'depthM');
+            const resolvesVolume = Object.hasOwn(pondData, 'areaM2')
+                || Object.hasOwn(pondData, 'depthM')
+                || Object.hasOwn(pondData, 'volumeM3');
             const updateData = {
                 ...pondData,
-                ...(recalculatesVolume && {
-                    volumeM3: calculateVolumeM3(nextAreaM2, nextDepthM),
+                ...(resolvesVolume && {
+                    volumeM3: resolveVolumeM3(
+                        nextAreaM2,
+                        nextDepthM,
+                        pondData.volumeM3,
+                    ),
                 }),
             };
             const hasOpenSeason = current.seasons.length > 0;
@@ -192,7 +211,7 @@ const updatePond = async (farmId, pondId, pondData, ownerId) => {
                 && pondData.type !== current.type;
             const changesToInactive = pondData.status === 'INACTIVE'
                 && current.status !== 'INACTIVE';
-            const changesVolume = recalculatesVolume
+            const changesVolume = resolvesVolume
                 && Number(updateData.volumeM3) !== Number(current.volumeM3);
             if (hasOpenSeason && (changesProtectedType || changesToInactive || changesVolume)) {
                 throw new ApiError(httpStatus.CONFLICT, messages.POND.OPEN_SEASON_RESTRICTS_UPDATE);
