@@ -145,7 +145,14 @@ test('returns technician detail with KPI, current assignments, and history', asy
             where: {
                 accountId: staffId,
                 role: 'TECHNICIAN',
-                season: { pond: { farm: { ownerId } } },
+                season: {
+                    pond: {
+                        AND: [
+                            { isDeleted: false },
+                            { farm: { AND: [{ isDeleted: false }, { ownerId }] } },
+                        ],
+                    },
+                },
             },
         }),
     );
@@ -197,3 +204,31 @@ test('returns zeroed expert KPI when no projection exists', async () => {
     expect(result.currentAssignments).toEqual([]);
     expect(result.assignmentHistory).toEqual([]);
 });
+
+test.each(['TECHNICIAN', 'EXPERT'])(
+    'filters deleted ponds and farms from %s assignment queries',
+    async (role) => {
+        prisma.account.findFirst.mockResolvedValue({ ...staff, role });
+
+        const result = await personnelService.getPersonnelById(ownerId, staffId);
+
+        expect(prisma.seasonPersonnelAssignment.findMany).toHaveBeenCalledWith(
+            expect.objectContaining({
+                where: {
+                    accountId: staffId,
+                    role,
+                    season: {
+                        pond: {
+                            AND: [
+                                { isDeleted: false },
+                                { farm: { AND: [{ isDeleted: false }, { ownerId }] } },
+                            ],
+                        },
+                    },
+                },
+            }),
+        );
+        expect(result.currentAssignments).toEqual([]);
+        expect(result.assignmentHistory).toEqual([]);
+    },
+);

@@ -5,6 +5,7 @@ const config = require('../config');
 const logger = require('../config/logger');
 const emailService = require('./email.service');
 const tokenService = require('./token.service');
+const { emitNotification } = require('../realtime/notification.socket');
 const { ApiError } = require('../utils');
 const {
     httpStatus,
@@ -12,6 +13,7 @@ const {
     ACCOUNT_ROLE,
     ACCOUNT_STATUS,
     VERIFICATION_PURPOSE,
+    NOTIFICATION_TYPE,
 } = require('../constants');
 
 const ELIGIBLE_ROLES = [
@@ -333,7 +335,7 @@ const activateAccount = async ({ actionToken, fullName, phone, password }) => {
     const passwordHash = await bcrypt.hash(password, config.security.bcryptSaltRounds);
     const now = new Date();
 
-    await prisma.$transaction(async (transaction) => {
+    const notification = await prisma.$transaction(async (transaction) => {
         await consumeActionChallenge(transaction, challenge.id, now);
         const updateResult = await transaction.account.updateMany({
             where: {
@@ -355,7 +357,29 @@ const activateAccount = async ({ actionToken, fullName, phone, password }) => {
         if (updateResult.count !== 1) {
             throw new ApiError(httpStatus.CONFLICT, messages.AUTH.ACCOUNT_ALREADY_ACTIVATED);
         }
+
+        const account = challenge.account;
+        if (account.managedByOwnerId
+            && [ACCOUNT_ROLE.TECHNICIAN, ACCOUNT_ROLE.EXPERT].includes(account.role)) {
+            return transaction.notification.create({
+                data: {
+                    accountId: account.managedByOwnerId,
+                    title: 'Nhân sự đã kích hoạt tài khoản',
+                    content: `${fullName} đã kích hoạt tài khoản và có thể được phân công vào vụ nuôi.`,
+                    type: NOTIFICATION_TYPE.MANAGED_ACCOUNT_ACTIVATED,
+                    referenceType: 'account',
+                    referenceId: challenge.accountId,
+                },
+                select: { id: true },
+            });
+        }
+        return null;
     });
+    if (notification) {
+        emitNotification(challenge.account.managedByOwnerId, 'notification:new', {
+            id: notification.id,
+        });
+    }
 };
 
 /**
