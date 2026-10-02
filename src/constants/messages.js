@@ -154,6 +154,10 @@ const messages = {
         INVALID_CURSOR: 'Mốc phân trang vụ nuôi không hợp lệ',
     },
 
+    EXPERT_DASHBOARD: {
+        FETCHED: 'Lấy tổng quan chuyên gia thành công',
+    },
+
     // Generic CRUD
     CRUD: {
         CREATED: (resource) => `Tạo ${resource} thành công`,

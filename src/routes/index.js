@@ -8,6 +8,7 @@ const pondRoute = require('./pond.route');
 const personnelRoute = require('./personnel.route');
 const seasonRoute = require('./season.route');
 const assignedSeasonRoute = require('./assignedSeason.route');
+const expertDashboardRoute = require('./expertDashboard.route');
 
 const router = express.Router();
 
@@ -20,6 +21,7 @@ const routes = [
     { path: '/owner/personnel', route: personnelRoute },
     { path: '/owner/seasons', route: seasonRoute },
     { path: '/me/seasons', route: assignedSeasonRoute },
+    { path: '/expert/dashboard', route: expertDashboardRoute },
     { path: '/notifications', route: notificationRoute },
 ];
 

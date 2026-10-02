@@ -80,6 +80,37 @@ enum HealthStatus {
   @@map("health_status")
 }
 
+enum CaseSeverity {
+  LOW      @map("low")
+  MEDIUM   @map("medium")
+  HIGH     @map("high")
+  CRITICAL @map("critical")
+
+  @@map("case_severity")
+}
+
+enum DiseaseCaseStatus {
+  OPEN             @map("open")
+  WAITING_FOR_INFO @map("waiting_for_info")
+  MONITORING       @map("monitoring")
+  IN_TREATMENT     @map("in_treatment")
+  RESOLVED         @map("resolved")
+
+  @@map("disease_case_status")
+}
+
+enum ProtocolStatus {
+  DRAFT            @map("draft")
+  PENDING_APPROVAL @map("pending_approval")
+  APPROVED         @map("approved")
+  REJECTED         @map("rejected")
+  SUPERSEDED       @map("superseded")
+  CANCELLED        @map("cancelled")
+  ABORTED          @map("aborted")
+
+  @@map("protocol_status")
+}
+
 enum ProductCategory {
   FEED     @map("feed")
   MEDICINE @map("medicine")
@@ -193,6 +224,7 @@ model Account {
   managedAccounts        Account[]                    @relation("OwnerManagedAccounts")
   seasonAssignments      SeasonPersonnelAssignment[]  @relation("SeasonAssignedAccount")
   ownedFarms             Farm[]
+  reportedDiseaseCases   DiseaseCase[]                @relation("DiseaseCaseReporter")
 
   @@map("accounts")
 }
@@ -300,6 +332,7 @@ model AquacultureSeason {
   pond                 Pond                        @relation(fields: [pondId], references: [id], onDelete: Restrict)
   personnelAssignments SeasonPersonnelAssignment[]
   healthLogs            ShrimpHealthLog[]
+  diseaseCases          DiseaseCase[]
 
   @@index([pondId, status], map: "idx_seasons_pond_status")
   @@map("aquaculture_seasons")
@@ -310,12 +343,37 @@ model ShrimpHealthLog {
   seasonId           String            @map("season_id") @db.Uuid
   recordedAt         DateTime          @map("recorded_at") @db.Timestamptz(6)
   estimatedBiomassKg Decimal?          @map("estimated_biomass_kg") @db.Decimal(14, 3)
+  estimatedPopulation BigInt?           @map("estimated_population") @db.BigInt
+  avgWeightG         Decimal?           @map("avg_weight_g") @db.Decimal(10, 3)
   healthStatus       HealthStatus      @default(GOOD) @map("health_status")
   isVoided           Boolean           @default(false) @map("is_voided")
   season             AquacultureSeason @relation(fields: [seasonId], references: [id], onDelete: Restrict)
 
   @@index([seasonId, recordedAt(sort: Desc)], map: "idx_shrimp_health_season_date")
   @@map("shrimp_health_logs")
+}
+
+model DiseaseCase {
+  id         String            @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  seasonId   String            @map("season_id") @db.Uuid
+  reportedBy String            @map("reported_by") @db.Uuid
+  expertId   String            @map("expert_id") @db.Uuid
+  title      String            @db.VarChar(500)
+  severity   CaseSeverity      @default(MEDIUM)
+  status     DiseaseCaseStatus @default(OPEN)
+  updatedAt  DateTime          @default(now()) @map("updated_at") @db.Timestamptz(6)
+  season     AquacultureSeason @relation(fields: [seasonId], references: [id], onDelete: Restrict)
+  reporter   Account           @relation("DiseaseCaseReporter", fields: [reportedBy], references: [id], onDelete: Restrict)
+
+  @@map("disease_cases")
+}
+
+model Protocol {
+  id        String         @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  createdBy String         @map("created_by") @db.Uuid
+  status    ProtocolStatus @default(DRAFT)
+
+  @@map("protocols")
 }
 
 model Product {
