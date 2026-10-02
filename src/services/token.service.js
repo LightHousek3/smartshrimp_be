@@ -140,7 +140,7 @@ const refreshAuthTokens = async (refreshToken) => {
 };
 
 const revokeRefreshToken = async (refreshToken) => {
-    await prisma.refreshToken.updateMany({
+    await prisma.refreshToken.update({
         where: { tokenHash: hashToken(refreshToken), revokedAt: null },
         data: { revokedAt: new Date() },
     });
