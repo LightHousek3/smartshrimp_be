@@ -9,10 +9,12 @@ const personnelRoute = require('./personnel.route');
 const seasonRoute = require('./season.route');
 const assignedSeasonRoute = require('./assignedSeason.route');
 const expertDashboardRoute = require('./expertDashboard.route');
+const ragRoute = require('./rag.route');
 
 const router = express.Router();
 
 const routes = [
+    { path: '/me/rag', route: ragRoute },
     { path: '/auth', route: authRoute },
     { path: '/admin/accounts', route: adminAccountRoute },
     { path: '/profile', route: profileRoute },

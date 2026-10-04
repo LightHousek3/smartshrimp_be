@@ -225,6 +225,9 @@ model Account {
   seasonAssignments      SeasonPersonnelAssignment[]  @relation("SeasonAssignedAccount")
   ownedFarms             Farm[]
   reportedDiseaseCases   DiseaseCase[]                @relation("DiseaseCaseReporter")
+  ragConversations       RagConversation[]
+  ragQueries             RagQuery[]
+  ragFeedback            RagFeedback[]
 
   @@map("accounts")
 }
@@ -296,20 +299,20 @@ model Farm {
 }
 
 model Pond {
-  id         String              @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
-  farmId     String              @map("farm_id") @db.Uuid
-  name       String              @db.VarChar(255)
-  areaM2     Decimal?            @map("area_m2") @db.Decimal(12, 2)
-  depthM     Decimal?            @map("depth_m") @db.Decimal(6, 2)
-  volumeM3   Decimal?            @map("volume_m3") @db.Decimal(14, 2)
-  type       PondType            @default(AQUACULTURE)
-  status     PondStatus          @default(AVAILABLE)
-  isDeleted  Boolean             @default(false) @map("is_deleted")
-  deletedAt  DateTime?           @map("deleted_at") @db.Timestamptz(6)
-  createdAt  DateTime            @default(now()) @map("created_at") @db.Timestamptz(6)
-  updatedAt  DateTime            @default(now()) @map("updated_at") @db.Timestamptz(6)
-  farm       Farm                @relation(fields: [farmId], references: [id], onDelete: Restrict)
-  seasons    AquacultureSeason[]
+  id        String              @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  farmId    String              @map("farm_id") @db.Uuid
+  name      String              @db.VarChar(255)
+  areaM2    Decimal?            @map("area_m2") @db.Decimal(12, 2)
+  depthM    Decimal?            @map("depth_m") @db.Decimal(6, 2)
+  volumeM3  Decimal?            @map("volume_m3") @db.Decimal(14, 2)
+  type      PondType            @default(AQUACULTURE)
+  status    PondStatus          @default(AVAILABLE)
+  isDeleted Boolean             @default(false) @map("is_deleted")
+  deletedAt DateTime?           @map("deleted_at") @db.Timestamptz(6)
+  createdAt DateTime            @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt DateTime            @default(now()) @map("updated_at") @db.Timestamptz(6)
+  farm      Farm                @relation(fields: [farmId], references: [id], onDelete: Restrict)
+  seasons   AquacultureSeason[]
 
   @@map("ponds")
 }
@@ -331,23 +334,24 @@ model AquacultureSeason {
   updatedAt            DateTime                    @default(now()) @map("updated_at") @db.Timestamptz(6)
   pond                 Pond                        @relation(fields: [pondId], references: [id], onDelete: Restrict)
   personnelAssignments SeasonPersonnelAssignment[]
-  healthLogs            ShrimpHealthLog[]
-  diseaseCases          DiseaseCase[]
+  healthLogs           ShrimpHealthLog[]
+  diseaseCases         DiseaseCase[]
+  ragConversations     RagConversation[]
 
   @@index([pondId, status], map: "idx_seasons_pond_status")
   @@map("aquaculture_seasons")
 }
 
 model ShrimpHealthLog {
-  id                 String            @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
-  seasonId           String            @map("season_id") @db.Uuid
-  recordedAt         DateTime          @map("recorded_at") @db.Timestamptz(6)
-  estimatedBiomassKg Decimal?          @map("estimated_biomass_kg") @db.Decimal(14, 3)
+  id                  String            @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  seasonId            String            @map("season_id") @db.Uuid
+  recordedAt          DateTime          @map("recorded_at") @db.Timestamptz(6)
+  estimatedBiomassKg  Decimal?          @map("estimated_biomass_kg") @db.Decimal(14, 3)
   estimatedPopulation BigInt?           @map("estimated_population") @db.BigInt
-  avgWeightG         Decimal?           @map("avg_weight_g") @db.Decimal(10, 3)
-  healthStatus       HealthStatus      @default(GOOD) @map("health_status")
-  isVoided           Boolean           @default(false) @map("is_voided")
-  season             AquacultureSeason @relation(fields: [seasonId], references: [id], onDelete: Restrict)
+  avgWeightG          Decimal?          @map("avg_weight_g") @db.Decimal(10, 3)
+  healthStatus        HealthStatus      @default(GOOD) @map("health_status")
+  isVoided            Boolean           @default(false) @map("is_voided")
+  season              AquacultureSeason @relation(fields: [seasonId], references: [id], onDelete: Restrict)
 
   @@index([seasonId, recordedAt(sort: Desc)], map: "idx_shrimp_health_season_date")
   @@map("shrimp_health_logs")
@@ -482,4 +486,64 @@ view FarmOwnerKpi {
   activeSeasons BigInt? @map("active_seasons")
 
   @@map("v_farm_owner_kpi")
+}
+
+enum RagQueryStatus {
+  ANSWERED  @map("answered")
+  NO_SOURCE @map("no_source")
+  LOW_MATCH @map("low_match")
+  ERROR     @map("error")
+
+  @@map("rag_query_status")
+}
+
+/// Maps existing SQL tables; season-less legacy conversations are rejected by the service.
+model RagConversation {
+  id            String             @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  accountId     String             @map("account_id") @db.Uuid
+  seasonId      String?            @map("season_id") @db.Uuid
+  title         String?            @db.VarChar(255)
+  startedAt     DateTime           @default(now()) @map("started_at") @db.Timestamptz(6)
+  lastMessageAt DateTime           @default(now()) @map("last_message_at") @db.Timestamptz(6)
+  account       Account            @relation(fields: [accountId], references: [id], onDelete: Restrict)
+  season        AquacultureSeason? @relation(fields: [seasonId], references: [id], onDelete: Restrict)
+  queries       RagQuery[]
+
+  @@map("rag_conversations")
+}
+
+model RagQuery {
+  id               String          @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  conversationId   String          @map("conversation_id") @db.Uuid
+  accountId        String          @map("account_id") @db.Uuid
+  question         String
+  answer           String?
+  queryStatus      RagQueryStatus  @map("query_status")
+  retrievedChunks  Json            @default("[]") @map("retrieved_chunks") @db.JsonB
+  topSimilarity    Decimal?        @map("top_similarity") @db.Decimal(6, 5)
+  modelVersion     String?         @map("model_version") @db.VarChar(100)
+  processingTimeMs Int?            @map("processing_time_ms")
+  errorCode        String?         @map("error_code") @db.VarChar(100)
+  errorMessage     String?         @map("error_message")
+  createdAt        DateTime        @default(now()) @map("created_at") @db.Timestamptz(6)
+  conversation     RagConversation @relation(fields: [conversationId], references: [id], onDelete: Restrict)
+  account          Account         @relation(fields: [accountId], references: [id], onDelete: Restrict)
+  feedback         RagFeedback?
+
+  @@index([queryStatus, createdAt(sort: Desc)], map: "idx_rag_queries_status_date")
+  @@map("rag_queries")
+}
+
+model RagFeedback {
+  id          String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  queryId     String   @unique @map("query_id") @db.Uuid
+  evaluatorId String   @map("evaluator_id") @db.Uuid
+  rating      Int      @db.SmallInt
+  comment     String?
+  createdAt   DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  query       RagQuery @relation(fields: [queryId], references: [id], onDelete: Restrict)
+  evaluator   Account  @relation(fields: [evaluatorId], references: [id], onDelete: Restrict)
+
+  @@index([rating, createdAt(sort: Desc)], map: "idx_rag_feedback_rating_date")
+  @@map("rag_feedback")
 }
