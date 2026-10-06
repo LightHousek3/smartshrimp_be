@@ -3,6 +3,23 @@ const path = require('path');
 
 dotenv.config({ path: path.join(__dirname, '../../.env') });
 
+// Fail fast on missing required secrets: without these the app would boot
+// and only crash later at runtime (e.g. on the first jwt.sign during login),
+// which is much harder to diagnose.
+const REQUIRED_ENV_VARS = ['JWT_ACCESS_SECRET', 'JWT_REFRESH_SECRET', 'DATABASE_URL'];
+
+const missingEnvVars = REQUIRED_ENV_VARS.filter((name) => {
+    const value = process.env[name];
+    return !value || value.trim() === '';
+});
+
+if (missingEnvVars.length > 0) {
+    throw new Error(
+        `Missing required environment variables: ${missingEnvVars.join(', ')}. ` +
+            'Set them in your .env file or environment before starting the server.',
+    );
+}
+
 const BASE_URL = (process.env.APP_BASE_URL || '').replace(/\/+$/, '');
 const API_PREFIX = `/${(process.env.API_PREFIX || '/api/v1').replace(/^\/+|\/+$/g, '')}`;
 
