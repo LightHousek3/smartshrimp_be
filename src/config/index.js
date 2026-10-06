@@ -73,6 +73,11 @@ const config = {
     security: {
         bcryptSaltRounds: parseInt(process.env.BCRYPT_SALT_ROUNDS, 10) || 12,
     },
+    rag: {
+        serviceUrl: (process.env.RAG_SERVICE_URL || '').replace(/\/+$/, ''),
+        internalApiKey: process.env.RAG_INTERNAL_API_KEY,
+        timeoutMs: parseInt(process.env.RAG_REQUEST_TIMEOUT_MS, 10) || 60000,
+    },
 };
 
 module.exports = config;
