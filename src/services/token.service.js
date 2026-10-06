@@ -139,8 +139,14 @@ const refreshAuthTokens = async (refreshToken) => {
     });
 };
 
+/**
+ * Revoke the refresh token matching the given value.
+ * Deliberately idempotent: unknown or already-revoked tokens resolve
+ * successfully (the caller treats them as logged out), so updateMany is
+ * used instead of update to avoid throwing P2025 on a stale token.
+ */
 const revokeRefreshToken = async (refreshToken) => {
-    await prisma.refreshToken.update({
+    await prisma.refreshToken.updateMany({
         where: { tokenHash: hashToken(refreshToken), revokedAt: null },
         data: { revokedAt: new Date() },
     });
