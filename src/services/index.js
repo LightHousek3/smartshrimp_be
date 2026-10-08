@@ -10,6 +10,7 @@ const seasonService = require('./season.service');
 const assignedSeasonService = require('./assignedSeason.service');
 const expertDashboardService = require('./expertDashboard.service');
 const expertSeasonService = require('./expertSeason.service');
+const waterLogService = require('./waterLog.service');
 
 module.exports = {
     authService,
@@ -24,4 +25,5 @@ module.exports = {
     assignedSeasonService,
     expertDashboardService,
     expertSeasonService,
+    waterLogService,
 };

@@ -1,6 +1,11 @@
 const httpStatus = require('./httpStatus');
 const messages = require('./messages');
 const NOTIFICATION_TYPE = require('./notificationType');
+const {
+    WATER_THRESHOLDS,
+    THRESHOLD_FIELD_MAP,
+    checkWaterThresholds,
+} = require('./waterThresholds');
 
 /**
  * Enums matching the database schema
@@ -51,4 +56,7 @@ module.exports = {
     SEASON_STATUS,
     PERSONNEL_ROLE,
     NOTIFICATION_TYPE,
+    WATER_THRESHOLDS,
+    THRESHOLD_FIELD_MAP,
+    checkWaterThresholds,
 };

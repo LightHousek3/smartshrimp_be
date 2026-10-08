@@ -1,8 +1,8 @@
 const express = require('express');
-const { seasonController } = require('../controllers');
+const { seasonController, waterLogController } = require('../controllers');
 const { ACCOUNT_ROLE } = require('../constants');
 const { authenticate, authorize, validate } = require('../middlewares');
-const { seasonValidator } = require('../validators');
+const { seasonValidator, waterLogValidator } = require('../validators');
 
 const router = express.Router();
 
@@ -32,5 +32,9 @@ router.patch(
     seasonController.cancelSeason,
 );
 router.patch('/:seasonId', validate(seasonValidator.updateSeason), seasonController.updateSeason);
+
+// Nhật ký đo nước — chủ trại chỉ đọc (D5).
+router.get('/:seasonId/water-logs', validate(waterLogValidator.listWaterLogs), waterLogController.listWaterLogsAsOwner);
+router.get('/:seasonId/water-logs/statistics', validate(waterLogValidator.getStatistics), waterLogController.getStatisticsAsOwner);
 
 module.exports = router;
