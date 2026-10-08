@@ -342,6 +342,7 @@ model AquacultureSeason {
   pond                 Pond                        @relation(fields: [pondId], references: [id], onDelete: Restrict)
   personnelAssignments SeasonPersonnelAssignment[]
   healthLogs           ShrimpHealthLog[]
+  waterQualityLogs     WaterQualityLog[]
   diseaseCases         DiseaseCase[]
   protocols             Protocol[]
   ragConversations     RagConversation[]
@@ -363,6 +364,32 @@ model ShrimpHealthLog {
 
   @@index([seasonId, recordedAt(sort: Desc)], map: "idx_shrimp_health_season_date")
   @@map("shrimp_health_logs")
+}
+
+model WaterQualityLog {
+  id                   String            @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  seasonId             String            @map("season_id") @db.Uuid
+  recordedBy           String            @map("recorded_by") @db.Uuid
+  recordedAt           DateTime          @map("recorded_at") @db.Timestamptz(6)
+  temperatureC         Decimal?          @map("temperature_c") @db.Decimal(5, 2)
+  ph                   Decimal?          @map("ph") @db.Decimal(4, 2)
+  dissolvedOxygenMgL   Decimal?          @map("dissolved_oxygen_mg_l") @db.Decimal(6, 3)
+  salinityPpt          Decimal?          @map("salinity_ppt") @db.Decimal(6, 3)
+  nh3MgL               Decimal?          @map("nh3_mg_l") @db.Decimal(9, 5)
+  no2MgL               Decimal?          @map("no2_mg_l") @db.Decimal(9, 5)
+  alkalinityMgLCaCO3   Decimal?          @map("alkalinity_mg_l_caco3") @db.Decimal(9, 2)
+  h2sMgL               Decimal?          @map("h2s_mg_l") @db.Decimal(9, 5)
+  note                 String?
+  isVoided             Boolean           @default(false) @map("is_voided")
+  voidedBy             String?           @map("voided_by") @db.Uuid
+  voidedAt             DateTime?         @map("voided_at") @db.Timestamptz(6)
+  voidReason           String?           @map("void_reason")
+  createdAt            DateTime          @default(now()) @map("created_at") @db.Timestamptz(6)
+  season               AquacultureSeason @relation(fields: [seasonId], references: [id], onDelete: Restrict)
+
+  @@index([seasonId, recordedAt(sort: Desc)], map: "idx_water_quality_season_date")
+  @@unique([seasonId, recordedAt, recordedBy], map: "uq_water_quality_log_no_duplicate")
+  @@map("water_quality_logs")
 }
 
 model DiseaseCase {

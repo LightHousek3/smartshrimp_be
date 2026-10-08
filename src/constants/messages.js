@@ -154,6 +154,24 @@ const messages = {
         INVALID_CURSOR: 'Mốc phân trang vụ nuôi không hợp lệ',
     },
 
+    WATER_LOG: {
+        CREATED: 'Nhập nhật ký đo nước thành công',
+        LIST_FETCHED: 'Lấy danh sách nhật ký đo nước thành công',
+        STATISTICS_FETCHED: 'Lấy thống kê chất lượng nước thành công',
+        NOT_FOUND: 'Không tìm thấy nhật ký đo nước',
+        INVALID_CURSOR: 'Mốc phân trang nhật ký đo nước không hợp lệ',
+        SEASON_NOT_ACTIVE: 'Chỉ được nhập nhật ký cho vụ nuôi đang hoạt động',
+        NO_ASSIGNMENT: 'Bạn không được phân công phụ trách vụ nuôi này',
+        ALREADY_VOIDED: 'Nhật ký này đã bị hủy hiệu lực',
+        VOID_FORBIDDEN_STATE: 'Chỉ được hủy hiệu lực nhật ký của vụ nuôi đang hoạt động',
+        VOIDED: 'Hủy hiệu lực nhật ký đo nước thành công',
+        AT_LEAST_ONE_METRIC: 'Phải nhập ít nhất một chỉ số đo',
+        DUPLICATE_LOG: 'Nhật ký đo nước cho thời điểm này đã tồn tại',
+        IDEMPOTENCY_KEY_REUSED: 'Khóa lưu nhật ký đã được dùng cho nội dung khác',
+        RECORDED_AT_TOO_FAR_FUTURE: 'Thời điểm đo không được vượt quá hiện tại 5 phút',
+        INVALID_DATE_RANGE: 'Khoảng thời gian thống kê tối đa 90 ngày',
+    },
+
     EXPERT_DASHBOARD: {
         FETCHED: 'Lấy tổng quan chuyên gia thành công',
     },
