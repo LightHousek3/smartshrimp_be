@@ -10,6 +10,7 @@ const assignedSeasonValidator = require('./assignedSeason.validator');
 const expertDashboardValidator = require('./expertDashboard.validator');
 const expertSeasonValidator = require('./expertSeason.validator');
 const waterLogValidator = require('./waterLog.validator');
+const operationValidator = require('./operation.validator');
 
 module.exports = {
     authValidator,
@@ -24,4 +25,5 @@ module.exports = {
     expertDashboardValidator,
     expertSeasonValidator,
     waterLogValidator,
+    operationValidator,
 };
