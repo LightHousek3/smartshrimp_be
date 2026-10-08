@@ -158,6 +158,10 @@ const messages = {
         FETCHED: 'Lấy tổng quan chuyên gia thành công',
     },
 
+    EXPERT_SEASON: {
+        LIST_FETCHED: 'Lấy danh sách vụ nuôi được phân công thành công',
+    },
+
     // Generic CRUD
     CRUD: {
         CREATED: (resource) => `Tạo ${resource} thành công`,

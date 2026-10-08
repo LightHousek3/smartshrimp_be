@@ -111,6 +111,13 @@ enum ProtocolStatus {
   @@map("protocol_status")
 }
 
+enum ProtocolType {
+  PRODUCTION @map("production")
+  TREATMENT  @map("treatment")
+
+  @@map("protocol_type")
+}
+
 enum ProductCategory {
   FEED     @map("feed")
   MEDICINE @map("medicine")
@@ -336,6 +343,7 @@ model AquacultureSeason {
   personnelAssignments SeasonPersonnelAssignment[]
   healthLogs           ShrimpHealthLog[]
   diseaseCases         DiseaseCase[]
+  protocols             Protocol[]
   ragConversations     RagConversation[]
 
   @@index([pondId, status], map: "idx_seasons_pond_status")
@@ -373,9 +381,13 @@ model DiseaseCase {
 }
 
 model Protocol {
-  id        String         @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
-  createdBy String         @map("created_by") @db.Uuid
-  status    ProtocolStatus @default(DRAFT)
+  id           String            @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  seasonId     String            @map("season_id") @db.Uuid
+  protocolType ProtocolType      @map("protocol_type")
+  versionNo    Int               @map("version_no")
+  createdBy    String            @map("created_by") @db.Uuid
+  status       ProtocolStatus    @default(DRAFT)
+  season       AquacultureSeason @relation(fields: [seasonId], references: [id], onDelete: Restrict)
 
   @@map("protocols")
 }

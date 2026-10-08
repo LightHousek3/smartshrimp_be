@@ -8,6 +8,7 @@ const personnelController = require('./personnel.controller');
 const seasonController = require('./season.controller');
 const assignedSeasonController = require('./assignedSeason.controller');
 const expertDashboardController = require('./expertDashboard.controller');
+const expertSeasonController = require('./expertSeason.controller');
 
 module.exports = {
     authController,
@@ -20,4 +21,5 @@ module.exports = {
     seasonController,
     assignedSeasonController,
     expertDashboardController,
+    expertSeasonController,
 };
