@@ -34,6 +34,34 @@ test('list is scoped to the authenticated account and read filter', async () => 
     expect(result.notifications).toEqual([]);
 });
 
+test('list applies notification group and numbered-page pagination for web', async () => {
+    prisma.notification.findMany.mockResolvedValue([]);
+    prisma.notification.count.mockResolvedValue(0);
+
+    const result = await notificationService.getListNotification('expert-id', {
+        group: 'disease',
+        page: 2,
+        limit: 10,
+    });
+
+    expect(prisma.notification.findMany).toHaveBeenCalledWith(expect.objectContaining({
+        where: expect.objectContaining({
+            accountId: 'expert-id',
+            type: { in: [
+                'DISEASE_CASE_CREATED',
+                'DISEASE_CASE_RESPONSE',
+                'DISEASE_CASE_WAITING_INFO',
+                'DISEASE_CASE_MONITORING',
+                'DISEASE_CASE_RESOLVED',
+                'EMERGENCY_CASE_UPDATE',
+            ] },
+        }),
+        skip: 10,
+        take: 11,
+    }));
+    expect(result.meta.page).toBe(2);
+});
+
 test('opening an owned unread notification records its first read and emits an event', async () => {
     const notification = { id: 'notification-id', readAt: new Date() };
     prisma.notification.updateMany.mockResolvedValue({ count: 1 });

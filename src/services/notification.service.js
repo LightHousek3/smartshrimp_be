@@ -22,13 +22,44 @@ const NOTIFICATION_SELECT = {
 const WARNING_NOTIFICATION_TYPES = [
     NOTIFICATION_TYPE.WATER_THRESHOLD_EXCEEDED,
     NOTIFICATION_TYPE.SCHEDULE_GENERATION_FAILED,
+    NOTIFICATION_TYPE.INVENTORY_LOW,
+    NOTIFICATION_TYPE.INVENTORY_INSUFFICIENT,
 ];
+const NOTIFICATION_GROUP_TYPES = {
+    disease: [
+        NOTIFICATION_TYPE.DISEASE_CASE_CREATED,
+        NOTIFICATION_TYPE.DISEASE_CASE_RESPONSE,
+        NOTIFICATION_TYPE.DISEASE_CASE_WAITING_INFO,
+        NOTIFICATION_TYPE.DISEASE_CASE_MONITORING,
+        NOTIFICATION_TYPE.DISEASE_CASE_RESOLVED,
+        NOTIFICATION_TYPE.EMERGENCY_CASE_UPDATE,
+    ],
+    protocol: [
+        NOTIFICATION_TYPE.PRODUCTION_PROTOCOL_PENDING,
+        NOTIFICATION_TYPE.PRODUCTION_PROTOCOL_REVIEWED,
+        NOTIFICATION_TYPE.TREATMENT_PROTOCOL_PENDING,
+        NOTIFICATION_TYPE.TREATMENT_PROTOCOL_REVIEWED,
+        NOTIFICATION_TYPE.TREATMENT_PROTOCOL_ABORTED,
+        NOTIFICATION_TYPE.TREATMENT_SCHEDULE_READY,
+        NOTIFICATION_TYPE.TREATMENT_SCHEDULE_COMPLETED,
+    ],
+    season: [
+        NOTIFICATION_TYPE.SEASON_ASSIGNMENT_CREATED,
+        NOTIFICATION_TYPE.SEASON_ASSIGNMENT_REPLACED,
+        NOTIFICATION_TYPE.SEASON_STATUS_CHANGED,
+        NOTIFICATION_TYPE.HARVEST_DUE,
+        NOTIFICATION_TYPE.SEASON_COMPLETED,
+    ],
+    system: [NOTIFICATION_TYPE.SYSTEM],
+};
 
 const getListNotification = async (accountId, {
     cursor,
+    page,
     limit = 20,
     readStatus = 'all',
     category,
+    group,
     type,
     createdFrom,
     createdTo,
@@ -39,6 +70,7 @@ const getListNotification = async (accountId, {
         ...(readStatus === 'read' && { readAt: { not: null } }),
         ...(category === 'action' && { referenceId: { not: null } }),
         ...(category === 'warning' && { type: { in: WARNING_NOTIFICATION_TYPES } }),
+        ...(group && { type: { in: NOTIFICATION_GROUP_TYPES[group] } }),
         ...(type && { type }),
         ...((createdFrom || createdTo) && {
             createdAt: {
@@ -65,7 +97,9 @@ const getListNotification = async (accountId, {
             select: NOTIFICATION_LIST_SELECT,
             orderBy: [{ createdAt: 'desc' }, { id: 'desc' }],
             take: limit + 1,
-            ...(cursor && { cursor: { id: cursor } }),
+            ...(page
+                ? { skip: (page - 1) * limit }
+                : cursor && { cursor: { id: cursor } }),
         }),
         prisma.notification.count({ where }),
     ]);
@@ -80,6 +114,7 @@ const getListNotification = async (accountId, {
             totalResults,
             hasNextPage,
             nextCursor: hasNextPage ? notifications[notifications.length - 1].id : null,
+            ...(page && { page }),
         },
     };
 };
