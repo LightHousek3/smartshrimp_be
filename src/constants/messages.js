@@ -201,6 +201,22 @@ const messages = {
         REQUIRED_FIELD: (field) => `${field} là bắt buộc`,
     },
 
+    // Operation
+    OPERATION: {
+        LIST_FETCHED: 'Lấy danh sách kế hoạch vận hành thành công',
+        FETCHED: 'Lấy chi tiết kế hoạch vận hành thành công',
+        EXECUTED: 'Ghi nhận thực hiện hoạt động thành công',
+        STATS_FETCHED: 'Lấy thống kê vận hành thành công',
+        NOT_FOUND: 'Không tìm thấy lịch vận hành',
+        SCHEDULE_NOT_PLANNED: 'Lịch vận hành không ở trạng thái chờ thực hiện',
+        SEASON_NOT_ACTIVE: 'Vụ nuôi không ở trạng thái đang hoạt động',
+        NOT_ASSIGNED_TECHNICIAN: 'Bạn không phải là kỹ thuật viên phụ trách vụ nuôi này',
+        INSUFFICIENT_INVENTORY: 'Số lượng vật tư trong kho không đủ để thực hiện',
+        VARIANCE_REASON_REQUIRED: 'Cần cung cấp lý do khi số lượng chênh lệch vượt mức cho phép',
+        INVALID_ACTUAL_QUANTITY: 'Số lượng thực tế phải lớn hơn 0',
+        INVALID_IDEMPOTENCY_KEY: 'Mã idempotency_key không hợp lệ',
+    },
+
     // Server
     SERVER: {
         INTERNAL_ERROR: 'Lỗi máy chủ nội bộ',

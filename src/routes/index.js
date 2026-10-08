@@ -12,6 +12,7 @@ const expertDashboardRoute = require('./expertDashboard.route');
 const expertSeasonRoute = require('./expertSeason.route');
 const ragRoute = require('./rag.route');
 const waterLogRoute = require('./waterLog.route');
+const operationRoute = require('./operation.route');
 
 const router = express.Router();
 
@@ -26,6 +27,7 @@ const routes = [
     { path: '/owner/seasons', route: seasonRoute },
     { path: '/me/seasons', route: assignedSeasonRoute },
     { path: '/me/seasons/:seasonId/water-logs', route: waterLogRoute },
+    { path: '/operations', route: operationRoute },
     { path: '/expert/dashboard', route: expertDashboardRoute },
     { path: '/expert/seasons', route: expertSeasonRoute },
     { path: '/notifications', route: notificationRoute },
