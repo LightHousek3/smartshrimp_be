@@ -279,6 +279,7 @@ model Account {
   ragConversations       RagConversation[]
   ragQueries             RagQuery[]
   ragFeedback            RagFeedback[]
+  ragDocuments           RagDocument[]
   cancelledSchedules     OperationSchedule[]          @relation("ScheduleCancelledBy")
   executedOperations     OperationExecution[]         @relation("ExecutionExecutedBy")
   inventoryTransactions  InventoryTransaction[]       @relation("InventoryTransactionPerformedBy")
@@ -786,4 +787,47 @@ model RagFeedback {
 
   @@index([rating, createdAt(sort: Desc)], map: "idx_rag_feedback_rating_date")
   @@map("rag_feedback")
+}
+
+enum RagDocumentStatus {
+  UPLOADING
+  PENDING
+  PROCESSING
+  READY
+  FAILED
+  DELETING
+  DELETE_FAILED
+
+  @@map("rag_document_status")
+}
+
+model RagDocument {
+  id                    String    @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  title                 String    @db.VarChar(255)
+  description           String?
+  category              String?   @db.VarChar(100)
+  originalFilename      String    @map("original_filename") @db.VarChar(500)
+  storageProvider       String    @default("cloudinary") @map("storage_provider") @db.VarChar(30)
+  storageKey            String    @unique @map("storage_key") @db.VarChar(500)
+  storageResourceType   String    @default("raw") @map("storage_resource_type") @db.VarChar(20)
+  mimeType              String    @map("mime_type") @db.VarChar(100)
+  fileSize              Int       @map("file_size")
+  fileHash              String    @map("file_hash") @db.Char(64)
+  status                RagDocumentStatus @default(PENDING)
+  isActive              Boolean   @default(true) @map("is_active")
+  chunkCount            Int       @default(0) @map("chunk_count")
+  errorMessage          String?   @map("error_message")
+  jobAttempts           Int       @default(0) @map("job_attempts")
+  processingStartedAt   DateTime? @map("processing_started_at") @db.Timestamptz(6)
+  indexedAt             DateTime? @map("indexed_at") @db.Timestamptz(6)
+  nextAttemptAt         DateTime  @default(now()) @map("next_attempt_at") @db.Timestamptz(6)
+  uploadedBy            String    @map("uploaded_by") @db.Uuid
+  uploader              Account   @relation(fields: [uploadedBy], references: [id], onDelete: Restrict)
+  createdAt             DateTime  @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt             DateTime  @default(now()) @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  @@index([status, createdAt])
+  @@index([category, createdAt])
+  @@index([uploadedBy])
+  @@map("rag_documents")
 }

@@ -13,6 +13,34 @@ const {
 } = buildAutoPaths(config.apiPrefix);
 
 const notificationDetailPath = `${config.apiPrefix}/notifications/{notificationId}`;
+const { RAG_DOCUMENT_CATEGORIES } = require('../constants');
+const documentUpload = autoPaths[`${config.apiPrefix}/admin/rag/documents`]?.post;
+if (documentUpload) {
+    documentUpload.requestBody = {
+        required: true,
+        content: {
+            'multipart/form-data': {
+                schema: {
+                    type: 'object', required: ['file', 'title'], additionalProperties: false,
+                    properties: {
+                        file: { type: 'string', format: 'binary', description: 'PDF, DOCX, MD or TXT, up to 10 MiB' },
+                        title: { type: 'string', maxLength: 255 }, category: { type: 'string', enum: RAG_DOCUMENT_CATEGORIES },
+                        description: { type: 'string', maxLength: 1000 },
+                    },
+                },
+            },
+        },
+    };
+    documentUpload.responses = {
+        202: { description: 'Original stored; indexing queued. Poll GET documents for status.' },
+        400: { description: 'Invalid, empty or unreadable document' },
+        401: { description: 'Authentication required' },
+        403: { description: 'Admin role required' },
+        413: { description: 'Document exceeds 10 MiB' },
+        429: { description: 'Write rate limit exceeded' },
+        503: { description: 'Cloudinary is unconfigured or original storage failed' },
+    };
+}
 if (autoPaths[notificationDetailPath]?.get) {
     autoPaths[notificationDetailPath].get.description =
         'Returns an owned notification and records readAt on the first successful detail request. Repeated requests preserve the original readAt.';

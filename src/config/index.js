@@ -61,6 +61,8 @@ const config = {
     rateLimit: {
         windowMs: parseInt(process.env.RATE_LIMIT_WINDOW_MS, 10) || 15 * 60 * 1000,
         max: parseInt(process.env.RATE_LIMIT_MAX, 10) || 100,
+        writeWindowMs: parseInt(process.env.RATE_LIMIT_WRITE_WINDOW_MS, 10) || 60 * 1000,
+        writeMax: parseInt(process.env.RATE_LIMIT_WRITE_MAX, 10) || 10,
     },
 
     log: {
@@ -94,6 +96,13 @@ const config = {
         serviceUrl: (process.env.RAG_SERVICE_URL || '').replace(/\/+$/, ''),
         internalApiKey: process.env.RAG_INTERNAL_API_KEY,
         timeoutMs: parseInt(process.env.RAG_REQUEST_TIMEOUT_MS, 10) || 60000,
+        ingestionTimeoutMs: parseInt(process.env.RAG_INGESTION_TIMEOUT_MS, 10) || 300000,
+        workerIntervalMs: Math.max(1000, parseInt(process.env.RAG_WORKER_INTERVAL_MS, 10) || 5000),
+    },
+    cloudinary: {
+        cloudName: process.env.CLOUDINARY_CLOUD_NAME,
+        apiKey: process.env.CLOUDINARY_API_KEY,
+        apiSecret: process.env.CLOUDINARY_API_SECRET,
     },
 };
 

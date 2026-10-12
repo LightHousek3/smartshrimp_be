@@ -1,6 +1,7 @@
 const express = require('express');
 const authRoute = require('./auth.route');
 const adminAccountRoute = require('./adminAccount.route');
+const adminRagDocumentRoute = require('./adminRagDocument.route');
 const profileRoute = require('./profile.route');
 const farmRoute = require('./farm.route');
 const notificationRoute = require('./notification.route');
@@ -20,6 +21,7 @@ const routes = [
     { path: '/me/rag', route: ragRoute },
     { path: '/auth', route: authRoute },
     { path: '/admin/accounts', route: adminAccountRoute },
+    { path: '/admin/rag/documents', route: adminRagDocumentRoute },
     { path: '/profile', route: profileRoute },
     { path: '/owner/farms', route: farmRoute },
     { path: '/owner/farms/:farmId/ponds', route: pondRoute },

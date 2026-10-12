@@ -13,7 +13,16 @@ const expertSeasonService = require('./expertSeason.service');
 const waterLogService = require('./waterLog.service');
 const operationService = require('./operation.service');
 
+const ragDocumentService = require('./ragDocument.service');
+const ragService = require('./rag.service');
+const ragClientService = require('./ragClient.service');
+const ragStorageService = require('./ragStorage.service');
+
 module.exports = {
+    ragDocumentService,
+    ragService,
+    ragClientService,
+    ragStorageService,
     authService,
     adminAccountService,
     verificationService,

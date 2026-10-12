@@ -2,6 +2,9 @@ const { assignedSeasonService } = require('../services');
 const { asyncHandler, ResponseHandler } = require('../utils');
 const { messages } = require('../constants');
 
+/**
+ * GET /me/seasons
+ */
 const getAssignedSeasons = asyncHandler(async (req, res) => {
     const { seasons, meta } = await assignedSeasonService.getAssignedSeasons(req.account.id, req.query);
     ResponseHandler.paginated(res, {
@@ -11,6 +14,9 @@ const getAssignedSeasons = asyncHandler(async (req, res) => {
     });
 });
 
+/**
+ * GET /me/seasons/:seasonId
+ */
 const getAssignedSeason = asyncHandler(async (req, res) => {
     const season = await assignedSeasonService.getAssignedSeason(req.account.id, req.params.seasonId);
     res.set('Cache-Control', 'private, no-store');

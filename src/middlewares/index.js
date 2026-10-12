@@ -5,7 +5,7 @@ const {
   notFoundHandler,
 } = require("./error.middleware");
 const validate = require("./validate.middleware");
-const { apiLimiter, authLimiter } = require("./rateLimiter.middleware");
+const { apiLimiter, authLimiter, writeLimiter } = require("./rateLimiter.middleware");
 
 module.exports = {
   authenticate,
@@ -17,4 +17,5 @@ module.exports = {
   validate,
   apiLimiter,
   authLimiter,
+  writeLimiter,
 };

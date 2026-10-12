@@ -33,7 +33,21 @@ const authLimiter = rateLimit({
     skipSuccessfulRequests: true,
 });
 
+// Share one IP quota across document writes, including cancellation and metadata edits.
+const writeLimiter = rateLimit({
+    windowMs: config.rateLimit.writeWindowMs,
+    max: config.rateLimit.writeMax,
+    message: {
+        success: false,
+        statusCode: httpStatus.TOO_MANY_REQUESTS,
+        message: messages.SERVER.TOO_MANY_REQUESTS,
+    },
+    standardHeaders: true,
+    legacyHeaders: false,
+});
+
 module.exports = {
     apiLimiter,
     authLimiter,
+    writeLimiter,
 };
