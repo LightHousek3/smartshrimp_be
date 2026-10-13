@@ -13,8 +13,7 @@ const requireTechnician = async (db, accountId) => {
 const requireSeason = async (db, accountId, seasonId, writing = false) => {
     if (!seasonId) throw ApiError.forbidden(messages.RAG.SEASON_REQUIRED);
     const assignment = await db.seasonPersonnelAssignment.findFirst({
-        where: { accountId, seasonId, role: PERSONNEL_ROLE.TECHNICIAN, unassignedAt: null,
-            season: { pond: { isDeleted: false, farm: { isDeleted: false } } } },
+        where: { accountId, seasonId, role: PERSONNEL_ROLE.TECHNICIAN, unassignedAt: null },
         select: { season: { select: { id: true, name: true, status: true } } },
     });
     if (!assignment) throw ApiError.forbidden(messages.RAG.ASSIGNMENT_REQUIRED);

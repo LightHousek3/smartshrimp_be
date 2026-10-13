@@ -1,7 +1,6 @@
 const prisma = require('../config/prisma');
 const { emitNotification } = require('../realtime/notification.socket');
 const { ApiError } = require('../utils');
-const { dataAccess } = require('../plugins');
 const {
     httpStatus,
     messages,
@@ -41,14 +40,11 @@ const POND_SUMMARY_SELECT = {
     areaM2: true,
     type: true,
     status: true,
-    isDeleted: true,
-    deletedAt: true,
     farm: {
         select: {
             id: true,
             name: true,
-            isDeleted: true,
-            deletedAt: true,
+            status: true,
         },
     },
 };
@@ -184,8 +180,7 @@ const buildActivationEligibility = (season) => {
     );
 
     if (season.status !== SEASON_STATUS.PLANNING) missingConditions.push('SEASON_NOT_PLANNING');
-    if (season.pond.farm.isDeleted) missingConditions.push('FARM_ARCHIVED');
-    if (season.pond.isDeleted) missingConditions.push('POND_ARCHIVED');
+    if (season.pond.farm.status !== 'ACTIVE') missingConditions.push('FARM_NOT_ACTIVE');
     if (season.pond.status !== 'AVAILABLE') missingConditions.push('POND_NOT_AVAILABLE');
     if (season.pond.type !== 'AQUACULTURE') missingConditions.push('POND_NOT_AQUACULTURE');
     if (!season.stockingDate) missingConditions.push('STOCKING_DATE_REQUIRED');
@@ -243,13 +238,13 @@ const normalizeSeasonDetail = ({
 };
 
 const buildSeasonWhere = (ownerId, { farmId, pondId, status, search } = {}) => ({
-    pond: dataAccess.notDeleted({
+    pond: {
         ...(pondId && { id: pondId }),
-        farm: dataAccess.notDeleted({
+        farm: {
             ownerId,
             ...(farmId && { id: farmId }),
-        }),
-    }),
+        },
+    },
     ...(status && { status }),
     ...(search && { name: { contains: search, mode: 'insensitive' } }),
 });
@@ -258,9 +253,7 @@ const findOwnedSeason = async (client, seasonId, ownerId, select = SEASON_DETAIL
     const season = await client.aquacultureSeason.findFirst({
         where: {
             id: seasonId,
-            pond: dataAccess.notDeleted({
-                farm: dataAccess.notDeleted({ ownerId }),
-            }),
+            pond: { farm: { ownerId } },
         },
         select,
     });
@@ -380,11 +373,8 @@ const buildCreateData = (seasonData, ownerId, areaM2) => {
 };
 
 const assertEligiblePond = (pond) => {
-    if (pond.farm.isDeleted) {
-        throw new ApiError(httpStatus.CONFLICT, messages.SEASON.FARM_ARCHIVED);
-    }
-    if (pond.isDeleted) {
-        throw new ApiError(httpStatus.CONFLICT, messages.SEASON.POND_ARCHIVED);
+    if (pond.farm.status !== 'ACTIVE') {
+        throw new ApiError(httpStatus.CONFLICT, messages.SEASON.FARM_NOT_ACTIVE);
     }
     if (pond.status !== 'AVAILABLE') {
         throw new ApiError(httpStatus.CONFLICT, messages.SEASON.POND_NOT_AVAILABLE);
@@ -412,18 +402,16 @@ const createSeason = async (seasonData, ownerId) => {
     try {
         const season = await prisma.$transaction(async (transaction) => {
             const pond = await transaction.pond.findFirst({
-                where: dataAccess.notDeleted({
+                where: {
                     id: seasonData.pondId,
-                    farm: dataAccess.notDeleted({ ownerId }),
-                }),
+                    farm: { ownerId },
+                },
                 select: {
                     id: true,
                     areaM2: true,
                     type: true,
                     status: true,
-                    isDeleted: true,
-                    deletedAt: true,
-                    farm: { select: { isDeleted: true, deletedAt: true } },
+                    farm: { select: { status: true } },
                 },
             });
             if (!pond) {

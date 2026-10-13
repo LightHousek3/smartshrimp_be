@@ -1,0 +1,164 @@
+{
+  "WHITELEG": {
+    "schemaVersion": 1,
+    "policyVersion": "water-v1",
+    "shrimpType": "WHITELEG",
+    "recordedAtFutureToleranceSeconds": 300,
+    "noteMaxLength": 2000,
+    "metrics": [
+      {
+        "field": "temperatureC",
+        "inputMin": 0,
+        "inputMax": 50,
+        "scale": 2,
+        "unit": "°C",
+        "warningMin": 25,
+        "warningMax": 33
+      },
+      {
+        "field": "ph",
+        "inputMin": 0,
+        "inputMax": 14,
+        "scale": 2,
+        "unit": "pH",
+        "warningMin": 7.5,
+        "warningMax": 8.5
+      },
+      {
+        "field": "dissolvedOxygenMgL",
+        "inputMin": 0,
+        "inputMax": null,
+        "scale": 3,
+        "unit": "mg/L",
+        "warningMin": 4,
+        "warningMax": null
+      },
+      {
+        "field": "salinityPpt",
+        "inputMin": 0,
+        "inputMax": null,
+        "scale": 3,
+        "unit": "ppt",
+        "warningMin": 10,
+        "warningMax": 30
+      },
+      {
+        "field": "nh3MgL",
+        "inputMin": 0,
+        "inputMax": null,
+        "scale": 5,
+        "unit": "mg/L",
+        "warningMin": null,
+        "warningMax": 0.1
+      },
+      {
+        "field": "no2MgL",
+        "inputMin": 0,
+        "inputMax": null,
+        "scale": 5,
+        "unit": "mg/L",
+        "warningMin": null,
+        "warningMax": 0.5
+      },
+      {
+        "field": "alkalinityMgLCaCO3",
+        "inputMin": 0,
+        "inputMax": null,
+        "scale": 2,
+        "unit": "mg/L CaCO3",
+        "warningMin": 100,
+        "warningMax": 250
+      },
+      {
+        "field": "h2sMgL",
+        "inputMin": 0,
+        "inputMax": null,
+        "scale": 5,
+        "unit": "mg/L",
+        "warningMin": null,
+        "warningMax": 0.05
+      }
+    ]
+  },
+  "BLACK_TIGER": {
+    "schemaVersion": 1,
+    "policyVersion": "water-v1",
+    "shrimpType": "BLACK_TIGER",
+    "recordedAtFutureToleranceSeconds": 300,
+    "noteMaxLength": 2000,
+    "metrics": [
+      {
+        "field": "temperatureC",
+        "inputMin": 0,
+        "inputMax": 50,
+        "scale": 2,
+        "unit": "°C",
+        "warningMin": 26,
+        "warningMax": 32
+      },
+      {
+        "field": "ph",
+        "inputMin": 0,
+        "inputMax": 14,
+        "scale": 2,
+        "unit": "pH",
+        "warningMin": 7.5,
+        "warningMax": 8.5
+      },
+      {
+        "field": "dissolvedOxygenMgL",
+        "inputMin": 0,
+        "inputMax": null,
+        "scale": 3,
+        "unit": "mg/L",
+        "warningMin": 4,
+        "warningMax": null
+      },
+      {
+        "field": "salinityPpt",
+        "inputMin": 0,
+        "inputMax": null,
+        "scale": 3,
+        "unit": "ppt",
+        "warningMin": 10,
+        "warningMax": 30
+      },
+      {
+        "field": "nh3MgL",
+        "inputMin": 0,
+        "inputMax": null,
+        "scale": 5,
+        "unit": "mg/L",
+        "warningMin": null,
+        "warningMax": 0.1
+      },
+      {
+        "field": "no2MgL",
+        "inputMin": 0,
+        "inputMax": null,
+        "scale": 5,
+        "unit": "mg/L",
+        "warningMin": null,
+        "warningMax": 0.5
+      },
+      {
+        "field": "alkalinityMgLCaCO3",
+        "inputMin": 0,
+        "inputMax": null,
+        "scale": 2,
+        "unit": "mg/L CaCO3",
+        "warningMin": 100,
+        "warningMax": 250
+      },
+      {
+        "field": "h2sMgL",
+        "inputMin": 0,
+        "inputMax": null,
+        "scale": 5,
+        "unit": "mg/L",
+        "warningMin": null,
+        "warningMax": 0.05
+      }
+    ]
+  }
+}

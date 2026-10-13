@@ -15,9 +15,7 @@ const assignmentWhere = (accountId, query = {}) => ({
             ],
         }),
         pond: {
-            isDeleted: false,
             farm: {
-                isDeleted: false,
                 ...(query.farmId && { id: query.farmId }),
             },
         },
@@ -73,8 +71,8 @@ const normalizeListItem = (assignment) => ({
 
 /**
  * List seasons with a current technician assignment using cursor pagination.
- * Deleted farms and ponds are excluded; counts include active seasons and
- * all matching assignments regardless of the requested season status.
+ * Counts include active seasons and all matching assignments regardless of
+ * the requested season status. Access follows the current assignment.
  */
 const getAssignedSeasons = async (accountId, query = {}) => {
     const { limit = 20, cursor } = query;
@@ -122,7 +120,7 @@ const getAssignedSeasons = async (accountId, query = {}) => {
 /**
  * Get details of a season currently assigned to the technician.
  * Include current personnel, the latest valid biomass estimate and other
- * currently assigned seasons in the same non-deleted farm and ponds.
+ * currently assigned seasons in the same farm.
  */
 const getAssignedSeason = async (accountId, seasonId) => {
     const assignment = await prisma.seasonPersonnelAssignment.findFirst({
@@ -174,9 +172,7 @@ const getAssignedSeason = async (accountId, seasonId) => {
             seasonId: { not: seasonId },
             season: {
                 pond: {
-                    isDeleted: false,
                     farmId: pond.farm.id,
-                    farm: { isDeleted: false },
                 },
             },
         },

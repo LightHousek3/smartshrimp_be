@@ -166,6 +166,21 @@ const THRESHOLD_FIELD_MAP = {
     h2sMgL: 'h2sMgL',
 };
 
+const WATER_METRICS_POLICY_VERSION = 'water-v1';
+const WATER_RECORDED_AT_FUTURE_TOLERANCE_SECONDS = 300;
+const WATER_NOTE_MAX_LENGTH = 2000;
+// Validation ranges stay unchanged; scale describes PostgreSQL storage precision.
+const WATER_METRIC_DEFINITIONS = Object.freeze({
+    temperatureC: { inputMin: 0, inputMax: 50, scale: 2 },
+    ph: { inputMin: 0, inputMax: 14, scale: 2 },
+    dissolvedOxygenMgL: { inputMin: 0, inputMax: null, scale: 3 },
+    salinityPpt: { inputMin: 0, inputMax: null, scale: 3 },
+    nh3MgL: { inputMin: 0, inputMax: null, scale: 5 },
+    no2MgL: { inputMin: 0, inputMax: null, scale: 5 },
+    alkalinityMgLCaCO3: { inputMin: 0, inputMax: null, scale: 2 },
+    h2sMgL: { inputMin: 0, inputMax: null, scale: 5 },
+});
+
 /**
  * Kiểm tra các chỉ số đo so với ngưỡng của loại tôm.
  * @param {string} shrimpType 'WHITELEG' | 'BLACK_TIGER' (đúng enum SHRIMP_TYPE)
@@ -215,5 +230,9 @@ module.exports = {
     NOTIFICATION_TYPE,
     WATER_THRESHOLDS,
     THRESHOLD_FIELD_MAP,
+    WATER_METRIC_DEFINITIONS,
+    WATER_METRICS_POLICY_VERSION,
+    WATER_RECORDED_AT_FUTURE_TOLERANCE_SECONDS,
+    WATER_NOTE_MAX_LENGTH,
     checkWaterThresholds,
 };

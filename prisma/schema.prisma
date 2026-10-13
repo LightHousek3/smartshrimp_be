@@ -57,6 +57,13 @@ enum PondStatus {
   @@map("pond_status")
 }
 
+enum FarmStatus {
+  ACTIVE   @map("active")
+  INACTIVE @map("inactive")
+
+  @@map("farm_status")
+}
+
 enum PondType {
   AQUACULTURE     @map("aquaculture")
   WATER_TREATMENT @map("water_treatment")
@@ -343,8 +350,7 @@ model Farm {
   latitude          Decimal?  @db.Decimal(10, 8)
   longitude         Decimal?  @db.Decimal(11, 8)
   totalAreaHectares Decimal?  @map("total_area_hectares") @db.Decimal(10, 2)
-  isDeleted         Boolean   @default(false) @map("is_deleted")
-  deletedAt         DateTime? @map("deleted_at") @db.Timestamptz(6)
+  status            FarmStatus @default(ACTIVE)
   createdAt         DateTime  @default(now()) @map("created_at") @db.Timestamptz(6)
   updatedAt         DateTime  @default(now()) @map("updated_at") @db.Timestamptz(6)
   owner             Account   @relation(fields: [ownerId], references: [id], onDelete: Restrict)
@@ -362,8 +368,6 @@ model Pond {
   volumeM3  Decimal?            @map("volume_m3") @db.Decimal(14, 2)
   type      PondType            @default(AQUACULTURE)
   status    PondStatus          @default(AVAILABLE)
-  isDeleted Boolean             @default(false) @map("is_deleted")
-  deletedAt DateTime?           @map("deleted_at") @db.Timestamptz(6)
   createdAt DateTime            @default(now()) @map("created_at") @db.Timestamptz(6)
   updatedAt DateTime            @default(now()) @map("updated_at") @db.Timestamptz(6)
   farm      Farm                @relation(fields: [farmId], references: [id], onDelete: Restrict)
@@ -627,8 +631,6 @@ model Product {
   conversionUnit        ConversionUnit?        @map("conversion_unit")
   minAlertQuantity      Decimal                @default(0) @map("min_alert_quantity") @db.Decimal(14, 3)
   description           String?
-  isDeleted             Boolean                @default(false) @map("is_deleted")
-  deletedAt             DateTime?              @map("deleted_at") @db.Timestamptz(6)
   createdAt             DateTime               @default(now()) @map("created_at") @db.Timestamptz(6)
   updatedAt             DateTime               @default(now()) @map("updated_at") @db.Timestamptz(6)
   protocolItems         ProtocolItem[]
@@ -649,8 +651,6 @@ model ProductionProtocolTemplate {
   allowedVariancePct Decimal     @default(10) @map("allowed_variance_pct") @db.Decimal(5, 2)
   createdBy          String      @map("created_by") @db.Uuid
   archivedAt         DateTime?   @map("archived_at") @db.Timestamptz(6)
-  isDeleted          Boolean     @default(false) @map("is_deleted")
-  deletedAt          DateTime?   @map("deleted_at") @db.Timestamptz(6)
   createdAt          DateTime    @default(now()) @map("created_at") @db.Timestamptz(6)
   updatedAt          DateTime    @default(now()) @map("updated_at") @db.Timestamptz(6)
 
@@ -671,8 +671,6 @@ model Task {
   startedAt          DateTime?    @map("started_at") @db.Timestamptz(6)
   completedAt        DateTime?    @map("completed_at") @db.Timestamptz(6)
   cancellationReason String?      @map("cancellation_reason")
-  isDeleted          Boolean      @default(false) @map("is_deleted")
-  deletedAt          DateTime?    @map("deleted_at") @db.Timestamptz(6)
   createdAt          DateTime     @default(now()) @map("created_at") @db.Timestamptz(6)
   updatedAt          DateTime     @default(now()) @map("updated_at") @db.Timestamptz(6)
 

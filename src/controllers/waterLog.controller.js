@@ -2,6 +2,14 @@ const { waterLogService } = require('../services');
 const { asyncHandler, ResponseHandler } = require('../utils');
 const { messages } = require('../constants');
 
+const metadataHandler = (scope) => asyncHandler(async (req, res) => {
+    const data = await waterLogService.getMetadata(req.account.id, req.params.seasonId, scope);
+    ResponseHandler.success(res, { message: messages.WATER_LOG.METADATA_FETCHED, data });
+});
+const getMetadata = metadataHandler('ktv');
+const getMetadataAsExpert = metadataHandler('expert');
+const getMetadataAsOwner = metadataHandler('owner');
+
 const getIdempotencyKey = (req) => {
     const value = req.headers['idempotency-key'];
     return typeof value === 'string' ? value.trim().slice(0, 128) : '';
@@ -137,6 +145,9 @@ const getStatisticsAsOwner = asyncHandler(async (req, res) => {
 });
 
 module.exports = {
+    getMetadata,
+    getMetadataAsExpert,
+    getMetadataAsOwner,
     createWaterLog,
     listWaterLogs,
     voidWaterLog,

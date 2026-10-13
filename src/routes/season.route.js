@@ -34,6 +34,7 @@ router.patch(
 router.patch('/:seasonId', validate(seasonValidator.updateSeason), seasonController.updateSeason);
 
 // Nhật ký đo nước — chủ trại chỉ đọc (D5).
+router.get('/:seasonId/water-logs/metadata', validate(waterLogValidator.getMetadata), waterLogController.getMetadataAsOwner);
 router.get('/:seasonId/water-logs', validate(waterLogValidator.listWaterLogs), waterLogController.listWaterLogsAsOwner);
 router.get('/:seasonId/water-logs/statistics', validate(waterLogValidator.getStatistics), waterLogController.getStatisticsAsOwner);
 
