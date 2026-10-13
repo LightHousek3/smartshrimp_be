@@ -12,7 +12,12 @@ const expertSeasonController = require('./expertSeason.controller');
 const waterLogController = require('./waterLog.controller');
 const operationController = require('./operation.controller');
 
+const ragDocumentController = require('./ragDocument.controller');
+const ragController = require('./rag.controller');
+
 module.exports = {
+    ragDocumentController,
+    ragController,
     authController,
     adminAccountController,
     profileController,

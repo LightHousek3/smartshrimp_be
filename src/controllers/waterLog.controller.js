@@ -9,6 +9,9 @@ const getIdempotencyKey = (req) => {
 
 // ---- KTV (ghi + đọc) -------------------------------------------------------
 
+/**
+ * POST /me/seasons/:seasonId/water-logs
+ */
 const createWaterLog = asyncHandler(async (req, res) => {
     const { log } = await waterLogService.createWaterLog(
         req.account.id,
@@ -19,6 +22,9 @@ const createWaterLog = asyncHandler(async (req, res) => {
     ResponseHandler.created(res, { message: messages.WATER_LOG.CREATED, data: log });
 });
 
+/**
+ * GET /me/seasons/:seasonId/water-logs
+ */
 const listWaterLogs = asyncHandler(async (req, res) => {
     const { logs, meta } = await waterLogService.listWaterLogs(
         req.account.id,
@@ -33,6 +39,9 @@ const listWaterLogs = asyncHandler(async (req, res) => {
     });
 });
 
+/**
+ * POST /me/seasons/:seasonId/water-logs/:logId/void
+ */
 const voidWaterLog = asyncHandler(async (req, res) => {
     const log = await waterLogService.voidWaterLog(
         req.account.id,
@@ -43,6 +52,9 @@ const voidWaterLog = asyncHandler(async (req, res) => {
     ResponseHandler.success(res, { message: messages.WATER_LOG.VOIDED, data: log });
 });
 
+/**
+ * GET /me/seasons/:seasonId/water-logs/statistics
+ */
 const getStatistics = asyncHandler(async (req, res) => {
     const statistics = await waterLogService.getStatistics(
         req.account.id,
@@ -58,6 +70,9 @@ const getStatistics = asyncHandler(async (req, res) => {
 
 // ---- Chuyên gia / Chủ trại (chỉ đọc — D5) -----------------------------------
 
+/**
+ * GET /expert/seasons/:seasonId/water-logs
+ */
 const listWaterLogsAsExpert = asyncHandler(async (req, res) => {
     const { logs, meta } = await waterLogService.listWaterLogs(
         req.account.id,
@@ -72,6 +87,9 @@ const listWaterLogsAsExpert = asyncHandler(async (req, res) => {
     });
 });
 
+/**
+ * GET /expert/seasons/:seasonId/water-logs/statistics
+ */
 const getStatisticsAsExpert = asyncHandler(async (req, res) => {
     const statistics = await waterLogService.getStatistics(
         req.account.id,
@@ -85,6 +103,9 @@ const getStatisticsAsExpert = asyncHandler(async (req, res) => {
     });
 });
 
+/**
+ * GET /owner/seasons/:seasonId/water-logs
+ */
 const listWaterLogsAsOwner = asyncHandler(async (req, res) => {
     const { logs, meta } = await waterLogService.listWaterLogs(
         req.account.id,
@@ -99,6 +120,9 @@ const listWaterLogsAsOwner = asyncHandler(async (req, res) => {
     });
 });
 
+/**
+ * GET /owner/seasons/:seasonId/water-logs/statistics
+ */
 const getStatisticsAsOwner = asyncHandler(async (req, res) => {
     const statistics = await waterLogService.getStatistics(
         req.account.id,

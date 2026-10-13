@@ -180,6 +180,53 @@ const messages = {
         LIST_FETCHED: 'Lấy danh sách vụ nuôi được phân công thành công',
     },
 
+    RAG: {
+        QUESTION_SAVED: 'Đã xử lý câu hỏi.',
+        CONVERSATION_FETCHED: 'Đã tải hội thoại.',
+        LIST_FETCHED: 'Đã tải danh sách hội thoại.',
+        FEEDBACK_SAVED: 'Đã lưu đánh giá.',
+        NOT_FOUND: 'Không tìm thấy hội thoại.',
+        QUERY_NOT_FOUND: 'Không tìm thấy câu trả lời.',
+        SEASON_REQUIRED: 'Hội thoại phải gắn với một vụ nuôi.',
+        SEASON_MISMATCH: 'Không thể đổi vụ nuôi của hội thoại.',
+        ASSIGNMENT_REQUIRED: 'Bạn cần phân công còn hiệu lực vào vụ nuôi này.',
+        SEASON_CLOSED: 'Không thể gửi câu hỏi trong vụ nuôi đã hoàn tất hoặc đã hủy.',
+        FORBIDDEN: 'Chỉ kỹ thuật viên đang hoạt động được sử dụng RAG.',
+        NO_ANSWER: 'Chỉ được đánh giá câu trả lời đã được tạo.',
+        UNAVAILABLE: 'Dịch vụ AI hiện không khả dụng. Vui lòng thử lại.',
+        CONFLICT: 'Dữ liệu hoặc quyền truy cập đã thay đổi. Vui lòng thử lại.',
+    },
+
+    RAG_WARNINGS: {
+        NO_SOURCE: 'Chưa tìm thấy nguồn tham chiếu. Vui lòng kiểm chứng câu trả lời trước khi áp dụng.',
+        LOW_MATCH: 'Nguồn tham chiếu có độ liên quan thấp. Vui lòng kiểm chứng câu trả lời trước khi áp dụng.',
+    },
+
+    RAG_DOCUMENT: {
+        CREATED: 'Đã thêm tài liệu vào kho kiến thức chatbot.',
+        FILE_REQUIRED: 'Vui lòng tải lên một tài liệu trong trường file.',
+        INVALID_UPLOAD: 'Chỉ được tải lên một tài liệu cùng tên, danh mục và mô tả.',
+        INVALID_NAME: 'Tên tài liệu không hợp lệ hoặc vượt quá 500 ký tự.',
+        UNSUPPORTED: 'Chỉ hỗ trợ tài liệu PDF, DOCX, MD và TXT.',
+        TOO_LARGE: 'Tài liệu không được vượt quá 10 MB.',
+        EMPTY: 'Tài liệu rỗng hoặc không có nội dung văn bản đọc được.',
+        INVALID_CONTENT: 'Không thể đọc tài liệu. Vui lòng kiểm tra định dạng và nội dung file.',
+        DUPLICATE: 'Tên tài liệu đã tồn tại trong kho kiến thức.',
+        UNAVAILABLE: 'Không thể nạp tài liệu vào dịch vụ AI. Vui lòng thử lại.',
+        TIMEOUT: 'Quá thời gian nạp tài liệu. Hãy kiểm tra kết quả trước khi thử lại.',
+    },
+
+    RAG_DOCUMENT_ERRORS: {
+        RAG_SOURCE_MISSING: 'File gốc không còn trên Cloudinary. Vui lòng tải lại file gốc của tài liệu.',
+        RAG_STORAGE_AUTH: 'Không có quyền đọc kho lưu trữ. Vui lòng kiểm tra cấu hình Cloudinary.',
+        RAG_STORAGE_TIMEOUT: 'Quá thời gian đọc file từ Cloudinary. Vui lòng thử lại.',
+        RAG_STORAGE_UNAVAILABLE: 'Chưa thể kết nối hoặc đọc file từ Cloudinary. Vui lòng thử lại.',
+        RAG_INVALID_CONTENT: 'Nội dung, dung lượng hoặc hash file không hợp lệ. Vui lòng kiểm tra file.',
+        RAG_INGESTION_TIMEOUT: 'Quá thời gian xử lý RAG. Bạn có thể thử lại xử lý.',
+        RAG_INGESTION_FAILED: 'Xử lý RAG chưa hoàn tất. Vui lòng thử lại xử lý.',
+        RAG_REUPLOAD_FILE_MISMATCH: 'File được chọn không khớp bản gốc. Vui lòng chọn file có cùng nội dung và định dạng ban đầu.',
+    },
+
     // Generic CRUD
     CRUD: {
         CREATED: (resource) => `Tạo ${resource} thành công`,

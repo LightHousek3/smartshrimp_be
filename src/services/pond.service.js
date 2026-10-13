@@ -89,6 +89,10 @@ const requireUniquePondName = async (client, farmId, name, excludedPondId) => {
     }
 };
 
+/**
+ * List non-deleted ponds in an owned farm with filters and pagination.
+ * Farm ownership is checked before reading ponds or counting results.
+ */
 const getPonds = async (farmId, ownerId, query) => {
     await requireOwnedFarm(prisma, farmId, ownerId);
     const { page, limit, search, status, type } = query;
@@ -129,6 +133,10 @@ const findOwnedPond = async (client, farmId, pondId, ownerId, select) => {
     return pond;
 };
 
+/**
+ * Get an owned pond with its current planning or active season.
+ * Decimal measurements are converted to numbers in the response.
+ */
 const getPond = async (farmId, pondId, ownerId) => {
     const pond = await findOwnedPond(prisma, farmId, pondId, ownerId, POND_DETAIL_SELECT);
     return normalizePondDetail(pond);
@@ -145,6 +153,10 @@ const mapWriteError = (error) => {
     throw error;
 };
 
+/**
+ * Create a pond in an owned farm and resolve its usable water volume.
+ * Name uniqueness and creation share a serializable transaction.
+ */
 const createPond = async (farmId, pondData, ownerId) => {
     try {
         const pond = await prisma.$transaction(async (transaction) => {
@@ -169,6 +181,11 @@ const createPond = async (farmId, pondData, ownerId) => {
     }
 };
 
+/**
+ * Update an owned pond and recalculate volume when dimensions change.
+ * An open season prevents changes to pond type, volume or inactive status.
+ * Ownership, name uniqueness and updates share a serializable transaction.
+ */
 const updatePond = async (farmId, pondId, pondData, ownerId) => {
     try {
         const pond = await prisma.$transaction(async (transaction) => {
@@ -231,6 +248,10 @@ const updatePond = async (farmId, pondId, pondData, ownerId) => {
     }
 };
 
+/**
+ * Soft-delete an owned pond only when it has no planning or active season.
+ * Ownership and season checks run in the same transaction as deletion.
+ */
 const deletePond = async (farmId, pondId, ownerId) => {
     try {
         const pond = await prisma.$transaction(async (transaction) => {

@@ -2,6 +2,9 @@ const { pondService } = require('../services');
 const { asyncHandler, ResponseHandler } = require('../utils');
 const { messages } = require('../constants');
 
+/**
+ * GET /owner/farms/:farmId/ponds
+ */
 const getPonds = asyncHandler(async (req, res) => {
     const { ponds, meta } = await pondService.getPonds(
         req.params.farmId,
@@ -11,16 +14,25 @@ const getPonds = asyncHandler(async (req, res) => {
     ResponseHandler.paginated(res, { message: messages.POND.LIST_FETCHED, data: ponds, meta });
 });
 
+/**
+ * GET /owner/farms/:farmId/ponds/:pondId
+ */
 const getPond = asyncHandler(async (req, res) => {
     const pond = await pondService.getPond(req.params.farmId, req.params.pondId, req.account.id);
     ResponseHandler.success(res, { message: messages.POND.FETCHED, data: pond });
 });
 
+/**
+ * POST /owner/farms/:farmId/ponds
+ */
 const createPond = asyncHandler(async (req, res) => {
     const pond = await pondService.createPond(req.params.farmId, req.body, req.account.id);
     ResponseHandler.created(res, { message: messages.POND.CREATED, data: pond });
 });
 
+/**
+ * PATCH /owner/farms/:farmId/ponds/:pondId
+ */
 const updatePond = asyncHandler(async (req, res) => {
     const pond = await pondService.updatePond(
         req.params.farmId,
@@ -31,6 +43,9 @@ const updatePond = asyncHandler(async (req, res) => {
     ResponseHandler.success(res, { message: messages.POND.UPDATED, data: pond });
 });
 
+/**
+ * DELETE /owner/farms/:farmId/ponds/:pondId
+ */
 const deletePond = asyncHandler(async (req, res) => {
     const pond = await pondService.deletePond(req.params.farmId, req.params.pondId, req.account.id);
     ResponseHandler.success(res, { message: messages.POND.DELETED, data: pond });

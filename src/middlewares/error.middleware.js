@@ -46,6 +46,7 @@ const errorHandler = (err, req, res, next) => {
         success: false,
         statusCode,
         message,
+        ...(err.isOperational && err.errorCode && { errorCode: err.errorCode }),
         ...(config.env === 'development' && { stack: err.stack }),
     };
 

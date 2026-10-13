@@ -249,6 +249,12 @@ const buildThresholdAlertContent = (season, exceeded) => {
     );
 };
 
+/**
+ * Create a water quality log for a technician currently assigned to an active season.
+ * Reject measurements too far in the future and reuse matching idempotent requests.
+ * Save threshold alerts with the log in one transaction, then emit the notification
+ * after commit. Idempotency keys are cached only within this server instance.
+ */
 const createWaterLog = async (accountId, seasonId, payload, idempotencyKey) => {
     const season = await resolveKtvScope(accountId, seasonId, { requireActiveSeason: true });
 
@@ -343,6 +349,10 @@ const createWaterLog = async (accountId, seasonId, payload, idempotencyKey) => {
 // F2 — Danh sách nhật ký đo nước
 // ---------------------------------------------------------------------------
 
+/**
+ * List season water logs after resolving technician, expert or owner access.
+ * Apply date filters and cursor pagination; voided logs are excluded by default.
+ */
 const listWaterLogs = async (accountId, seasonId, query = {}, scope = 'ktv') => {
     const resolver = SCOPE_RESOLVERS[scope];
     if (!resolver) {
@@ -401,6 +411,11 @@ const listWaterLogs = async (accountId, seasonId, query = {}, scope = 'ktv') => 
 // F3 — Hủy hiệu lực nhật ký đo nước
 // ---------------------------------------------------------------------------
 
+/**
+ * Void an existing log with an audit reason while the assigned season is active.
+ * Only the currently assigned technician can void a log. Measurements remain
+ * unchanged, and a concurrent or repeated void is reported as a conflict.
+ */
 const voidWaterLog = async (accountId, seasonId, logId, voidReason) => {
     // BR-WATER-01: chỉ KTV đương nhiệm (assignment đang hiệu lực) được void.
     const season = await resolveKtvScope(accountId, seasonId);
@@ -462,6 +477,12 @@ const bucketKeyOf = (date, granularity) => {
     return `${y}-${m}-${String(d).padStart(2, '0')}`;
 };
 
+/**
+ * Aggregate valid water logs after resolving technician, expert or owner access.
+ * Limit the date range to 90 days and group daily or weekly series in farm time
+ * (UTC+7). Voided logs are counted separately and excluded from measurements
+ * and threshold exceedance rates.
+ */
 const getStatistics = async (accountId, seasonId, query = {}, scope = 'ktv') => {
     const resolver = SCOPE_RESOLVERS[scope];
     if (!resolver) {

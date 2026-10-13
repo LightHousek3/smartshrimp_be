@@ -12,7 +12,12 @@ const expertSeasonValidator = require('./expertSeason.validator');
 const waterLogValidator = require('./waterLog.validator');
 const operationValidator = require('./operation.validator');
 
+const ragDocumentValidator = require('./ragDocument.validator');
+const ragValidator = require('./rag.validator');
+
 module.exports = {
+    ragDocumentValidator,
+    ragValidator,
     authValidator,
     adminAccountValidator,
     profileValidator,
