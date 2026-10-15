@@ -71,6 +71,19 @@ test.each([['me', 'TECHNICIAN'], ['expert', 'EXPERT'], ['owner', 'FARM_OWNER']])
     await request(app).get(path).set('Authorization', 'ADMIN').expect(403);
     await request(app).get(`/${prefix}/seasons/invalid/water-logs/metadata`).set('Authorization', role).expect(400);
 });
+
+test.each([['me', 'TECHNICIAN'], ['expert', 'EXPERT'], ['owner', 'FARM_OWNER']])('%s list returns high/low details alongside legacy fields', async (prefix, role) => {
+    const fixture = require('./fixtures/water-warning-directions.json');
+    prisma.waterQualityLog.findMany.mockResolvedValue([{
+        ...fixture, recordedAt: new Date(fixture.recordedAt), createdAt: new Date(fixture.createdAt),
+    }]);
+    prisma.waterQualityLog.count.mockResolvedValue(1);
+    const result = await request(app).get(`/${prefix}/seasons/${seasonId}/water-logs`)
+        .set('Authorization', role).expect(200);
+    expect(result.body).toMatchObject({ success: true, data: [fixture], meta: {
+        totalResults: 1, hasNextPage: false, nextCursor: null,
+    } });
+});
 test('metadata route propagates missing season, scope and database failures', async () => {
     const path = `/me/seasons/${seasonId}/water-logs/metadata`;
     prisma.aquacultureSeason.findUnique.mockResolvedValueOnce(null);

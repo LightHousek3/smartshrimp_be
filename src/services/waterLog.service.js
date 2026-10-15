@@ -187,6 +187,7 @@ const normalizeLog = (log, shrimpType) => {
     for (const field of METRIC_FIELDS) {
         values[field] = toNumberOrNull(log[field]);
     }
+    const exceededParameterDetails = checkWaterThresholds(shrimpType, values);
     return {
         id: log.id,
         seasonId: log.seasonId,
@@ -199,7 +200,8 @@ const normalizeLog = (log, shrimpType) => {
         voidedAt: toIsoOrNull(log.voidedAt),
         voidReason: log.voidReason,
         createdAt: log.createdAt.toISOString(),
-        exceededParameters: checkWaterThresholds(shrimpType, values).map((e) => e.field),
+        exceededParameters: exceededParameterDetails.map((e) => e.field),
+        exceededParameterDetails,
     };
 };
 

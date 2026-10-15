@@ -185,7 +185,7 @@ const WATER_METRIC_DEFINITIONS = Object.freeze({
  * Kiểm tra các chỉ số đo so với ngưỡng của loại tôm.
  * @param {string} shrimpType 'WHITELEG' | 'BLACK_TIGER' (đúng enum SHRIMP_TYPE)
  * @param {Object} values object các chỉ số (Decimal hoặc number, null = không đo)
- * @returns {Array<{field, value, min, max, unit}>} danh sách chỉ số vượt ngưỡng
+ * @returns {Array<{field, direction, value, min, max, unit}>} danh sách chỉ số vượt ngưỡng
  */
 const checkWaterThresholds = (shrimpType, values = {}) => {
     const thresholds = WATER_THRESHOLDS[shrimpType];
@@ -200,7 +200,8 @@ const checkWaterThresholds = (shrimpType, values = {}) => {
         if (Number.isNaN(value)) continue;
         const { min, max, unit } = thresholds[key];
         if ((min !== null && value < min) || (max !== null && value > max)) {
-            exceeded.push({ field, value, min, max, unit });
+            const direction = min !== null && value < min ? 'below_min' : 'above_max';
+            exceeded.push({ field, direction, value, min, max, unit });
         }
     }
     return exceeded;

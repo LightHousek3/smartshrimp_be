@@ -13,6 +13,7 @@ const service = require('../src/services/waterLog.service');
 const validator = require('../src/validators/waterLog.validator');
 const { WATER_THRESHOLDS } = require('../src/constants');
 const fixture = require('./fixtures/water-metadata.json');
+const warningFixture = require('./fixtures/water-warning-directions.json');
 const seasonId = '11111111-1111-4111-8111-111111111111';
 const accountId = '22222222-2222-4222-8222-222222222222';
 const recordedAt = new Date('2026-01-02T00:00:00Z');
@@ -92,7 +93,50 @@ test('persisted precision is used for both alert and response', async () => {
     const result = await service.createWaterLog(accountId, seasonId, { recordedAt, ph: 8.504 });
     expect(result.log.ph).toBe(8.5);
     expect(result.log.exceededParameters).toEqual([]);
+    expect(result.log.exceededParameterDetails).toEqual([]);
     expect(tx.notification.create).not.toHaveBeenCalled();
+});
+
+test.each(['WHITELEG', 'BLACK_TIGER'])('warning directions preserve inclusive bounds and missing metrics for %s', (species) => {
+    const { Prisma } = require('@prisma/client');
+    for (const [field, { min, max, unit }] of Object.entries(WATER_THRESHOLDS[species])) {
+        expect(service._checkWaterThresholds(species, { [field]: null })).toEqual([]);
+        expect(service._checkWaterThresholds(species, {})).toEqual([]);
+        if (min !== null) {
+            expect(service._checkWaterThresholds(species, { [field]: new Prisma.Decimal(min) })).toEqual([]);
+            const value = min - 0.001;
+            expect(service._checkWaterThresholds(species, { [field]: new Prisma.Decimal(value) })).toEqual([
+                { field, direction: 'below_min', value, min, max, unit },
+            ]);
+        }
+        if (max !== null) {
+            expect(service._checkWaterThresholds(species, { [field]: new Prisma.Decimal(max) })).toEqual([]);
+            const value = max + 0.001;
+            expect(service._checkWaterThresholds(species, { [field]: new Prisma.Decimal(value) })).toEqual([
+                { field, direction: 'above_max', value, min, max, unit },
+            ]);
+        }
+    }
+});
+
+test('create, replay, list and void expose the same additive warning contract', async () => {
+    const payload = { recordedAt, ph: 9, dissolvedOxygenMgL: 3 };
+    const persisted = makeLog({ ph: 9, dissolvedOxygenMgL: 3 });
+    const first = await service.createWaterLog(accountId, seasonId, payload, 'directions');
+    prisma.waterQualityLog.findUnique.mockResolvedValue(persisted);
+    const replay = await service.createWaterLog(accountId, seasonId, payload, 'directions');
+    prisma.waterQualityLog.findMany.mockResolvedValue([persisted]);
+    prisma.waterQualityLog.count.mockResolvedValue(1);
+    const page = await service.listWaterLogs(accountId, seasonId, {});
+    prisma.waterQualityLog.findFirst.mockResolvedValue(persisted);
+    prisma.waterQualityLog.update.mockResolvedValue({ ...persisted, isVoided: true });
+    const voided = await service.voidWaterLog(accountId, seasonId, persisted.id, 'wrong sample');
+    for (const log of [first.log, replay.log, page.logs[0], voided]) {
+        expect(log.exceededParameters).toEqual(warningFixture.exceededParameters);
+        expect(log.exceededParameterDetails).toEqual(warningFixture.exceededParameterDetails);
+    }
+    expect(tx.waterQualityLog.create).toHaveBeenCalledTimes(1);
+    expect(emitNotification).toHaveBeenCalledTimes(1);
 });
 test('idempotent replay does not create or emit twice and different payload conflicts', async () => {
     const payload = { recordedAt, ph: 9 };
