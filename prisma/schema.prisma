@@ -64,6 +64,13 @@ enum FarmStatus {
   @@map("farm_status")
 }
 
+enum ProductStatus {
+  ACTIVE   @map("active")
+  INACTIVE @map("inactive")
+
+  @@map("product_status")
+}
+
 enum PondType {
   AQUACULTURE     @map("aquaculture")
   WATER_TREATMENT @map("water_treatment")
@@ -351,6 +358,8 @@ model Farm {
   longitude         Decimal?  @db.Decimal(11, 8)
   totalAreaHectares Decimal?  @map("total_area_hectares") @db.Decimal(10, 2)
   status            FarmStatus @default(ACTIVE)
+  isDeleted         Boolean   @default(false) @map("is_deleted")
+  deletedAt         DateTime? @map("deleted_at") @db.Timestamptz(6)
   createdAt         DateTime  @default(now()) @map("created_at") @db.Timestamptz(6)
   updatedAt         DateTime  @default(now()) @map("updated_at") @db.Timestamptz(6)
   owner             Account   @relation(fields: [ownerId], references: [id], onDelete: Restrict)
@@ -631,6 +640,7 @@ model Product {
   conversionUnit        ConversionUnit?        @map("conversion_unit")
   minAlertQuantity      Decimal                @default(0) @map("min_alert_quantity") @db.Decimal(14, 3)
   description           String?
+  status                ProductStatus          @default(ACTIVE)
   isDeleted             Boolean                @default(false) @map("is_deleted")
   deletedAt             DateTime?              @map("deleted_at") @db.Timestamptz(6)
   createdAt             DateTime               @default(now()) @map("created_at") @db.Timestamptz(6)

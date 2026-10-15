@@ -268,6 +268,13 @@ const messages = {
         INVALID_IDEMPOTENCY_KEY: 'Mã idempotency_key không hợp lệ',
     },
 
+    // Owner dashboard
+    OWNER_DASHBOARD: {
+        FETCHED: 'Lấy tổng quan vận hành thành công',
+        FINANCE_FETCHED: 'Lấy thống kê thu chi thành công',
+        INVALID_RANGE: 'Khoảng ngày phải từ trước đến sau, không ở tương lai và không quá 60 tháng.',
+    },
+
     // Server
     SERVER: {
         INTERNAL_ERROR: 'Lỗi máy chủ nội bộ',
