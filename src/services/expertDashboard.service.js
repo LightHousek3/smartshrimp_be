@@ -8,15 +8,11 @@ const localDate = new Intl.DateTimeFormat('en-US', {
     day: '2-digit',
 });
 
-const visibleSeason = {
-    pond: { isDeleted: false, farm: { isDeleted: false } },
-};
-
 const activeAssignment = (accountId, status) => ({
     accountId,
     role: PERSONNEL_ROLE.EXPERT,
     unassignedAt: null,
-    season: { ...visibleSeason, status },
+    season: { status },
 });
 
 const toNumber = (value) => (value == null ? null : Number(value));

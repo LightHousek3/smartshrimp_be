@@ -1,17 +1,3 @@
-const buildAndWhere = (where = {}, constraint = {}) => {
-    if (Object.keys(where).length === 0) return constraint;
-    return { AND: [constraint, where] };
-};
-
-const notDeleted = (where = {}) => buildAndWhere(where, { isDeleted: false });
-
-const onlyDeleted = (where = {}) => buildAndWhere(where, { isDeleted: true });
-
-const deletionData = (deletedAt = new Date()) => ({
-    isDeleted: true,
-    deletedAt,
-});
-
 const assertPositiveInteger = (value, name) => {
     if (!Number.isInteger(value) || value < 1) {
         throw new TypeError(`${name} must be a positive integer`);
@@ -81,17 +67,7 @@ const paginateCursor = async ({
     };
 };
 
-const softDeleteMany = ({ delegate, where, deletedAt = new Date() }) =>
-    delegate.updateMany({
-        where: notDeleted(where),
-        data: deletionData(deletedAt),
-    });
-
 module.exports = {
-    deletionData,
-    notDeleted,
-    onlyDeleted,
     paginateCursor,
     paginateOffset,
-    softDeleteMany,
 };

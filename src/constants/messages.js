@@ -87,6 +87,7 @@ const messages = {
         NAME_ALREADY_EXISTS: 'Tên trang trại đã tồn tại trong danh sách đang hoạt động',
         OWNER_NOT_ELIGIBLE: 'Chỉ chủ trang trại đang hoạt động mới có thể tạo trang trại',
         HAS_OPEN_SEASON: 'Không thể xóa trang trại đang có vụ nuôi ở trạng thái lập kế hoạch hoặc đang hoạt động',
+        HAS_REFERENCES: 'Không thể xóa trang trại còn dữ liệu liên quan',
         CHANGE_CONFLICT: 'Trạng thái trang trại đã thay đổi. Vui lòng tải lại và thử lại',
     },
 
@@ -99,6 +100,7 @@ const messages = {
         NOT_FOUND: 'Không tìm thấy ao',
         NAME_ALREADY_EXISTS: 'Tên ao đã tồn tại trong danh sách đang hoạt động của trang trại',
         HAS_OPEN_SEASON: 'Không thể xóa ao đang có vụ nuôi lập kế hoạch hoặc hoạt động',
+        HAS_REFERENCES: 'Không thể xóa ao còn dữ liệu liên quan hoặc lịch sử vụ nuôi',
         OPEN_SEASON_RESTRICTS_UPDATE: 'Vụ nuôi đang mở không cho phép thay đổi loại ao, ngừng hoạt động hoặc thay đổi thể tích',
         VOLUME_OUT_OF_RANGE: 'Thể tích tính từ diện tích và độ sâu vượt quá giới hạn cho phép',
         VOLUME_EXCEEDS_CAPACITY: 'Thể tích không được vượt quá diện tích nhân với độ sâu của ao',
@@ -118,6 +120,7 @@ const messages = {
         POND_NOT_FOUND: 'Không tìm thấy ao thuộc trang trại của bạn',
         INVALID_CURSOR: 'Không tìm thấy mốc phân trang vụ nuôi',
         FARM_ARCHIVED: 'Không thể tạo vụ nuôi trong trang trại đã lưu trữ',
+        FARM_NOT_ACTIVE: 'Không thể tạo hoặc kích hoạt vụ nuôi trong trang trại không hoạt động',
         POND_ARCHIVED: 'Không thể tạo vụ nuôi trong ao đã lưu trữ',
         POND_NOT_AVAILABLE: 'Chỉ có thể tạo vụ nuôi trong ao đang sẵn sàng',
         POND_NOT_AQUACULTURE: 'Chỉ có thể tạo vụ nuôi trong ao nuôi thủy sản',
@@ -155,6 +158,7 @@ const messages = {
     },
 
     WATER_LOG: {
+        METADATA_FETCHED: 'Lấy cấu hình chỉ số nước thành công',
         CREATED: 'Nhập nhật ký đo nước thành công',
         LIST_FETCHED: 'Lấy danh sách nhật ký đo nước thành công',
         STATISTICS_FETCHED: 'Lấy thống kê chất lượng nước thành công',

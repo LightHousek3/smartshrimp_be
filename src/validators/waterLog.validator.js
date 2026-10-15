@@ -1,4 +1,5 @@
 const Joi = require('joi');
+const { WATER_METRIC_DEFINITIONS, WATER_NOTE_MAX_LENGTH } = require('../constants');
 
 /**
  * Validators cho nhật ký đo nước (water_quality_logs).
@@ -9,15 +10,15 @@ const Joi = require('joi');
 
 const seasonIdParam = Joi.string().uuid({ version: 'uuidv4' }).required();
 
-const metricSchemas = {
-    temperatureC: Joi.number().min(0).max(50),
-    ph: Joi.number().min(0).max(14),
-    dissolvedOxygenMgL: Joi.number().min(0),
-    salinityPpt: Joi.number().min(0),
-    nh3MgL: Joi.number().min(0),
-    no2MgL: Joi.number().min(0),
-    alkalinityMgLCaCO3: Joi.number().min(0),
-    h2sMgL: Joi.number().min(0),
+const metricSchemas = Object.fromEntries(
+    Object.entries(WATER_METRIC_DEFINITIONS).map(([field, { inputMin, inputMax }]) => {
+        const schema = Joi.number().min(inputMin);
+        return [field, inputMax === null ? schema : schema.max(inputMax)];
+    }),
+);
+
+const getMetadata = {
+    params: Joi.object().keys({ seasonId: seasonIdParam }),
 };
 
 const metricKeys = Object.keys(metricSchemas);
@@ -30,7 +31,7 @@ const createWaterLog = {
         .keys({
             recordedAt: Joi.date().iso().required(),
             ...metricSchemas,
-            note: Joi.string().trim().max(2000).allow('', null),
+            note: Joi.string().trim().max(WATER_NOTE_MAX_LENGTH).allow('', null),
         })
         .or(...metricKeys)
         .messages({
@@ -46,6 +47,8 @@ const listWaterLogs = {
         from: Joi.date().iso(),
         to: Joi.date().iso().min(Joi.ref('from')),
         includeVoided: Joi.boolean().default(false),
+        filter: Joi.string().valid('all', 'warning', 'voided'),
+        includeCounts: Joi.boolean().default(false),
         limit: Joi.number().integer().min(1).max(50).default(20),
         cursor: Joi.string().max(1000),
     }),
@@ -73,6 +76,7 @@ const getStatistics = {
 };
 
 module.exports = {
+    getMetadata,
     createWaterLog,
     listWaterLogs,
     voidWaterLog,

@@ -14,6 +14,13 @@ const router = express.Router({ mergeParams: true });
 router.use(authenticate, authorize(ACCOUNT_ROLE.TECHNICIAN));
 
 /**
+ * @route   GET /api/v1/me/seasons/:seasonId/water-logs/metadata
+ * @desc    Read metric ranges, storage scale and species thresholds in any season state
+ * @access  Assigned technician
+ */
+router.get('/metadata', validate(waterLogValidator.getMetadata), waterLogController.getMetadata);
+
+/**
  * @route   POST /api/v1/me/seasons/:seasonId/water-logs
  * @desc    Create a water quality log for an active assigned season and check warning thresholds
  * @access  Technician

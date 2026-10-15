@@ -37,7 +37,6 @@ const assignmentScope = (accountId) => {
 
 const assignedSeasonWhere = (accountId, query = {}) => ({
     AND: [
-        { pond: { isDeleted: false, farm: { isDeleted: false } } },
         assignmentScope(accountId),
         ...(query.status ? [{ status: query.status }] : []),
         ...(query.shrimpType ? [{ shrimpType: query.shrimpType }] : []),
@@ -94,9 +93,7 @@ const getAssignedSeasons = async (accountId, query = {}, now = new Date()) => {
         prisma.aquacultureSeason.count({ where }),
         prisma.farm.findMany({
             where: {
-                isDeleted: false,
                 ponds: { some: {
-                    isDeleted: false,
                     seasons: { some: assignmentScope(accountId) },
                 } },
             },

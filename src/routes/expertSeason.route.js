@@ -10,6 +10,8 @@ router.get('/', authenticate, authorize(ACCOUNT_ROLE.EXPERT),
     expertSeasonController.getAssignedSeasons);
 
 // Nhật ký đo nước — chuyên gia chỉ đọc (D5).
+router.get('/:seasonId/water-logs/metadata', authenticate, authorize(ACCOUNT_ROLE.EXPERT),
+    validate(waterLogValidator.getMetadata), waterLogController.getMetadataAsExpert);
 router.get('/:seasonId/water-logs', authenticate, authorize(ACCOUNT_ROLE.EXPERT),
     validate(waterLogValidator.listWaterLogs),
     waterLogController.listWaterLogsAsExpert);

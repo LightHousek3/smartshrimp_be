@@ -6,6 +6,12 @@ const {
     SEASON_STATUS,
     NOTIFICATION_TYPE,
     checkWaterThresholds,
+    WATER_THRESHOLDS,
+    THRESHOLD_FIELD_MAP,
+    WATER_METRIC_DEFINITIONS,
+    WATER_METRICS_POLICY_VERSION,
+    WATER_RECORDED_AT_FUTURE_TOLERANCE_SECONDS,
+    WATER_NOTE_MAX_LENGTH,
 } = require('../constants');
 const { emitNotification } = require('../realtime/notification.socket');
 
@@ -20,7 +26,7 @@ const { emitNotification } = require('../realtime/notification.socket');
  * - BR-ARCH-03: không SELECT FOR UPDATE cho các read thông thường.
  */
 
-const RECORDED_AT_FUTURE_TOLERANCE_MS = 5 * 60 * 1000; // D3: +5 phút
+const RECORDED_AT_FUTURE_TOLERANCE_MS = WATER_RECORDED_AT_FUTURE_TOLERANCE_SECONDS * 1000;
 const STATISTICS_MAX_RANGE_DAYS = 90;
 const FARM_TZ_OFFSET_MS = 7 * 60 * 60 * 1000; // Asia/Saigon, không DST
 
@@ -67,13 +73,11 @@ const SEASON_WITH_FARM_SELECT = {
         select: {
             id: true,
             name: true,
-            isDeleted: true,
             farm: {
                 select: {
                     id: true,
                     name: true,
                     ownerId: true,
-                    isDeleted: true,
                 },
             },
         },
@@ -133,8 +137,6 @@ const resolveOwnerScope = async (accountId, seasonId) => {
     const season = await findSeason(seasonId);
     if (
         !season ||
-        season.pond.isDeleted ||
-        season.pond.farm.isDeleted ||
         season.pond.farm.ownerId !== accountId
     ) {
         throw ApiError.forbidden(messages.WATER_LOG.NO_ASSIGNMENT);
@@ -146,6 +148,28 @@ const SCOPE_RESOLVERS = {
     ktv: resolveKtvScope,
     expert: resolveExpertScope,
     owner: resolveOwnerScope,
+};
+
+const getMetadata = async (accountId, seasonId, scope = 'ktv') => {
+    const resolver = SCOPE_RESOLVERS[scope];
+    if (!resolver) throw ApiError.forbidden(messages.AUTH.FORBIDDEN);
+    const season = await resolver(accountId, seasonId);
+    const thresholds = WATER_THRESHOLDS[season.shrimpType];
+    if (!thresholds) throw new Error(`Unknown shrimp type: ${season.shrimpType}`);
+    return {
+        schemaVersion: 1,
+        policyVersion: WATER_METRICS_POLICY_VERSION,
+        shrimpType: season.shrimpType,
+        recordedAtFutureToleranceSeconds: WATER_RECORDED_AT_FUTURE_TOLERANCE_SECONDS,
+        noteMaxLength: WATER_NOTE_MAX_LENGTH,
+        metrics: Object.entries(WATER_METRIC_DEFINITIONS).map(([field, definition]) => ({
+            field,
+            ...definition,
+            unit: thresholds[field].unit,
+            warningMin: thresholds[field].min,
+            warningMax: thresholds[field].max,
+        })),
+    };
 };
 
 // ---------------------------------------------------------------------------
@@ -163,6 +187,7 @@ const normalizeLog = (log, shrimpType) => {
     for (const field of METRIC_FIELDS) {
         values[field] = toNumberOrNull(log[field]);
     }
+    const exceededParameterDetails = checkWaterThresholds(shrimpType, values);
     return {
         id: log.id,
         seasonId: log.seasonId,
@@ -175,7 +200,8 @@ const normalizeLog = (log, shrimpType) => {
         voidedAt: toIsoOrNull(log.voidedAt),
         voidReason: log.voidReason,
         createdAt: log.createdAt.toISOString(),
-        exceededParameters: checkWaterThresholds(shrimpType, values).map((e) => e.field),
+        exceededParameters: exceededParameterDetails.map((e) => e.field),
+        exceededParameterDetails,
     };
 };
 
@@ -303,7 +329,8 @@ const createWaterLog = async (accountId, seasonId, payload, idempotencyKey) => {
                 },
             });
 
-            const exceededParams = checkWaterThresholds(season.shrimpType, metricData);
+            // Use persisted NUMERIC values so the alert agrees with the response/statistics.
+            const exceededParams = checkWaterThresholds(season.shrimpType, created);
             let createdNotificationId = null;
             if (exceededParams.length > 0) {
                 // BR-NOTI-03: chủ trại nhận cảnh báo nước — cùng transaction với log.
@@ -351,8 +378,21 @@ const createWaterLog = async (accountId, seasonId, payload, idempotencyKey) => {
 
 /**
  * List season water logs after resolving technician, expert or owner access.
- * Apply date filters and cursor pagination; voided logs are excluded by default.
+ * Filter in the database before pagination; legacy reads exclude voided logs.
  */
+const warningWhereFor = (shrimpType) => {
+    const thresholds = WATER_THRESHOLDS[shrimpType];
+    if (!thresholds) throw new Error(`Unknown shrimp type: ${shrimpType}`);
+    const conditions = [];
+    for (const [field, key] of Object.entries(THRESHOLD_FIELD_MAP)) {
+        const { min, max } = thresholds[key];
+        // Strict comparisons preserve inclusive policy bounds; SQL NULL never matches.
+        if (min !== null) conditions.push({ [field]: { lt: min } });
+        if (max !== null) conditions.push({ [field]: { gt: max } });
+    }
+    return { AND: [{ isVoided: false }, { OR: conditions }] };
+};
+
 const listWaterLogs = async (accountId, seasonId, query = {}, scope = 'ktv') => {
     const resolver = SCOPE_RESOLVERS[scope];
     if (!resolver) {
@@ -360,10 +400,9 @@ const listWaterLogs = async (accountId, seasonId, query = {}, scope = 'ktv') => 
     }
     const season = await resolver(accountId, seasonId);
 
-    const { limit = 20, cursor, from, to, includeVoided = false } = query;
-    const baseWhere = {
+    const { limit = 20, cursor, from, to, includeVoided = false, filter, includeCounts = false } = query;
+    const scopeWhere = {
         seasonId,
-        ...(includeVoided ? {} : { isVoided: false }),
         ...(from || to
             ? {
                 recordedAt: {
@@ -373,27 +412,47 @@ const listWaterLogs = async (accountId, seasonId, query = {}, scope = 'ktv') => 
             }
             : {}),
     };
-
-    let where = baseWhere;
+    const warningWhere = filter === 'warning' || includeCounts
+        ? warningWhereFor(season.shrimpType) : null;
+    const filterWhere = filter === 'warning' ? warningWhere
+        : filter === 'voided' ? { isVoided: true }
+            : filter === 'all' || includeVoided ? {} : { isVoided: false };
+    const baseWhere = { AND: [scopeWhere, filterWhere] };
+    const where = { AND: [scopeWhere, filterWhere] };
     if (cursor) {
         const { recordedAt, logId } = decodeCursor(cursor);
-        where = {
-            ...baseWhere,
+        where.AND.push({
             OR: [
                 { recordedAt: { lt: recordedAt } },
                 { recordedAt, id: { lt: logId } },
             ],
-        };
+        });
     }
 
-    const [rows, totalResults] = await Promise.all([
-        prisma.waterQualityLog.findMany({
-            where,
-            orderBy: [{ recordedAt: 'desc' }, { id: 'desc' }],
-            take: limit + 1,
-        }),
-        prisma.waterQualityLog.count({ where: baseWhere }),
-    ]);
+    const readPage = async (client) => {
+        const rowsPromise = client.waterQualityLog.findMany({
+            where, orderBy: [{ recordedAt: 'desc' }, { id: 'desc' }], take: limit + 1,
+        });
+        if (!includeCounts) {
+            const [rows, totalResults] = await Promise.all([
+                rowsPromise, client.waterQualityLog.count({ where: baseWhere }),
+            ]);
+            return { rows, totalResults };
+        }
+        const [rows, all, voided, warning] = await Promise.all([
+            rowsPromise,
+            client.waterQualityLog.count({ where: scopeWhere }),
+            client.waterQualityLog.count({ where: { AND: [scopeWhere, { isVoided: true }] } }),
+            client.waterQualityLog.count({ where: { AND: [scopeWhere, warningWhere] } }),
+        ]);
+        const counts = { all, valid: all - voided, warning, voided };
+        const totalResults = filter ? counts[filter] : includeVoided ? all : counts.valid;
+        return { rows, totalResults, counts };
+    };
+    // Items and group counts share one read snapshot, without locking writes.
+    const { rows, totalResults, counts } = includeCounts
+        ? await prisma.$transaction(readPage, { isolationLevel: 'RepeatableRead' })
+        : await readPage(prisma);
 
     const hasNextPage = rows.length > limit;
     const logs = hasNextPage ? rows.slice(0, limit) : rows;
@@ -403,7 +462,7 @@ const listWaterLogs = async (accountId, seasonId, query = {}, scope = 'ktv') => 
 
     return {
         logs: logs.map((log) => normalizeLog(log, season.shrimpType)),
-        meta: { totalResults, hasNextPage, nextCursor },
+        meta: { totalResults, hasNextPage, nextCursor, ...(counts && { counts }) },
     };
 };
 
@@ -604,6 +663,7 @@ const getStatistics = async (accountId, seasonId, query = {}, scope = 'ktv') => 
 };
 
 module.exports = {
+    getMetadata,
     createWaterLog,
     listWaterLogs,
     voidWaterLog,
