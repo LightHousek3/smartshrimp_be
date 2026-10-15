@@ -631,6 +631,8 @@ model Product {
   conversionUnit        ConversionUnit?        @map("conversion_unit")
   minAlertQuantity      Decimal                @default(0) @map("min_alert_quantity") @db.Decimal(14, 3)
   description           String?
+  isDeleted             Boolean                @default(false) @map("is_deleted")
+  deletedAt             DateTime?              @map("deleted_at") @db.Timestamptz(6)
   createdAt             DateTime               @default(now()) @map("created_at") @db.Timestamptz(6)
   updatedAt             DateTime               @default(now()) @map("updated_at") @db.Timestamptz(6)
   protocolItems         ProtocolItem[]
@@ -651,6 +653,8 @@ model ProductionProtocolTemplate {
   allowedVariancePct Decimal     @default(10) @map("allowed_variance_pct") @db.Decimal(5, 2)
   createdBy          String      @map("created_by") @db.Uuid
   archivedAt         DateTime?   @map("archived_at") @db.Timestamptz(6)
+  isDeleted          Boolean     @default(false) @map("is_deleted")
+  deletedAt          DateTime?   @map("deleted_at") @db.Timestamptz(6)
   createdAt          DateTime    @default(now()) @map("created_at") @db.Timestamptz(6)
   updatedAt          DateTime    @default(now()) @map("updated_at") @db.Timestamptz(6)
 
@@ -671,6 +675,8 @@ model Task {
   startedAt          DateTime?    @map("started_at") @db.Timestamptz(6)
   completedAt        DateTime?    @map("completed_at") @db.Timestamptz(6)
   cancellationReason String?      @map("cancellation_reason")
+  isDeleted          Boolean      @default(false) @map("is_deleted")
+  deletedAt          DateTime?    @map("deleted_at") @db.Timestamptz(6)
   createdAt          DateTime     @default(now()) @map("created_at") @db.Timestamptz(6)
   updatedAt          DateTime     @default(now()) @map("updated_at") @db.Timestamptz(6)
 
