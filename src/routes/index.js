@@ -10,6 +10,7 @@ const personnelRoute = require('./personnel.route');
 const seasonRoute = require('./season.route');
 const assignedSeasonRoute = require('./assignedSeason.route');
 const expertDashboardRoute = require('./expertDashboard.route');
+const ownerDashboardRoute = require('./ownerDashboard.route');
 const expertSeasonRoute = require('./expertSeason.route');
 const ragRoute = require('./rag.route');
 const waterLogRoute = require('./waterLog.route');
@@ -27,6 +28,7 @@ const routes = [
     { path: '/owner/farms/:farmId/ponds', route: pondRoute },
     { path: '/owner/personnel', route: personnelRoute },
     { path: '/owner/seasons', route: seasonRoute },
+    { path: '/owner/dashboard', route: ownerDashboardRoute },
     { path: '/me/seasons', route: assignedSeasonRoute },
     { path: '/me/seasons/:seasonId/water-logs', route: waterLogRoute },
     { path: '/operations', route: operationRoute },

@@ -8,6 +8,7 @@ const personnelValidator = require('./personnel.validator');
 const seasonValidator = require('./season.validator');
 const assignedSeasonValidator = require('./assignedSeason.validator');
 const expertDashboardValidator = require('./expertDashboard.validator');
+const ownerDashboardValidator = require('./ownerDashboard.validator');
 const expertSeasonValidator = require('./expertSeason.validator');
 const waterLogValidator = require('./waterLog.validator');
 const operationValidator = require('./operation.validator');
@@ -28,6 +29,7 @@ module.exports = {
     seasonValidator,
     assignedSeasonValidator,
     expertDashboardValidator,
+    ownerDashboardValidator,
     expertSeasonValidator,
     waterLogValidator,
     operationValidator,
