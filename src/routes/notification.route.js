@@ -6,6 +6,8 @@ const { ACCOUNT_ROLE } = require('../constants');
 
 const router = express.Router();
 
+// Every notification endpoint requires an active account with an allowed role.
+// authenticate sets req.account; controllers use its ID to scope all queries.
 router.use(authenticate, authorize(
     ACCOUNT_ROLE.TECHNICIAN,
     ACCOUNT_ROLE.EXPERT,
@@ -38,6 +40,12 @@ router.patch(
  * @desc    Get an owned notification and record its first read time
  * @access  Technician, Expert, Owner
  */
+router.get(
+    '/:notificationId/reference-context',
+    validate(notificationValidator.getNotification),
+    notificationController.getReferenceContext,
+);
+
 router.get(
     '/:notificationId',
     validate(notificationValidator.getNotification),

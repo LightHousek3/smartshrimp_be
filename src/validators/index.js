@@ -13,6 +13,7 @@ const expertSeasonValidator = require('./expertSeason.validator');
 const expertProductionProtocolValidator = require('./expertProductionProtocol.validator');
 const waterLogValidator = require('./waterLog.validator');
 const operationValidator = require('./operation.validator');
+const inventoryValidator = require('./inventory.validator');
 
 const ragDocumentValidator = require('./ragDocument.validator');
 const ragValidator = require('./rag.validator');
@@ -35,4 +36,5 @@ module.exports = {
     expertProductionProtocolValidator,
     waterLogValidator,
     operationValidator,
+    inventoryValidator,
 };

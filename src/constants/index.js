@@ -1,6 +1,7 @@
 const httpStatus = require('./httpStatus');
 const messages = require('./messages');
 const NOTIFICATION_TYPE = require('./notificationType');
+const inventory = require('./inventory');
 
 const DASHBOARD_PERIOD = Object.freeze({
     THIS_MONTH: 'THIS_MONTH',
@@ -282,4 +283,5 @@ module.exports = {
     WATER_RECORDED_AT_FUTURE_TOLERANCE_SECONDS,
     WATER_NOTE_MAX_LENGTH,
     checkWaterThresholds,
+    ...inventory,
 };

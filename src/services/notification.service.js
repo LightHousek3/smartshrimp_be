@@ -19,12 +19,14 @@ const NOTIFICATION_SELECT = {
     content: true,
 };
 
+// The warning category matches these types; the action category uses referenceId.
 const WARNING_NOTIFICATION_TYPES = [
     NOTIFICATION_TYPE.WATER_THRESHOLD_EXCEEDED,
     NOTIFICATION_TYPE.SCHEDULE_GENERATION_FAILED,
     NOTIFICATION_TYPE.INVENTORY_LOW,
     NOTIFICATION_TYPE.INVENTORY_INSUFFICIENT,
 ];
+// Expand each supported UI group into notification types for list filtering.
 const NOTIFICATION_GROUP_TYPES = {
     disease: [
         NOTIFICATION_TYPE.DISEASE_CASE_CREATED,
@@ -53,6 +55,16 @@ const NOTIFICATION_GROUP_TYPES = {
     system: [NOTIFICATION_TYPE.SYSTEM],
 };
 
+/**
+ * List notifications owned by an account, newest first, with optional filters.
+ * Supports either page offsets or an owned notification ID as the cursor.
+ *
+ * @param {string} accountId - Authenticated recipient account ID
+ * @param {Object} [options={}] - Pagination, read status, category, group, type,
+ * and inclusive creation date filters
+ * @returns {Promise<Object>} Notifications and pagination metadata
+ * @throws {ApiError} If the cursor does not belong to the account
+ */
 const getListNotification = async (accountId, {
     cursor,
     page,
@@ -69,6 +81,7 @@ const getListNotification = async (accountId, {
         ...(readStatus === 'unread' && { readAt: null }),
         ...(readStatus === 'read' && { readAt: { not: null } }),
         ...(category === 'action' && { referenceId: { not: null } }),
+        // Later type filters take precedence: explicit type, then group, then category.
         ...(category === 'warning' && { type: { in: WARNING_NOTIFICATION_TYPES } }),
         ...(group && { type: { in: NOTIFICATION_GROUP_TYPES[group] } }),
         ...(type && { type }),
@@ -80,6 +93,7 @@ const getListNotification = async (accountId, {
         }),
     };
 
+    // Reject unknown cursors and cursors owned by another recipient.
     if (cursor) {
         const cursorNotification = await prisma.notification.findFirst({
             where: { id: cursor, accountId },
@@ -91,6 +105,7 @@ const getListNotification = async (accountId, {
         }
     }
 
+    // Fetch one extra row to detect the next page; count all matching notifications.
     const [rows, totalResults] = await Promise.all([
         prisma.notification.findMany({
             where: cursor ? { ...where, id: { not: cursor } } : where,
@@ -119,6 +134,12 @@ const getListNotification = async (accountId, {
     };
 };
 
+/**
+ * Persist a notification, then notify its recipient to fetch the new record.
+ *
+ * @param {Object} data - Prisma notification data including accountId and type
+ * @returns {Promise<Object>} Created notification
+ */
 const createNotification = async (data) => {
     const notification = await prisma.notification.create({
         data,
@@ -128,8 +149,18 @@ const createNotification = async (data) => {
     return notification;
 };
 
+/**
+ * Fetch an owned notification and mark it read when opened for the first time.
+ * Repeated reads preserve readAt and do not emit another notification:read event.
+ *
+ * @param {string} accountId - Authenticated recipient account ID
+ * @param {string} notificationId - Notification ID to open
+ * @returns {Promise<Object>} Notification with its current read timestamp
+ * @throws {ApiError} If the notification is missing or belongs to another account
+ */
 const getNotificationById = async (accountId, notificationId) => {
     const { notification, firstRead } = await prisma.$transaction(async (transaction) => {
+        // Update only unread, owned records so concurrent opens keep the first readAt.
         const update = await transaction.notification.updateMany({
             where: { id: notificationId, accountId, readAt: null },
             data: { readAt: new Date() },
@@ -146,6 +177,7 @@ const getNotificationById = async (accountId, notificationId) => {
 
         return { notification, firstRead: update.count > 0 };
     });
+    // Emit only after the transaction commits and only if the read state changed.
     if (firstRead) {
         emitNotification(accountId, 'notification:read', {
             id: notification.id,
@@ -155,6 +187,13 @@ const getNotificationById = async (accountId, notificationId) => {
     return notification;
 };
 
+/**
+ * Mark all unread notifications for an account with a shared read timestamp.
+ * Emit notification:read-all only when at least one record changes.
+ *
+ * @param {string} accountId - Authenticated recipient account ID
+ * @returns {Promise<Object>} Updated count and timestamp used for this operation
+ */
 const markAllAsRead = async (accountId) => {
     const readAt = new Date();
     const { count: updatedCount } = await prisma.notification.updateMany({

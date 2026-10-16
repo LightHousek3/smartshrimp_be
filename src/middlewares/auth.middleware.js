@@ -19,11 +19,24 @@ const AUTHENTICATED_ACCOUNT_SELECT = {
     updatedAt: true,
 };
 
+/**
+ * Extract the access token from an HTTP Bearer authorization header.
+ * @param {string} authorization - Authorization header value
+ * @returns {string|null} Token, or null when the Bearer credential is missing
+ */
 const getBearerToken = (authorization) => {
     const [scheme, token] = (authorization || '').split(' ');
     return scheme === 'Bearer' && token ? token : null;
 };
 
+/**
+ * Verify an access token and load its active account for HTTP and notification sockets.
+ * Reject non-access tokens, missing accounts, and blocked or inactive accounts.
+ *
+ * @param {string} token - Signed JWT access token
+ * @returns {Promise<Object>} Active account without password credentials
+ * @throws {Error} JWT verification error or account access error
+ */
 const loadActiveAccount = async (token) => {
     const decoded = jwt.verify(token, config.jwt.accessSecret);
     if (decoded.type !== 'access' || !decoded.sub) {
@@ -50,6 +63,11 @@ const loadActiveAccount = async (token) => {
     return account;
 };
 
+/**
+ * Require a valid Bearer access token and attach the active account to req.account.
+ * Notification controllers use this verified account to enforce recipient ownership.
+ * Forward expired or invalid JWTs as unauthorized errors to the error middleware.
+ */
 const authenticate = async (req, res, next) => {
     try {
         const token = getBearerToken(req.headers.authorization);
@@ -72,6 +90,13 @@ const authenticate = async (req, res, next) => {
     }
 };
 
+/**
+ * Build middleware restricting an authenticated account to the allowed roles.
+ * Must run after authenticate, which populates req.account.
+ *
+ * @param {...string} roles - Account roles allowed to access the route
+ * @returns {Function} Express authorization middleware
+ */
 const authorize = (...roles) => (req, res, next) => {
     if (!req.account) {
         return next(ApiError.unauthorized(messages.AUTH.UNAUTHORIZED));
