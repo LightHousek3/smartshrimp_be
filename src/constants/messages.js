@@ -185,6 +185,7 @@ const messages = {
     },
 
     PRODUCTION_PROTOCOL: {
+        PENDING_NOTIFICATION_TITLE: 'Phác đồ nuôi đang chờ duyệt',
         STAGE_OVERLAP: 'Các giai đoạn không được trùng ngày DOC. Ngày kết thúc cũng thuộc giai đoạn.',
         SUBMITTED: 'Đã gửi phác đồ nuôi để chủ trại duyệt.',
         SUBMIT_INCOMPLETE: 'Cần có ít nhất một hạng mục và giờ thực hiện cho mọi cữ trước khi gửi duyệt.',
