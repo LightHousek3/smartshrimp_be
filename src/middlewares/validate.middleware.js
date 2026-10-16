@@ -1,7 +1,6 @@
 const Joi = require('joi');
-const { ApiError } = require('../utils');
+const { ApiError, pick } = require('../utils');
 const { httpStatus } = require('../constants');
-const pick = require('../utils/pick');
 
 /**
  * Validate request against a Joi schema.

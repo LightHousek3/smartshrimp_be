@@ -1,4 +1,4 @@
-const { authenticate, authorize, optionalAuth } = require("./auth.middleware");
+const { authenticate, authorize, optionalAuth, loadActiveAccount } = require("./auth.middleware");
 const {
   errorConverter,
   errorHandler,
@@ -11,6 +11,7 @@ module.exports = {
   authenticate,
   authorize,
   optionalAuth,
+  loadActiveAccount,
   errorConverter,
   errorHandler,
   notFoundHandler,

@@ -1,9 +1,8 @@
 const { createHash, timingSafeEqual } = require('node:crypto');
 const axios = require('axios');
 const config = require('../config');
-const { ApiError } = require('../utils');
+const { ApiError, createDocumentError } = require('../utils');
 const { RAG_DOCUMENT_MAX_FILE_BYTES } = require('../constants');
-const { createDocumentError } = require('../utils/ragDocumentError');
 
 // Cloudinary's signed REST API avoids adding a second upload SDK to the backend.
 const settings = () => {

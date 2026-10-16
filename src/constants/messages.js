@@ -184,6 +184,28 @@ const messages = {
         LIST_FETCHED: 'Lấy danh sách vụ nuôi được phân công thành công',
     },
 
+    PRODUCTION_PROTOCOL: {
+        STAGE_OVERLAP: 'Các giai đoạn không được trùng ngày DOC. Ngày kết thúc cũng thuộc giai đoạn.',
+        SUBMITTED: 'Đã gửi phác đồ nuôi để chủ trại duyệt.',
+        SUBMIT_INCOMPLETE: 'Cần có ít nhất một hạng mục và giờ thực hiện cho mọi cữ trước khi gửi duyệt.',
+        TEMPLATE_NOT_FOUND: 'Không tìm thấy phác đồ mẫu phù hợp trong trang trại.',
+        TEMPLATE_INVALID: 'Phác đồ mẫu có dữ liệu không được hỗ trợ; vui lòng kiểm tra lại mẫu.',
+        CREATED: 'Đã lưu bản nháp phác đồ nuôi.',
+        UPDATED: 'Đã lưu phác đồ nuôi.',
+        CANCELLED: 'Đã hủy bản nháp phác đồ nuôi.',
+        EXPERT_INACTIVE: 'Tài khoản chuyên gia không còn hoạt động.',
+        TIME_PRECISION: 'Giờ thực hiện có độ chính xác cao hơn form hỗ trợ; không thể ghi lại các hạng mục này.',
+        NOT_FOUND: 'Không tìm thấy vụ nuôi hoặc phác đồ trong phạm vi được phân công.',
+        CONFLICT: 'Dữ liệu đã thay đổi. Vui lòng tải lại trước khi tiếp tục.',
+        STATE: 'Trạng thái hiện tại không cho phép thao tác này.',
+        IN_PROGRESS: 'Vụ nuôi đã có phác đồ đang soạn, bị từ chối hoặc chờ duyệt.',
+        DEPENDENCY: 'Phác đồ đã có phiên bản kế tiếp hoặc lịch vận hành, không thể sửa/hủy.',
+        PRODUCT: 'Vật tư phải đang hoạt động và thuộc cùng trang trại.',
+        UNIT: 'Đơn vị liều không tương thích với đơn vị vật tư.',
+        ID: 'ID giai đoạn, cữ hoặc hạng mục không thuộc phác đồ này.',
+        DOSE: 'Cơ sở liều không hợp lệ cho tuổi nuôi của giai đoạn.',
+    },
+
     RAG: {
         QUESTION_SAVED: 'Đã xử lý câu hỏi.',
         CONVERSATION_FETCHED: 'Đã tải hội thoại.',
