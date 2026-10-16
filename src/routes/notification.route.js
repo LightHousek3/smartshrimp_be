@@ -39,6 +39,12 @@ router.patch(
  * @access  Technician, Expert, Owner
  */
 router.get(
+    '/:notificationId/reference-context',
+    validate(notificationValidator.getNotification),
+    notificationController.getReferenceContext,
+);
+
+router.get(
     '/:notificationId',
     validate(notificationValidator.getNotification),
     notificationController.getNotification,

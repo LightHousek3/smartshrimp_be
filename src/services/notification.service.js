@@ -69,6 +69,7 @@ const getListNotification = async (accountId, {
         ...(readStatus === 'unread' && { readAt: null }),
         ...(readStatus === 'read' && { readAt: { not: null } }),
         ...(category === 'action' && { referenceId: { not: null } }),
+        // Later type filters take precedence: explicit type, then group, then category.
         ...(category === 'warning' && { type: { in: WARNING_NOTIFICATION_TYPES } }),
         ...(group && { type: { in: NOTIFICATION_GROUP_TYPES[group] } }),
         ...(type && { type }),
@@ -130,6 +131,7 @@ const createNotification = async (data) => {
 
 const getNotificationById = async (accountId, notificationId) => {
     const { notification, firstRead } = await prisma.$transaction(async (transaction) => {
+        // Update only unread, owned records so concurrent opens keep the first readAt.
         const update = await transaction.notification.updateMany({
             where: { id: notificationId, accountId, readAt: null },
             data: { readAt: new Date() },
@@ -146,6 +148,7 @@ const getNotificationById = async (accountId, notificationId) => {
 
         return { notification, firstRead: update.count > 0 };
     });
+    // Emit only after the transaction commits and only if the read state changed.
     if (firstRead) {
         emitNotification(accountId, 'notification:read', {
             id: notification.id,

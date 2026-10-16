@@ -164,7 +164,6 @@ enum ConversionUnit {
   @@map("conversion_unit")
 }
 
-
 enum OperationType {
   FEEDING  @map("feeding")
   MINERAL  @map("mineral")
@@ -204,6 +203,9 @@ enum ScheduleCancellationType {
 enum InventoryTransactionType {
   STOCK_IN  @map("stock_in")
   STOCK_OUT @map("stock_out")
+
+  ADJUSTMENT_IN  @map("adjustment_in")
+  ADJUSTMENT_OUT @map("adjustment_out")
 
   @@map("inventory_transaction_type")
 }
@@ -365,6 +367,9 @@ model Farm {
   owner             Account   @relation(fields: [ownerId], references: [id], onDelete: Restrict)
   ponds             Pond[]
 
+  products  Product[]
+  suppliers Supplier[]
+
   @@map("farms")
 }
 
@@ -386,24 +391,24 @@ model Pond {
 }
 
 model AquacultureSeason {
-  id                   String                      @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
-  pondId               String                      @map("pond_id") @db.Uuid
-  name                 String                      @db.VarChar(255)
-  shrimpType           ShrimpType                  @map("shrimp_type")
-  stockingDate         DateTime?                   @map("stocking_date") @db.Date
-  expectedEndDate      DateTime?                   @map("expected_end_date") @db.Date
-  actualEndDate        DateTime?                   @map("actual_end_date") @db.Date
-  initialQuantity      BigInt?                     @map("initial_quantity") @db.BigInt
-  initialDensityPerM2  Decimal?                    @map("initial_density_per_m2") @db.Decimal(12, 2)
-  status               SeasonStatus                @default(PLANNING)
-  cancellationReason   String?                     @map("cancellation_reason")
-  createdBy            String                      @map("created_by") @db.Uuid
-  createdAt            DateTime                    @default(now()) @map("created_at") @db.Timestamptz(6)
-  updatedAt            DateTime                    @default(now()) @map("updated_at") @db.Timestamptz(6)
-  pond                 Pond                        @relation(fields: [pondId], references: [id], onDelete: Restrict)
-  personnelAssignments SeasonPersonnelAssignment[]
-  healthLogs           ShrimpHealthLog[]
-  waterQualityLogs     WaterQualityLog[]
+  id                    String                      @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  pondId                String                      @map("pond_id") @db.Uuid
+  name                  String                      @db.VarChar(255)
+  shrimpType            ShrimpType                  @map("shrimp_type")
+  stockingDate          DateTime?                   @map("stocking_date") @db.Date
+  expectedEndDate       DateTime?                   @map("expected_end_date") @db.Date
+  actualEndDate         DateTime?                   @map("actual_end_date") @db.Date
+  initialQuantity       BigInt?                     @map("initial_quantity") @db.BigInt
+  initialDensityPerM2   Decimal?                    @map("initial_density_per_m2") @db.Decimal(12, 2)
+  status                SeasonStatus                @default(PLANNING)
+  cancellationReason    String?                     @map("cancellation_reason")
+  createdBy             String                      @map("created_by") @db.Uuid
+  createdAt             DateTime                    @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt             DateTime                    @default(now()) @map("updated_at") @db.Timestamptz(6)
+  pond                  Pond                        @relation(fields: [pondId], references: [id], onDelete: Restrict)
+  personnelAssignments  SeasonPersonnelAssignment[]
+  healthLogs            ShrimpHealthLog[]
+  waterQualityLogs      WaterQualityLog[]
   diseaseCases          DiseaseCase[]
   ragConversations      RagConversation[]
   schedules             OperationSchedule[]
@@ -431,28 +436,28 @@ model ShrimpHealthLog {
 }
 
 model WaterQualityLog {
-  id                   String            @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
-  seasonId             String            @map("season_id") @db.Uuid
-  recordedBy           String            @map("recorded_by") @db.Uuid
-  recordedAt           DateTime          @map("recorded_at") @db.Timestamptz(6)
-  temperatureC         Decimal?          @map("temperature_c") @db.Decimal(5, 2)
-  ph                   Decimal?          @map("ph") @db.Decimal(4, 2)
-  dissolvedOxygenMgL   Decimal?          @map("dissolved_oxygen_mg_l") @db.Decimal(6, 3)
-  salinityPpt          Decimal?          @map("salinity_ppt") @db.Decimal(6, 3)
-  nh3MgL               Decimal?          @map("nh3_mg_l") @db.Decimal(9, 5)
-  no2MgL               Decimal?          @map("no2_mg_l") @db.Decimal(9, 5)
-  alkalinityMgLCaCO3   Decimal?          @map("alkalinity_mg_l_caco3") @db.Decimal(9, 2)
-  h2sMgL               Decimal?          @map("h2s_mg_l") @db.Decimal(9, 5)
-  note                 String?
-  isVoided             Boolean           @default(false) @map("is_voided")
-  voidedBy             String?           @map("voided_by") @db.Uuid
-  voidedAt             DateTime?         @map("voided_at") @db.Timestamptz(6)
-  voidReason           String?           @map("void_reason")
-  createdAt            DateTime          @default(now()) @map("created_at") @db.Timestamptz(6)
-  season               AquacultureSeason @relation(fields: [seasonId], references: [id], onDelete: Restrict)
+  id                 String            @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  seasonId           String            @map("season_id") @db.Uuid
+  recordedBy         String            @map("recorded_by") @db.Uuid
+  recordedAt         DateTime          @map("recorded_at") @db.Timestamptz(6)
+  temperatureC       Decimal?          @map("temperature_c") @db.Decimal(5, 2)
+  ph                 Decimal?          @map("ph") @db.Decimal(4, 2)
+  dissolvedOxygenMgL Decimal?          @map("dissolved_oxygen_mg_l") @db.Decimal(6, 3)
+  salinityPpt        Decimal?          @map("salinity_ppt") @db.Decimal(6, 3)
+  nh3MgL             Decimal?          @map("nh3_mg_l") @db.Decimal(9, 5)
+  no2MgL             Decimal?          @map("no2_mg_l") @db.Decimal(9, 5)
+  alkalinityMgLCaCO3 Decimal?          @map("alkalinity_mg_l_caco3") @db.Decimal(9, 2)
+  h2sMgL             Decimal?          @map("h2s_mg_l") @db.Decimal(9, 5)
+  note               String?
+  isVoided           Boolean           @default(false) @map("is_voided")
+  voidedBy           String?           @map("voided_by") @db.Uuid
+  voidedAt           DateTime?         @map("voided_at") @db.Timestamptz(6)
+  voidReason         String?           @map("void_reason")
+  createdAt          DateTime          @default(now()) @map("created_at") @db.Timestamptz(6)
+  season             AquacultureSeason @relation(fields: [seasonId], references: [id], onDelete: Restrict)
 
-  @@index([seasonId, recordedAt(sort: Desc)], map: "idx_water_quality_season_date")
   @@unique([seasonId, recordedAt, recordedBy], map: "uq_water_quality_log_no_duplicate")
+  @@index([seasonId, recordedAt(sort: Desc)], map: "idx_water_quality_season_date")
   @@map("water_quality_logs")
 }
 
@@ -472,59 +477,59 @@ model DiseaseCase {
 }
 
 model Protocol {
-  id                   String            @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
-  protocolType         ProtocolType      @map("protocol_type")
-  seasonId             String            @map("season_id") @db.Uuid
-  diseaseCaseId        String?           @map("disease_case_id") @db.Uuid
-  sourceTemplateId     String?           @map("source_template_id") @db.Uuid
-  versionNo            Int               @map("version_no")
-  supersedesProtocolId String?           @map("supersedes_protocol_id") @db.Uuid
-  title                String            @db.VarChar(500)
+  id                   String         @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  protocolType         ProtocolType   @map("protocol_type")
+  seasonId             String         @map("season_id") @db.Uuid
+  diseaseCaseId        String?        @map("disease_case_id") @db.Uuid
+  sourceTemplateId     String?        @map("source_template_id") @db.Uuid
+  versionNo            Int            @map("version_no")
+  supersedesProtocolId String?        @map("supersedes_protocol_id") @db.Uuid
+  title                String         @db.VarChar(500)
   summary              String?
-  allowedVariancePct   Decimal?          @map("allowed_variance_pct") @db.Decimal(5, 2)
-  rollingWindowDays    Int               @default(7) @map("rolling_window_days") @db.SmallInt
-  status               ProtocolStatus    @default(DRAFT)
-  createdBy            String            @map("created_by") @db.Uuid
-  submittedAt          DateTime?         @map("submitted_at") @db.Timestamptz(6)
-  reviewedBy           String?           @map("reviewed_by") @db.Uuid
-  reviewedAt           DateTime?         @map("reviewed_at") @db.Timestamptz(6)
-  rejectionReason      String?           @map("rejection_reason")
-  supersededAt         DateTime?         @map("superseded_at") @db.Timestamptz(6)
-  abortReason          String?           @map("abort_reason")
-  abortedBy            String?           @map("aborted_by") @db.Uuid
-  abortedAt            DateTime?         @map("aborted_at") @db.Timestamptz(6)
-  createdAt            DateTime          @default(now()) @map("created_at") @db.Timestamptz(6)
-  updatedAt            DateTime          @default(now()) @map("updated_at") @db.Timestamptz(6)
+  allowedVariancePct   Decimal?       @map("allowed_variance_pct") @db.Decimal(5, 2)
+  rollingWindowDays    Int            @default(7) @map("rolling_window_days") @db.SmallInt
+  status               ProtocolStatus @default(DRAFT)
+  createdBy            String         @map("created_by") @db.Uuid
+  submittedAt          DateTime?      @map("submitted_at") @db.Timestamptz(6)
+  reviewedBy           String?        @map("reviewed_by") @db.Uuid
+  reviewedAt           DateTime?      @map("reviewed_at") @db.Timestamptz(6)
+  rejectionReason      String?        @map("rejection_reason")
+  supersededAt         DateTime?      @map("superseded_at") @db.Timestamptz(6)
+  abortReason          String?        @map("abort_reason")
+  abortedBy            String?        @map("aborted_by") @db.Uuid
+  abortedAt            DateTime?      @map("aborted_at") @db.Timestamptz(6)
+  createdAt            DateTime       @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt            DateTime       @default(now()) @map("updated_at") @db.Timestamptz(6)
 
-  season               AquacultureSeason @relation(fields: [seasonId], references: [id], onDelete: Restrict)
-  items                ProtocolItem[]
+  season AquacultureSeason @relation(fields: [seasonId], references: [id], onDelete: Restrict)
+  items  ProtocolItem[]
 
   @@map("protocols")
 }
 
 model ProtocolItem {
-  id                     String              @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
-  protocolId             String              @map("protocol_id") @db.Uuid
-  operationType          OperationType       @map("operation_type")
-  productId              String?             @map("product_id") @db.Uuid
-  recommendedProductName String?             @map("recommended_product_name") @db.VarChar(255)
-  recommendedCategory    ProductCategory?    @map("recommended_category")
-  startDayOffset         Int                 @map("start_day_offset")
-  endDayOffset           Int                 @map("end_day_offset")
-  repeatIntervalDays     Int                 @default(1) @map("repeat_interval_days") @db.SmallInt
-  mealNumber             Int?                @map("meal_number")
-  plannedTime            DateTime?           @map("planned_time") @db.Time(6)
-  doseBasis              DoseBasis           @map("dose_basis")
-  doseValue              Decimal             @map("dose_value") @db.Decimal(14, 4)
-  doseUnit               ProductUnit         @map("dose_unit")
+  id                     String           @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  protocolId             String           @map("protocol_id") @db.Uuid
+  operationType          OperationType    @map("operation_type")
+  productId              String?          @map("product_id") @db.Uuid
+  recommendedProductName String?          @map("recommended_product_name") @db.VarChar(255)
+  recommendedCategory    ProductCategory? @map("recommended_category")
+  startDayOffset         Int              @map("start_day_offset")
+  endDayOffset           Int              @map("end_day_offset")
+  repeatIntervalDays     Int              @default(1) @map("repeat_interval_days") @db.SmallInt
+  mealNumber             Int?             @map("meal_number")
+  plannedTime            DateTime?        @map("planned_time") @db.Time(6)
+  doseBasis              DoseBasis        @map("dose_basis")
+  doseValue              Decimal          @map("dose_value") @db.Decimal(14, 4)
+  doseUnit               ProductUnit      @map("dose_unit")
   instructions           String?
-  sequenceOrder          Int                 @default(1) @map("sequence_order")
-  createdAt              DateTime            @default(now()) @map("created_at") @db.Timestamptz(6)
-  updatedAt              DateTime            @default(now()) @map("updated_at") @db.Timestamptz(6)
+  sequenceOrder          Int              @default(1) @map("sequence_order")
+  createdAt              DateTime         @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt              DateTime         @default(now()) @map("updated_at") @db.Timestamptz(6)
 
-  protocol               Protocol            @relation(fields: [protocolId], references: [id], onDelete: Restrict)
-  product                Product?            @relation(fields: [productId], references: [id], onDelete: Restrict)
-  schedules              OperationSchedule[]
+  protocol  Protocol            @relation(fields: [protocolId], references: [id], onDelete: Restrict)
+  product   Product?            @relation(fields: [productId], references: [id], onDelete: Restrict)
+  schedules OperationSchedule[]
 
   @@unique([protocolId, sequenceOrder])
   @@map("protocol_items")
@@ -554,54 +559,60 @@ model OperationSchedule {
   generatedAt        DateTime                  @default(now()) @map("generated_at") @db.Timestamptz(6)
   updatedAt          DateTime                  @default(now()) @map("updated_at") @db.Timestamptz(6)
 
-  protocolItem       ProtocolItem              @relation(fields: [protocolItemId], references: [id], onDelete: Restrict)
-  season             AquacultureSeason         @relation(fields: [seasonId], references: [id], onDelete: Restrict)
-  product            Product?                  @relation(fields: [productId], references: [id], onDelete: Restrict)
-  cancelledByAccount Account?                  @relation("ScheduleCancelledBy", fields: [cancelledBy], references: [id], onDelete: Restrict)
-  sourceHealthLog    ShrimpHealthLog?          @relation(fields: [sourceHealthLogId], references: [id], onDelete: Restrict)
+  protocolItem       ProtocolItem        @relation(fields: [protocolItemId], references: [id], onDelete: Restrict)
+  season             AquacultureSeason   @relation(fields: [seasonId], references: [id], onDelete: Restrict)
+  product            Product?            @relation(fields: [productId], references: [id], onDelete: Restrict)
+  cancelledByAccount Account?            @relation("ScheduleCancelledBy", fields: [cancelledBy], references: [id], onDelete: Restrict)
+  sourceHealthLog    ShrimpHealthLog?    @relation(fields: [sourceHealthLogId], references: [id], onDelete: Restrict)
   execution          OperationExecution?
 
   @@unique([protocolItemId, scheduledAt])
   @@index([seasonId, scheduledAt, status], map: "idx_operation_schedules_season_time")
   @@index([protocolItemId, scheduledAt, status], map: "idx_operation_schedules_protocol_item_time")
+  @@index([productId, status], map: "idx_operation_schedules_product_status")
   @@map("operation_schedules")
 }
 
 model OperationExecution {
-  id              String            @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
-  scheduleId      String            @unique @map("schedule_id") @db.Uuid
-  actualProductId String?           @map("actual_product_id") @db.Uuid
-  actualQuantity  Decimal           @map("actual_quantity") @db.Decimal(14, 3)
-  executedBy      String            @map("executed_by") @db.Uuid
-  idempotencyKey  String            @unique @map("idempotency_key") @db.Uuid
-  executedAt      DateTime          @map("executed_at") @db.Timestamptz(6)
+  id              String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  scheduleId      String   @unique @map("schedule_id") @db.Uuid
+  actualProductId String?  @map("actual_product_id") @db.Uuid
+  actualQuantity  Decimal  @map("actual_quantity") @db.Decimal(14, 3)
+  executedBy      String   @map("executed_by") @db.Uuid
+  idempotencyKey  String   @unique @map("idempotency_key") @db.Uuid
+  executedAt      DateTime @map("executed_at") @db.Timestamptz(6)
   note            String?
-  varianceReason  String?           @map("variance_reason")
-  createdAt       DateTime          @default(now()) @map("created_at") @db.Timestamptz(6)
+  varianceReason  String?  @map("variance_reason")
+  createdAt       DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
 
-  schedule        OperationSchedule @relation(fields: [scheduleId], references: [id], onDelete: Restrict)
-  actualProduct   Product?          @relation("ExecutionActualProduct", fields: [actualProductId], references: [id], onDelete: Restrict)
-  executor        Account           @relation("ExecutionExecutedBy", fields: [executedBy], references: [id], onDelete: Restrict)
+  schedule      OperationSchedule @relation(fields: [scheduleId], references: [id], onDelete: Restrict)
+  actualProduct Product?          @relation("ExecutionActualProduct", fields: [actualProductId], references: [id], onDelete: Restrict)
+  executor      Account           @relation("ExecutionExecutedBy", fields: [executedBy], references: [id], onDelete: Restrict)
 
   @@map("operation_executions")
 }
 
 model InventoryBalance {
-  id           String                 @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
-  productId    String                 @map("product_id") @db.Uuid
-  lotNumber    String                 @map("lot_number") @db.VarChar(100)
-  receivedAt   DateTime               @default(now()) @map("received_at") @db.Timestamptz(6)
-  quantity     Decimal                @default(0) @db.Decimal(14, 3)
-  unitPrice    Decimal                @map("unit_price") @db.Decimal(14, 2)
-  createdAt    DateTime               @default(now()) @map("created_at") @db.Timestamptz(6)
-  updatedAt    DateTime               @default(now()) @map("updated_at") @db.Timestamptz(6)
+  id         String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  productId  String   @map("product_id") @db.Uuid
+  lotNumber  String   @map("lot_number") @db.VarChar(100)
+  receivedAt DateTime @default(now()) @map("received_at") @db.Timestamptz(6)
+  quantity   Decimal  @default(0) @db.Decimal(14, 3)
+  unitPrice  Decimal  @map("unit_price") @db.Decimal(14, 2)
+  createdAt  DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt  DateTime @default(now()) @map("updated_at") @db.Timestamptz(6)
 
   product      Product                @relation(fields: [productId], references: [id], onDelete: Restrict)
   transactions InventoryTransaction[]
 
+  supplierName String    @map("supplier_name") @db.VarChar(255)
+  supplierId   String?   @map("supplier_id") @db.Uuid
+  supplier     Supplier? @relation(fields: [supplierId], references: [id], onDelete: Restrict)
+
   @@unique([productId, lotNumber], map: "uq_inventory_balance_product_lot")
   @@index([productId, receivedAt, id], map: "idx_inventory_balances_fifo")
   @@index([productId], map: "idx_inventory_balances_product")
+  @@index([supplierId], map: "idx_inventory_balances_supplier")
   @@map("inventory_balances")
 }
 
@@ -622,11 +633,16 @@ model InventoryTransaction {
   idempotencyKey     String                   @unique @map("idempotency_key") @db.Uuid
   createdAt          DateTime                 @default(now()) @map("created_at") @db.Timestamptz(6)
 
-  product            Product                  @relation(fields: [productId], references: [id], onDelete: Restrict)
-  inventoryBalance   InventoryBalance         @relation(fields: [inventoryBalanceId], references: [id], onDelete: Restrict)
-  season             AquacultureSeason?       @relation(fields: [seasonId], references: [id], onDelete: Restrict)
-  performer          Account                  @relation("InventoryTransactionPerformedBy", fields: [performedBy], references: [id], onDelete: Restrict)
+  product          Product            @relation(fields: [productId], references: [id], onDelete: Restrict)
+  inventoryBalance InventoryBalance   @relation(fields: [inventoryBalanceId], references: [id], onDelete: Restrict)
+  season           AquacultureSeason? @relation(fields: [seasonId], references: [id], onDelete: Restrict)
+  performer        Account            @relation("InventoryTransactionPerformedBy", fields: [performedBy], references: [id], onDelete: Restrict)
 
+  @@index([productId, createdAt(sort: Desc)], map: "idx_inventory_transactions_lookup")
+  @@index([seasonId, createdAt(sort: Desc)], map: "idx_inventory_transactions_season")
+  @@index([transactionGroupId], map: "idx_inventory_transactions_group")
+  @@index([inventoryBalanceId, createdAt(sort: Desc)], map: "idx_inventory_transactions_balance")
+  @@index([referenceType, referenceId], map: "idx_inventory_transactions_reference")
   @@map("inventory_transactions")
 }
 
@@ -641,6 +657,8 @@ model Product {
   minAlertQuantity      Decimal                @default(0) @map("min_alert_quantity") @db.Decimal(14, 3)
   description           String?
   status                ProductStatus          @default(ACTIVE)
+  imageUrl              String?                @map("image_url") @db.VarChar(2048)
+  imageUrls             String[]               @default([]) @map("image_urls")
   isDeleted             Boolean                @default(false) @map("is_deleted")
   deletedAt             DateTime?              @map("deleted_at") @db.Timestamptz(6)
   createdAt             DateTime               @default(now()) @map("created_at") @db.Timestamptz(6)
@@ -651,7 +669,31 @@ model Product {
   inventoryBalances     InventoryBalance[]
   inventoryTransactions InventoryTransaction[]
 
+  archivedAt DateTime? @map("archived_at") @db.Timestamptz(6)
+  farm       Farm      @relation(fields: [farmId], references: [id], onDelete: Restrict)
+
+  @@index([farmId], map: "idx_products_farm")
   @@map("products")
+}
+
+model Supplier {
+  id                String             @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  farmId            String             @map("farm_id") @db.Uuid
+  name              String             @db.VarChar(255)
+  contactName       String?            @map("contact_name") @db.VarChar(255)
+  phone             String?            @db.VarChar(20)
+  email             String?            @db.VarChar(320)
+  address           String?            @db.VarChar(1000)
+  note              String?            @db.VarChar(2000)
+  isDeleted         Boolean            @default(false) @map("is_deleted")
+  deletedAt         DateTime?          @map("deleted_at") @db.Timestamptz(6)
+  createdAt         DateTime           @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt         DateTime           @default(now()) @map("updated_at") @db.Timestamptz(6)
+  farm              Farm               @relation(fields: [farmId], references: [id], onDelete: Restrict)
+  inventoryBalances InventoryBalance[]
+
+  @@index([farmId, isDeleted], map: "idx_suppliers_farm_active")
+  @@map("suppliers")
 }
 
 model ProductionProtocolTemplate {
