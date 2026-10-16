@@ -1,4 +1,4 @@
-const { notificationService } = require('../services');
+const { notificationService, notificationNavigationService } = require('../services');
 const { asyncHandler, ResponseHandler } = require('../utils');
 const { messages } = require('../constants');
 
@@ -37,8 +37,17 @@ const markAllAsRead = asyncHandler(async (req, res) => {
     });
 });
 
+const getReferenceContext = asyncHandler(async (req, res) => {
+    const context = await notificationNavigationService.getNotificationReferenceContext(
+        req.account.id, req.params.notificationId, req.account.role,
+    );
+    res.set('Cache-Control', 'no-store');
+    ResponseHandler.success(res, { message: messages.NOTIFICATION.FETCHED, data: context });
+});
+
 module.exports = {
     getListNotification,
     getNotification,
     markAllAsRead,
+    getReferenceContext,
 };

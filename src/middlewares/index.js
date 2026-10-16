@@ -6,6 +6,7 @@ const {
 } = require("./error.middleware");
 const validate = require("./validate.middleware");
 const { apiLimiter, authLimiter, writeLimiter } = require("./rateLimiter.middleware");
+const { requireIdempotencyKey } = require('./idempotency.middleware');
 
 module.exports = {
   authenticate,
@@ -19,4 +20,5 @@ module.exports = {
   apiLimiter,
   authLimiter,
   writeLimiter,
+  requireIdempotencyKey,
 };

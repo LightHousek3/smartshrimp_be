@@ -14,6 +14,9 @@ const expertSeasonService = require('./expertSeason.service');
 const expertProductionProtocolService = require('./expertProductionProtocol.service');
 const waterLogService = require('./waterLog.service');
 const operationService = require('./operation.service');
+const inventoryService = require('./inventory.service');
+const supplierService = require('./supplier.service');
+const notificationNavigationService = require('./notificationNavigation.service');
 
 const ragDocumentService = require('./ragDocument.service');
 const ragService = require('./rag.service');
@@ -41,4 +44,7 @@ module.exports = {
     expertProductionProtocolService,
     waterLogService,
     operationService,
+    inventoryService,
+    supplierService,
+    notificationNavigationService,
 };
