@@ -501,10 +501,26 @@ model Protocol {
   createdAt            DateTime       @default(now()) @map("created_at") @db.Timestamptz(6)
   updatedAt            DateTime       @default(now()) @map("updated_at") @db.Timestamptz(6)
 
-  season AquacultureSeason @relation(fields: [seasonId], references: [id], onDelete: Restrict)
-  items  ProtocolItem[]
+  season               AquacultureSeason @relation(fields: [seasonId], references: [id], onDelete: Restrict)
+  items                ProtocolItem[]
+  statusHistory        ProtocolStatusHistory[]
 
   @@map("protocols")
+}
+
+/// Maps the existing protocol_status_history table; no database DDL is required.
+model ProtocolStatusHistory {
+  id         String         @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  protocolId String         @map("protocol_id") @db.Uuid
+  fromStatus ProtocolStatus? @map("from_status")
+  toStatus   ProtocolStatus  @map("to_status")
+  changedBy  String         @map("changed_by") @db.Uuid
+  reason     String?
+  changedAt  DateTime       @default(now()) @map("changed_at") @db.Timestamptz(6)
+  protocol   Protocol       @relation(fields: [protocolId], references: [id], onDelete: Restrict)
+
+  @@index([protocolId, changedAt], map: "idx_protocol_status_history")
+  @@map("protocol_status_history")
 }
 
 model ProtocolItem {
