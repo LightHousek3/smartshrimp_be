@@ -15,11 +15,13 @@ const expertSeasonRoute = require('./expertSeason.route');
 const ragRoute = require('./rag.route');
 const waterLogRoute = require('./waterLog.route');
 const operationRoute = require('./operation.route');
+const protocolRoute = require('./protocol.route');
 const inventoryRoute = require('./inventory.route');
 
 const router = express.Router();
 
 const routes = [
+    { path: '/owner/protocols', route: protocolRoute },
     { path: '/me/rag', route: ragRoute },
     { path: '/auth', route: authRoute },
     { path: '/admin/accounts', route: adminAccountRoute },
