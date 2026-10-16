@@ -6,6 +6,7 @@ const localDate = new Intl.DateTimeFormat('en-US', {
     timeZone: 'Asia/Ho_Chi_Minh', year: 'numeric', month: '2-digit', day: '2-digit',
 });
 
+/** Represent the Vietnam calendar day as UTC midnight so day differences ignore server timezone. */
 const localDayStamp = (date) => {
     const parts = Object.fromEntries(localDate.formatToParts(date)
         .filter(({ type }) => ['year', 'month', 'day'].includes(type))
@@ -13,14 +14,21 @@ const localDayStamp = (date) => {
     return Date.UTC(parts.year, parts.month - 1, parts.day);
 };
 
+/**
+ * Stocking day is DOC 1; planning seasons and missing stocking dates have no DOC.
+ * Ended seasons use the actual end date, falling back to their last update day.
+ */
 const dayOfCulture = (season, now) => {
     if (season.status === SEASON_STATUS.PLANNING || !season.stockingDate) return null;
     const end = season.status === SEASON_STATUS.ACTIVE
         ? localDayStamp(now)
         : (season.actualEndDate?.getTime() ?? localDayStamp(season.updatedAt));
-    return Math.max(0, Math.floor((end - season.stockingDate.getTime()) / MILLISECONDS_PER_DAY));
+    return Math.max(0, Math.floor((end - season.stockingDate.getTime()) / MILLISECONDS_PER_DAY) + 1);
 };
 
+/**
+ * Open seasons require a current expert assignment; ended seasons retain historical access.
+ */
 const assignmentScope = (accountId) => {
     const participant = { accountId, role: PERSONNEL_ROLE.EXPERT };
     return { OR: [
@@ -35,6 +43,7 @@ const assignmentScope = (accountId) => {
     ] };
 };
 
+/** Search and filters narrow the assignment scope without granting access to other seasons. */
 const assignedSeasonWhere = (accountId, query = {}) => ({
     AND: [
         assignmentScope(accountId),
@@ -49,6 +58,10 @@ const assignedSeasonWhere = (accountId, query = {}) => ({
     ],
 });
 
+/**
+ * Load only list context, unresolved case severities and the latest production version.
+ * The latest version may be a draft or rejected protocol, rather than the approved one.
+ */
 const seasonSelect = {
     id: true, name: true, status: true, shrimpType: true,
     stockingDate: true, actualEndDate: true, updatedAt: true,
@@ -70,6 +83,7 @@ const seasonSelect = {
 
 const SEVERITY_RANK = { LOW: 1, MEDIUM: 2, HIGH: 3, CRITICAL: 4 };
 
+/** Return list summaries with date-only stocking dates and the highest unresolved case severity. */
 const normalizeSeason = (season, now) => ({
     id: season.id,
     name: season.name,
@@ -86,6 +100,10 @@ const normalizeSeason = (season, now) => ({
     ), null),
 });
 
+/**
+ * List scoped seasons with deterministic pagination and a shared timestamp for DOC calculation.
+ * Farm filter options use the full assignment scope so active filters do not hide other choices.
+ */
 const getAssignedSeasons = async (accountId, query = {}, now = new Date()) => {
     const { page = 1, limit = 10 } = query;
     const where = assignedSeasonWhere(accountId, query);

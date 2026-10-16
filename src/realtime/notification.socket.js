@@ -1,7 +1,7 @@
 const { Server } = require('socket.io');
 const config = require('../config');
 const { ACCOUNT_ROLE } = require('../constants');
-const { loadActiveAccount } = require('../middlewares/auth.middleware');
+const { loadActiveAccount } = require('../middlewares');
 
 let io;
 

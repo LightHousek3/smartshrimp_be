@@ -11,8 +11,9 @@ const {
     ACCOUNT_ROLE,
     ACCOUNT_STATUS,
     SEASON_STATUS,
+    ALERT_KIND,
+    DASHBOARD_PERIOD,
 } = require('../constants');
-const { ALERT_KIND, DASHBOARD_PERIOD } = require('../constants/ownerDashboard');
 
 const DAY_MS = 86400000;
 const MAX_FINANCE_MONTHS = 60;

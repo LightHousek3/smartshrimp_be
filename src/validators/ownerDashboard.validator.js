@@ -1,5 +1,5 @@
 const Joi = require('joi');
-const { DASHBOARD_PERIOD } = require('../constants/ownerDashboard');
+const { DASHBOARD_PERIOD } = require('../constants');
 
 /** Reject impossible calendar dates instead of letting Date silently roll them over. */
 const dateOnly = Joi.string().pattern(/^\d{4}-\d{2}-\d{2}$/).custom((value, helpers) => {

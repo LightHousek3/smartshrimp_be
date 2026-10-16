@@ -5,8 +5,7 @@ const axios = require('axios');
 const prisma = require('../config/prisma');
 const config = require('../config');
 const storage = require('./ragStorage.service');
-const { ApiError } = require('../utils');
-const { createDocumentError, getDocumentErrorCode } = require('../utils/ragDocumentError');
+const { ApiError, createDocumentError, getDocumentErrorCode } = require('../utils');
 const { RAG_DOCUMENT_STATUS, RAG_DOCUMENT_MAX_FILE_BYTES, RAG_DOCUMENT_CATEGORIES, messages, RAG_UPLOAD_SIGNATURE_TTL_MS, RAG_UPLOAD_CLEANUP_DELAY_MS } = require('../constants');
 
 const include = { uploader: { select: { id: true, fullName: true } } };

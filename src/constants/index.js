@@ -2,6 +2,23 @@ const httpStatus = require('./httpStatus');
 const messages = require('./messages');
 const NOTIFICATION_TYPE = require('./notificationType');
 
+const DASHBOARD_PERIOD = Object.freeze({
+    THIS_MONTH: 'THIS_MONTH',
+    LAST_MONTH: 'LAST_MONTH',
+    SIX_MONTHS: 'SIX_MONTHS',
+    YEAR: 'YEAR',
+    CUSTOM: 'CUSTOM',
+});
+
+const ALERT_KIND = Object.freeze({
+    URGENT_TASK: 'URGENT_TASK',
+    PENDING_TREATMENT: 'PENDING_TREATMENT',
+    PENDING_PRODUCTION: 'PENDING_PRODUCTION',
+    LOW_STOCK: 'LOW_STOCK',
+    IN_TREATMENT: 'IN_TREATMENT',
+    MONITORING: 'MONITORING',
+});
+
 /**
  * Enums matching the database schema
  */
@@ -60,6 +77,27 @@ const DOSE_BASIS = {
     PER_KG_BIOMASS: 'PER_KG_BIOMASS',
     PERCENT_BIOMASS: 'PERCENT_BIOMASS',
     PER_M3_WATER: 'PER_M3_WATER',
+};
+
+const PRODUCTION_PROTOCOL_EDITABLE_STATUSES = ['DRAFT', 'REJECTED'];
+const PRODUCTION_PROTOCOL_IN_PROGRESS_STATUSES = [
+    ...PRODUCTION_PROTOCOL_EDITABLE_STATUSES,
+    'PENDING_APPROVAL',
+];
+const PRODUCTION_PROTOCOL_WRITABLE_SEASONS = [SEASON_STATUS.PLANNING, SEASON_STATUS.ACTIVE];
+const PRODUCTION_PROTOCOL_UNITS = ['KG', 'G', 'L', 'ML', 'PACK', 'BOTTLE', 'PCS'];
+const PRODUCTION_PROTOCOL_CATEGORIES = ['FEED', 'MEDICINE', 'MINERAL', 'CHEMICAL', 'OTHER'];
+
+const allowedProductionProtocolDoseBases = (operationType, offset) => {
+    if (offset >= 30) {
+        return Object.values(DOSE_BASIS);
+    }
+
+    if ([OPERATION_TYPE.FEEDING, OPERATION_TYPE.MEDICINE].includes(operationType)) {
+        return [DOSE_BASIS.FIXED_QUANTITY];
+    }
+
+    return [DOSE_BASIS.FIXED_QUANTITY, DOSE_BASIS.PER_M3_WATER];
 };
 
 const SCHEDULE_CANCELLATION_TYPE = {
@@ -208,6 +246,8 @@ const checkWaterThresholds = (shrimpType, values = {}) => {
 };
 
 module.exports = {
+    DASHBOARD_PERIOD,
+    ALERT_KIND,
     RAG_STATUS,
     RAG_DOCUMENT_STATUS,
     RAG_DOCUMENT_MAX_FILE_BYTES,
@@ -227,6 +267,12 @@ module.exports = {
     OPERATION_TYPE,
     OPERATION_STATUS,
     DOSE_BASIS,
+    PRODUCTION_PROTOCOL_EDITABLE_STATUSES,
+    PRODUCTION_PROTOCOL_IN_PROGRESS_STATUSES,
+    PRODUCTION_PROTOCOL_WRITABLE_SEASONS,
+    PRODUCTION_PROTOCOL_UNITS,
+    PRODUCTION_PROTOCOL_CATEGORIES,
+    allowedProductionProtocolDoseBases,
     SCHEDULE_CANCELLATION_TYPE,
     NOTIFICATION_TYPE,
     WATER_THRESHOLDS,
