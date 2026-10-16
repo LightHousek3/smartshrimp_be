@@ -1,9 +1,12 @@
 const { createHash } = require('crypto');
 const prisma = require('../config/prisma');
+const logger = require('../config/logger');
+const { emitNotification } = require('../realtime/notification.socket');
 const { ApiError } = require('../utils');
 const { hasOverlappingStages } = require('../utils/productionProtocol');
 const {
     messages,
+    NOTIFICATION_TYPE,
     PRODUCTION_PROTOCOL_EDITABLE_STATUSES,
     PRODUCTION_PROTOCOL_IN_PROGRESS_STATUSES,
     PRODUCTION_PROTOCOL_WRITABLE_SEASONS,
@@ -39,12 +42,22 @@ const mapError = (error) => {
  * Keep protocol content and status history atomic; surface concurrent writes as conflicts.
  */
 const transaction = async (callback) => {
+    const notifications = [];
     try {
-        return await prisma.$transaction(callback, {
+        const result = await prisma.$transaction((tx) => callback(tx, notifications), {
             isolationLevel: 'Serializable',
             maxWait: 5000,
             timeout: 15000,
         });
+        // Persisted notifications remain readable even if realtime delivery is unavailable.
+        for (const notification of notifications) {
+            try {
+                emitNotification(notification.accountId, 'notification:new', { id: notification.id });
+            } catch (_) {
+                logger.warn('Protocol notification realtime delivery failed after commit.');
+            }
+        }
+        return result;
     } catch (error) {
         return mapError(error);
     }
@@ -674,7 +687,7 @@ const templateDetail = (accountId, seasonId, templateId) => transaction(async (t
  * Revalidate saved content before transitioning to PENDING_APPROVAL in the caller's transaction.
  * Clear previous review fields, retain audit history and leave schedule generation to approval.
  */
-const submitCurrent = async (tx, season, accountId, current) => {
+const submitCurrent = async (tx, season, accountId, current, notifications) => {
     const fromStatus = current.status;
     if (!current.items.length || current.items.some((item) => item.plannedTime == null)) {
         throw ApiError.badRequest(messages.PRODUCTION_PROTOCOL.SUBMIT_INCOMPLETE);
@@ -707,10 +720,23 @@ const submitCurrent = async (tx, season, accountId, current) => {
         throw ApiError.conflict(messages.PRODUCTION_PROTOCOL.CONFLICT);
     }
     await appendHistory(tx, current.id, fromStatus.toLowerCase(), 'pending_approval', accountId);
+    const ownerId = season.pond.farm.ownerId;
+    const notification = await tx.notification.create({
+        data: {
+            accountId: ownerId,
+            type: NOTIFICATION_TYPE.PRODUCTION_PROTOCOL_PENDING,
+            title: messages.PRODUCTION_PROTOCOL.PENDING_NOTIFICATION_TITLE,
+            content: `Phác đồ "${current.title}" (v${current.versionNo}) của vụ ${season.name}, ao ${season.pond.name}, trang trại ${season.pond.farm.name} đang chờ chủ trại duyệt.`,
+            referenceType: 'protocol',
+            referenceId: current.id,
+        },
+        select: { id: true },
+    });
+    notifications.push({ accountId: ownerId, id: notification.id });
 };
 
 /** Require an editable status, matching revision and no dependencies before standalone submission. */
-const submit = (accountId, seasonId, protocolId, body) => transaction(async (tx) => {
+const submit = (accountId, seasonId, protocolId, body) => transaction(async (tx, notifications) => {
     const season = await scope(tx, accountId, seasonId, true);
     await tx.$queryRaw`SELECT id FROM protocols WHERE id = ${protocolId}::uuid FOR UPDATE`;
     const current = await findProtocol(tx, seasonId, protocolId);
@@ -720,7 +746,7 @@ const submit = (accountId, seasonId, protocolId, body) => transaction(async (tx)
     if (await blockers(tx, current)) {
         throw ApiError.conflict(messages.PRODUCTION_PROTOCOL.DEPENDENCY);
     }
-    await submitCurrent(tx, season, accountId, current);
+    await submitCurrent(tx, season, accountId, current, notifications);
     return wireDetail(await findProtocol(tx, seasonId, protocolId), season, false, await history(tx, protocolId));
 });
 
@@ -728,7 +754,7 @@ const submit = (accountId, seasonId, protocolId, body) => transaction(async (tx)
  * Create the next version only when no draft, rejected or pending version is in progress.
  * Link the latest version, including cancelled ones; optional submission remains atomic.
  */
-const create = (accountId, seasonId, body) => transaction(async (tx) => {
+const create = (accountId, seasonId, body) => transaction(async (tx, notifications) => {
     const season = await scope(tx, accountId, seasonId, true);
     if (await tx.protocol.count({
         where: {
@@ -769,7 +795,7 @@ const create = (accountId, seasonId, body) => transaction(async (tx) => {
     await persistGraph(tx, row.id, stages, null);
     await appendHistory(tx, row.id, null, 'draft', accountId);
     if (submitForApproval) {
-        await submitCurrent(tx, season, accountId, await findProtocol(tx, seasonId, row.id));
+        await submitCurrent(tx, season, accountId, await findProtocol(tx, seasonId, row.id), notifications);
     }
     return wireDetail(await findProtocol(tx, seasonId, row.id), season, false, await history(tx, row.id));
 });
@@ -777,7 +803,7 @@ const create = (accountId, seasonId, body) => transaction(async (tx) => {
  * Share revision and dependency checks between draft edits and cancellation.
  * Cancellation preserves items; omitted PATCH fields preserve their stored values.
  */
-const mutate = (accountId, seasonId, protocolId, body, cancelling) => transaction(async (tx) => {
+const mutate = (accountId, seasonId, protocolId, body, cancelling) => transaction(async (tx, notifications) => {
     const season = await scope(tx, accountId, seasonId, true);
     await tx.$queryRaw`SELECT id FROM protocols WHERE id = ${protocolId}::uuid FOR UPDATE`;
     const current = await findProtocol(tx, seasonId, protocolId);
@@ -832,7 +858,7 @@ const mutate = (accountId, seasonId, protocolId, body, cancelling) => transactio
         await persistGraph(tx, protocolId, stages, current);
     }
     if (!cancelling && submitForApproval) {
-        await submitCurrent(tx, season, accountId, await findProtocol(tx, seasonId, protocolId));
+        await submitCurrent(tx, season, accountId, await findProtocol(tx, seasonId, protocolId), notifications);
     }
     return wireDetail(await findProtocol(tx, seasonId, protocolId), season, false, await history(tx, protocolId));
 });
