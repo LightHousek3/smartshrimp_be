@@ -1,3 +1,7 @@
+/**
+ * Provide assigned technicians with schedules, execution recording, and season statistics.
+ * Execution commits inventory movements, the execution record, and schedule completion together.
+ */
 const crypto = require('crypto');
 const prisma = require('../config/prisma');
 const { emitNotification } = require('../realtime/notification.socket');
@@ -11,8 +15,10 @@ const {
     NOTIFICATION_TYPE,
 } = require('../constants');
 
+// Preserve missing measurements while converting Prisma decimals to API numbers.
 const toNumber = (val) => (val == null ? null : Number(val));
 
+// Normalize decimal fields in the schedule and its optional nested context consistently.
 const formatSchedule = (s) => {
     if (!s) return s;
     return {
@@ -40,7 +46,7 @@ const formatSchedule = (s) => {
 };
 
 /**
- * UC-09: Xem danh sách kế hoạch vận hành
+ * UC-09: List operation schedules for an actively assigned technician.
  */
 const listSchedules = async (technicianId, seasonId, query = {}) => {
     // 1. Verify active technician assignment
@@ -109,6 +115,7 @@ const listSchedules = async (technicianId, seasonId, query = {}) => {
     };
 
     if (query.date) {
+        // This filter uses a UTC calendar day, matching the existing schedule query contract.
         const start = new Date(`${query.date}T00:00:00.000Z`);
         const end = new Date(`${query.date}T23:59:59.999Z`);
         where.scheduledAt = { gte: start, lte: end };
@@ -220,7 +227,7 @@ const listSchedules = async (technicianId, seasonId, query = {}) => {
 };
 
 /**
- * UC-10: Xem chi tiết kế hoạch vận hành
+ * UC-10: Read schedule details after verifying the technician's active assignment.
  */
 const getSchedule = async (technicianId, scheduleId) => {
     const schedule = await prisma.operationSchedule.findUnique({
@@ -303,7 +310,7 @@ const getSchedule = async (technicianId, scheduleId) => {
 };
 
 /**
- * UC-11: Ghi nhận thực hiện hoạt động
+ * UC-11: Record an operation execution and its inventory movements atomically.
  */
 const executeSchedule = async (technicianId, scheduleId, payload) => {
     // 1. Fetch schedule
@@ -402,6 +409,13 @@ const executeSchedule = async (technicianId, scheduleId, payload) => {
     }
 
     return await prisma.$transaction(async (tx) => {
+        // Share the season lock with final harvest, then recheck status after any lock wait.
+        // This prevents execution and inventory writes after the season has completed.
+        await tx.$queryRaw`SELECT id FROM aquaculture_seasons WHERE id = ${schedule.seasonId}::uuid FOR UPDATE`;
+        const freshSeason = await tx.aquacultureSeason.findUnique({ where: { id: schedule.seasonId } });
+        if (!freshSeason || freshSeason.status !== SEASON_STATUS.ACTIVE) {
+            throw ApiError.badRequest(messages.OPERATION.SEASON_NOT_ACTIVE);
+        }
         // Re-check schedule status in transaction
         const freshSchedule = await tx.operationSchedule.findUnique({
             where: { id: scheduleId },
@@ -426,6 +440,7 @@ const executeSchedule = async (technicianId, scheduleId, payload) => {
             }
 
             let remainingToDeduct = actualQty;
+            // Link FIFO deductions from multiple batches to the same inventory movement group.
             const txGroupId = crypto.randomUUID();
 
             for (const balance of balances) {
@@ -494,7 +509,7 @@ const executeSchedule = async (technicianId, scheduleId, payload) => {
 };
 
 /**
- * UC-12: Xem thống kê vận hành
+ * UC-12: Summarize operation progress for an actively assigned technician.
  */
 const getSeasonStats = async (technicianId, seasonId) => {
     // 1. Verify technician assignment
@@ -533,6 +548,7 @@ const getSeasonStats = async (technicianId, seasonId) => {
         _count: { id: true },
     });
 
+    // Include zero-count operation types so clients receive a stable statistics shape.
     const byType = {};
     for (const type of Object.values(OPERATION_TYPE)) {
         byType[type.toLowerCase()] = {
@@ -553,6 +569,7 @@ const getSeasonStats = async (technicianId, seasonId) => {
         byType[typeKey].total += group._count.id;
     }
 
+    // Cancelled schedules do not contribute to the completion-rate denominator.
     const activeTotal = total - cancelled;
     const completionRate = activeTotal > 0 ? Number(((completed / activeTotal) * 100).toFixed(2)) : 0;
 

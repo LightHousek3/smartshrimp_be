@@ -1,3 +1,7 @@
+/**
+ * Validator barrel exposing request schemas and domain validation middleware to routes.
+ * Keep domain exports aligned with the validators consumed by each route module.
+ */
 const authValidator = require('./auth.validator');
 const adminAccountValidator = require('./adminAccount.validator');
 const profileValidator = require('./profile.validator');
@@ -15,6 +19,7 @@ const waterLogValidator = require('./waterLog.validator');
 const operationValidator = require('./operation.validator');
 const inventoryValidator = require('./inventory.validator');
 const supplierValidator = require('./supplier.validator');
+const harvestValidator = require('./harvest.validator');
 
 const ragDocumentValidator = require('./ragDocument.validator');
 const ragValidator = require('./rag.validator');
@@ -39,4 +44,5 @@ module.exports = {
     operationValidator,
     inventoryValidator,
     supplierValidator,
+    harvestValidator,
 };

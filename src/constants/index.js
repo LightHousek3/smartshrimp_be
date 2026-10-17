@@ -1,6 +1,24 @@
+/**
+ * Shared domain enums, response messages, and validation policies exposed through the constants barrel.
+ * Keep persisted enum values aligned with the database and API consumers.
+ */
 const httpStatus = require('./httpStatus');
 const messages = require('./messages');
 const NOTIFICATION_TYPE = require('./notificationType');
+
+// Keep harvest response and error messages consistent across the controller and service.
+const HARVEST_MESSAGES = {
+    NOT_FOUND: 'Không tìm thấy lần thu hoạch hoặc vụ nuôi.',
+    CONFLICT: 'Dữ liệu thu hoạch đã thay đổi. Vui lòng tải lại và thử lại.',
+    INACTIVE: 'Chỉ ghi nhận thu hoạch cho vụ nuôi đang hoạt động.',
+    INVALID_QUANTITY: 'Sản lượng hoặc số lượng thu hoạch không hợp lệ.',
+    INVALID_TIME: 'Thời điểm thu hoạch phải từ ngày thả giống, không trước lần thu gần nhất và không ở tương lai.',
+    INVALID_CURSOR: 'Con trỏ phân trang không hợp lệ.',
+    KEY_CONFLICT: 'Khóa ghi nhận đã được sử dụng cho dữ liệu khác.',
+    LIST: 'Đã tải danh sách thu hoạch.',
+    DETAIL: 'Đã tải chi tiết thu hoạch.',
+    CREATED: 'Đã ghi nhận thu hoạch.',
+};
 
 const DASHBOARD_PERIOD = Object.freeze({
     THIS_MONTH: 'THIS_MONTH',
@@ -144,6 +162,7 @@ const PRODUCTION_PROTOCOL_WRITABLE_SEASONS = [SEASON_STATUS.PLANNING, SEASON_STA
 const PRODUCTION_PROTOCOL_UNITS = ['KG', 'G', 'L', 'ML', 'PACK', 'BOTTLE', 'PCS'];
 const PRODUCTION_PROTOCOL_CATEGORIES = ['FEED', 'MEDICINE', 'MINERAL', 'CHEMICAL', 'OTHER'];
 
+// Biomass-based dosing becomes available from day 30; earlier days use restricted bases.
 const allowedProductionProtocolDoseBases = (operationType, offset) => {
     if (offset >= 30) {
         return Object.values(DOSE_BASIS);
@@ -195,32 +214,32 @@ const RAG_DOCUMENT_ERRORS = Object.freeze({
 /**
  * Water quality thresholds
  * ==========================
- * Ngưỡng cảnh báo chất lượng nước theo loại tôm, dùng cho:
- *  - F1 "Nhập nhật ký đo nước": so sánh từng chỉ số lúc nhập, vượt ngưỡng ->
- *    tạo notification `water_threshold_exceeded` cho chủ trại (BR-NOTI-03).
- *  - F4 "Xem thống kê chất lượng nước": tính % mẫu vượt ngưỡng.
+ * Species-specific warning thresholds used by:
+ *  - F1 "Record water measurements": compare entered metrics and notify the farm
+ *    owner with `water_threshold_exceeded` when limits are exceeded (BR-NOTI-03).
+ *  - F4 "View water quality statistics": calculate the percentage of samples outside limits.
  *
- * NGUỒN SỐ LIỆU (DRAFT 2026-10-08): tổng hợp từ tài liệu trực tuyến
- * (tôm thẻ chân trắng L. vannamei; tôm sú P. monodon).
- * ⚠️ TEAM NUÔI TRỒNG BẮT BUỘC rà soát và điều chỉnh trước khi dùng production.
+ * DATA SOURCE (DRAFT 2026-10-08): compiled from online references
+ * for whiteleg shrimp (L. vannamei) and black tiger shrimp (P. monodon).
+ * The aquaculture team must review and adjust these draft values before production use.
  *
- * Quy ước: vượt ngưỡng = giá trị nằm NGOÀI [min, max].
- * Các chỉ số một phía (vd. NH3 chỉ có max) thì phía còn lại để null = không giới hạn.
- * Đây là ngưỡng CẢNH BÁO vận hành, khác với khoảng vật lý ở DB CHECK
- * (temp 0–50, pH 0–14, các chỉ số ≥ 0) — DB CHECK vẫn là tuyến phòng thủ cuối.
+ * A value exceeds a threshold when it is outside the inclusive [min, max] range.
+ * One-sided limits use null for the unbounded side, such as NH3 with only a maximum.
+ * These operational warning thresholds differ from physical database CHECK ranges
+ * (temperature 0–50, pH 0–14, other metrics >= 0); database constraints remain the final guard.
  *
- * Lưu ý về NH3: cột `nh3_mg_l` trong DB chưa rõ là NH3 tự do hay TAN
- * (total ammonia nitrogen). Ngưỡng dưới đây áp cho giá trị đo thực tế được nhập;
- * team cần chốt định nghĩa cột, lý tưởng là quy đổi NH3 tự do từ TAN + pH + nhiệt độ.
+ * NH3 caveat: `nh3_mg_l` does not yet distinguish free NH3 from TAN
+ * (total ammonia nitrogen). These limits apply to the entered measurement;
+ * the team must clarify the column definition, ideally deriving free NH3 from TAN, pH, and temperature.
  */
 
-// Dùng đúng key SHRIMP_TYPE của src/constants/index.js: WHITELEG / BLACK_TIGER
+// Use the exact SHRIMP_TYPE keys: WHITELEG and BLACK_TIGER.
 const WATER_THRESHOLDS = {
     WHITELEG: {
-        // Tôm thẻ chân trắng (Litopenaeus vannamei)
-        // Nguồn: tổng hợp nhiều nghiên cứu — temp tối ưu 25–33 (tốt nhất 28–30);
-        // pH 7.5–8.5; DO > 4 (tối ưu ≥ 5); độ mặn 15–25 (chịu được 5–35);
-        // NH3 < 0.1; NO2 < 0.5; kiềm > 120; H2S < 0.05.
+        // Whiteleg shrimp (Litopenaeus vannamei).
+        // Reference summary: optimal temperature 25–33 (best 28–30);
+        // pH 7.5–8.5; DO > 4 (optimal >= 5); salinity 15–25 (tolerated 5–35);
+        // NH3 < 0.1; NO2 < 0.5; alkalinity > 120; H2S < 0.05.
         temperatureC:       { min: 25,  max: 33,  unit: '°C' },
         ph:                 { min: 7.5, max: 8.5, unit: 'pH' },
         dissolvedOxygenMgL: { min: 4.0, max: null, unit: 'mg/L' },
@@ -231,11 +250,11 @@ const WATER_THRESHOLDS = {
         h2sMgL:             { min: null, max: 0.05, unit: 'mg/L' },
     },
     BLACK_TIGER: {
-        // Tôm sú (Penaeus monodon)
-        // Nguồn: tổng hợp nhiều nghiên cứu — temp tối ưu 26–32 (tốt nhất 26–29);
-        // pH 7.5–8.5; DO tối thiểu 4; độ mặn 10–25 (chịu được 5–32);
-        // NH3-N tối đa 0.1; NO2-N tối đa 0.5–1.0 (lấy mức chặt 0.5);
-        // H2S < 0.05; kiềm 100–200.
+        // Black tiger shrimp (Penaeus monodon).
+        // Reference summary: optimal temperature 26–32 (best 26–29);
+        // pH 7.5–8.5; minimum DO 4; salinity 10–25 (tolerated 5–32);
+        // maximum NH3-N 0.1; maximum NO2-N 0.5–1.0 (using the stricter 0.5);
+        // H2S < 0.05; alkalinity 100–200.
         temperatureC:       { min: 26,  max: 32,  unit: '°C' },
         ph:                 { min: 7.5, max: 8.5, unit: 'pH' },
         dissolvedOxygenMgL: { min: 4.0, max: null, unit: 'mg/L' },
@@ -247,8 +266,8 @@ const WATER_THRESHOLDS = {
     },
 };
 
-// Map tên field camelCase (BE) -> key ngưỡng, để loop kiểm tra.
-// Thêm/xóa chỉ số đo trong tương lai chỉ cần sửa map này + WATER_THRESHOLDS.
+// Map backend camelCase fields to threshold keys for the comparison loop.
+// Add or remove compared metrics in this map and WATER_THRESHOLDS together.
 const THRESHOLD_FIELD_MAP = {
     temperatureC: 'temperatureC',
     ph: 'ph',
@@ -276,10 +295,10 @@ const WATER_METRIC_DEFINITIONS = Object.freeze({
 });
 
 /**
- * Kiểm tra các chỉ số đo so với ngưỡng của loại tôm.
- * @param {string} shrimpType 'WHITELEG' | 'BLACK_TIGER' (đúng enum SHRIMP_TYPE)
- * @param {Object} values object các chỉ số (Decimal hoặc number, null = không đo)
- * @returns {Array<{field, direction, value, min, max, unit}>} danh sách chỉ số vượt ngưỡng
+ * Compare measured water metrics against the selected species' warning thresholds.
+ * @param {string} shrimpType 'WHITELEG' | 'BLACK_TIGER', matching SHRIMP_TYPE.
+ * @param {Object} values Metric values as Decimal or number; null means not measured.
+ * @returns {Array<{field, direction, value, min, max, unit}>} Metrics outside their warning limits.
  */
 const checkWaterThresholds = (shrimpType, values = {}) => {
     const thresholds = WATER_THRESHOLDS[shrimpType];
@@ -289,7 +308,7 @@ const checkWaterThresholds = (shrimpType, values = {}) => {
     const exceeded = [];
     for (const [field, key] of Object.entries(THRESHOLD_FIELD_MAP)) {
         const raw = values[field];
-        if (raw === null || raw === undefined || raw === '') continue; // không đo -> bỏ qua
+        if (raw === null || raw === undefined || raw === '') continue; // Skip unmeasured metrics.
         const value = Number(raw);
         if (Number.isNaN(value)) continue;
         const { min, max, unit } = thresholds[key];
@@ -346,4 +365,5 @@ module.exports = {
     PRODUCT_STOCK_STATUS,
     PRODUCT_ARCHIVE_STATUS,
     INVENTORY_LIMITS,
+    HARVEST_MESSAGES,
 };

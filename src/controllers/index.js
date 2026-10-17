@@ -1,3 +1,7 @@
+/**
+ * Controller barrel used by route modules to access HTTP handlers through one entry point.
+ * Register each controller here when adding routes that consume it.
+ */
 const authController = require('./auth.controller');
 const adminAccountController = require('./adminAccount.controller');
 const profileController = require('./profile.controller');
@@ -15,6 +19,7 @@ const waterLogController = require('./waterLog.controller');
 const operationController = require('./operation.controller');
 const inventoryController = require('./inventory.controller');
 const supplierController = require('./supplier.controller');
+const harvestController = require('./harvest.controller');
 
 const ragDocumentController = require('./ragDocument.controller');
 const ragController = require('./rag.controller');
@@ -39,4 +44,5 @@ module.exports = {
     operationController,
     inventoryController,
     supplierController,
+    harvestController,
 };

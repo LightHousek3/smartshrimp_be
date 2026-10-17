@@ -1,3 +1,7 @@
+/**
+ * Mount domain routers below the API prefix configured by the application.
+ * Authentication and request validation remain in the individual domain routers.
+ */
 const express = require('express');
 const authRoute = require('./auth.route');
 const adminAccountRoute = require('./adminAccount.route');
@@ -17,6 +21,7 @@ const waterLogRoute = require('./waterLog.route');
 const operationRoute = require('./operation.route');
 const protocolRoute = require('./protocol.route');
 const inventoryRoute = require('./inventory.route');
+const harvestRoute = require('./harvest.route');
 
 const router = express.Router();
 
@@ -31,6 +36,7 @@ const routes = [
     { path: '/owner/farms/:farmId/ponds', route: pondRoute },
     { path: '/owner/farms/:farmId', route: inventoryRoute },
     { path: '/owner/personnel', route: personnelRoute },
+    { path: '/owner/seasons/:seasonId/harvests', route: harvestRoute },
     { path: '/owner/seasons', route: seasonRoute },
     { path: '/owner/dashboard', route: ownerDashboardRoute },
     { path: '/me/seasons', route: assignedSeasonRoute },

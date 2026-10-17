@@ -1,3 +1,7 @@
+/**
+ * Service barrel used by controllers to access backend business operations.
+ * Services that depend on sibling services use direct imports to avoid re-entering this barrel.
+ */
 const authService = require('./auth.service');
 const adminAccountService = require('./adminAccount.service');
 const verificationService = require('./verification.service');
@@ -17,6 +21,7 @@ const operationService = require('./operation.service');
 const inventoryService = require('./inventory.service');
 const supplierService = require('./supplier.service');
 const notificationNavigationService = require('./notificationNavigation.service');
+const harvestService = require('./harvest.service');
 
 const ragDocumentService = require('./ragDocument.service');
 const ragService = require('./rag.service');
@@ -47,4 +52,5 @@ module.exports = {
     inventoryService,
     supplierService,
     notificationNavigationService,
+    harvestService,
 };
