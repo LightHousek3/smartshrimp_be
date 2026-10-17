@@ -6,6 +6,7 @@ const { ACCOUNT_ROLE } = require('../constants');
 
 const router = express.Router();
 
+// Apply the same active-account and Owner gate to every farm endpoint.
 router.use(authenticate, authorize(ACCOUNT_ROLE.FARM_OWNER));
 
 /**

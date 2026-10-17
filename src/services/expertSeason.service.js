@@ -103,6 +103,7 @@ const normalizeSeason = (season, now) => ({
 /**
  * List scoped seasons with deterministic pagination and a shared timestamp for DOC calculation.
  * Farm filter options use the full assignment scope so active filters do not hide other choices.
+ * Open-season access needs a current assignment; ended-season access can follow historical participation.
  */
 const getAssignedSeasons = async (accountId, query = {}, now = new Date()) => {
     const { page = 1, limit = 10 } = query;

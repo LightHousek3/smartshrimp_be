@@ -14,7 +14,7 @@ const PROFILE_ROLES = [
 /**
  * @route   GET /api/v1/profile
  * @desc    Get the authenticated Technician, Owner, or Expert profile
- * @access  Private
+ * @access  Private (ACTIVE Technician, Farm Owner, or Expert)
  */
 router.get(
     '/',
@@ -26,7 +26,7 @@ router.get(
 /**
  * @route   PATCH /api/v1/profile
  * @desc    Update editable fields of the authenticated account's profile
- * @access  Private
+ * @access  Private (ACTIVE Technician, Farm Owner, or Expert)
  */
 router.patch(
     '/',
@@ -39,7 +39,7 @@ router.patch(
 /**
  * @route   PATCH /api/v1/profile/password
  * @desc    Change password, revoke every session, and renew the current session
- * @access  Private
+ * @access  Private (ACTIVE Technician, Farm Owner, or Expert)
  */
 router.patch(
     '/password',

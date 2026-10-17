@@ -5,6 +5,7 @@ const { assignedSeasonValidator } = require('../validators');
 const { ACCOUNT_ROLE } = require('../constants');
 
 const router = express.Router();
+// The service further narrows Technician access to current season assignments.
 router.use(authenticate, authorize(ACCOUNT_ROLE.TECHNICIAN));
 
 /**

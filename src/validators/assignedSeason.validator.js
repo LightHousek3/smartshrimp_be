@@ -1,6 +1,10 @@
 const Joi = require('joi');
 const { SEASON_STATUS } = require('../constants');
 
+/**
+ * Bound list size and cursor length before querying current technician assignments.
+ * The service validates cursor structure and verifies it belongs to this filtered assignment scope.
+ */
 const getAssignedSeasons = {
     query: Joi.object().keys({
         status: Joi.string().uppercase().valid(...Object.values(SEASON_STATUS)),
@@ -11,6 +15,9 @@ const getAssignedSeasons = {
     }),
 };
 
+/**
+ * Reject malformed season identifiers before checking the technician assignment.
+ */
 const getAssignedSeason = {
     params: Joi.object().keys({
         seasonId: Joi.string().uuid({ version: 'uuidv4' }).required(),

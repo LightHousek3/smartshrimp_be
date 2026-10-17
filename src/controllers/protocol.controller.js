@@ -4,6 +4,7 @@ const { PROTOCOL_MESSAGE: M } = require('../constants/protocol');
 
 /**
  * GET /owner/protocols
+ * Pass validated filters, including the pending inbox, within the authenticated owner scope.
  */
 const list = asyncHandler(async (req, res) => {
     const { data, meta } = await service.list(req.account.id, req.query);
@@ -12,6 +13,7 @@ const list = asyncHandler(async (req, res) => {
 
 /**
  * GET /owner/protocols/:protocolId
+ * Return the owned version, decision reason and status history from one service snapshot.
  */
 const detail = asyncHandler(async (req, res) => {
     ResponseHandler.success(res, {
@@ -32,6 +34,7 @@ const day = asyncHandler(async (req, res) => {
 
 /**
  * POST /owner/protocols/:protocolId/review
+ * Only translate validated HTTP input; transactional state transitions belong to the service.
  */
 const review = asyncHandler(async (req, res) => {
     const { decision, ...input } = req.body;

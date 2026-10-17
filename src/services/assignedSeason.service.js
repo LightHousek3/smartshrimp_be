@@ -2,6 +2,10 @@ const prisma = require('../config/prisma');
 const { ApiError } = require('../utils');
 const { messages, PERSONNEL_ROLE } = require('../constants');
 
+/**
+ * Apply the current technician assignment before optional list filters.
+ * A farm filter narrows assigned seasons and never grants farm-wide access.
+ */
 const assignmentWhere = (accountId, query = {}) => ({
     accountId,
     role: PERSONNEL_ROLE.TECHNICIAN,
@@ -22,11 +26,17 @@ const assignmentWhere = (accountId, query = {}) => ({
     },
 });
 
+/**
+ * Use assignment time plus ID as a stable descending cursor when timestamps tie.
+ */
 const encodeCursor = ({ assignedAt, id }) => Buffer.from(JSON.stringify({
     assignedAt: assignedAt.toISOString(),
     assignmentId: id,
 })).toString('base64url');
 
+/**
+ * Treat cursors as untrusted input; malformed JSON, timestamps or UUIDs are validation errors.
+ */
 const decodeCursor = (cursor) => {
     try {
         const value = JSON.parse(Buffer.from(cursor, 'base64url').toString('utf8'));
@@ -73,6 +83,7 @@ const normalizeListItem = (assignment) => ({
  * List seasons with a current technician assignment using cursor pagination.
  * Counts include active seasons and all matching assignments regardless of
  * the requested season status. Access follows the current assignment.
+ * Resolve the supplied cursor inside that scope before applying its time/ID boundary.
  */
 const getAssignedSeasons = async (accountId, query = {}) => {
     const { limit = 20, cursor } = query;

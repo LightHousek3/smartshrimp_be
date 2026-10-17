@@ -4,6 +4,7 @@ const { messages } = require('../constants');
 
 /**
  * GET /me/seasons
+ * Return the authenticated technician’s assignment-scoped page and cursor metadata.
  */
 const getAssignedSeasons = asyncHandler(async (req, res) => {
     const { seasons, meta } = await assignedSeasonService.getAssignedSeasons(req.account.id, req.query);

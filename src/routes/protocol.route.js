@@ -11,7 +11,7 @@ router.use(authenticate, authorize(ACCOUNT_ROLE.FARM_OWNER));
 
 /**
  * @route   GET /api/v1/owner/protocols
- * @desc    List submitted protocol versions for the owner's farms
+ * @desc    List submitted versions; status=PENDING_APPROVAL selects the owner's approval inbox
  * @access  Farm Owner
  */
 router.get('/', validate(validator.list), controller.list);

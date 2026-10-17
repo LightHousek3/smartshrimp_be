@@ -8,6 +8,9 @@ const dateOnly = Joi.string().pattern(/^\d{4}-\d{2}-\d{2}$/).custom((value, help
         ? value : helpers.error('any.invalid');
 });
 
+/**
+ * The operational overview has no client-selected owner or filters; its scope comes from authentication.
+ */
 const getOverview = { query: Joi.object({}).unknown(false) };
 const getFinance = {
     query: Joi.object({

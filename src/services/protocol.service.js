@@ -237,6 +237,7 @@ const findOwned = async (client, ownerId, id, select = DETAIL_SELECT) => {
 
 /**
  * Return the protocol header and sparse day markers without loading execution payloads.
+ * RepeatableRead keeps the current rejection reason, reviewer and history in one snapshot.
  */
 const detail = async (ownerId, id) =>
     prisma.$transaction(
@@ -583,6 +584,9 @@ const notifyReview = async (client, p, approved) => {
 
 /**
  * Perform the owner-only state transition with optimistic timestamp and serializable context protection.
+ * Only PENDING_APPROVAL in an open season on an active farm can transition.
+ * Version replacement, decision history, case state and persisted notices roll back together.
+ * Approval clears any rejection reason; socket delivery happens only after commit.
  */
 const review = async (ownerId, id, { updatedAt, reason }, approved) => {
     let result;

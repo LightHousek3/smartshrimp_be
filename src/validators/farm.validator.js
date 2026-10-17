@@ -4,6 +4,9 @@ const farmId = Joi.string().uuid({ version: 'uuidv4' });
 
 const normalizeWhitespace = (value) => value.trim().replace(/\s+/gu, ' ');
 
+/**
+ * Collapse whitespace before length checks so persisted names use a consistent representation.
+ */
 const normalizedString = ({ max, allowNull = false }) => {
     let schema = Joi.string().custom((value) => normalizeWhitespace(value)).min(1).max(max);
     if (allowNull) schema = schema.allow(null);
@@ -23,12 +26,18 @@ const farmFields = {
         .allow(null),
 };
 
+/**
+ * Validate the same UUID boundary for detail and delete; ownership remains a service concern.
+ */
 const getFarm = {
     params: Joi.object().keys({
         farmId: farmId.required(),
     }),
 };
 
+/**
+ * Require a name and paired coordinates; numeric limits follow the current SQL precision.
+ */
 const createFarm = {
     body: Joi.object().keys({
         ...farmFields,
@@ -36,6 +45,9 @@ const createFarm = {
     }).and('latitude', 'longitude'),
 };
 
+/**
+ * Reject empty patches and partial coordinate updates before reaching the transactional service.
+ */
 const updateFarm = {
     params: getFarm.params,
     body: Joi.object().keys(farmFields).and('latitude', 'longitude').min(1),
