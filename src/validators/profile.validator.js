@@ -5,6 +5,10 @@ const {
     vietnamesePhoneField,
 } = require('./accountFields.validator');
 
+/**
+ * Allow only editable identity fields and require at least one change.
+ * Shared account validators keep phone normalization and name limits consistent with Auth.
+ */
 const updateProfile = {
     body: Joi.object()
         .keys({
@@ -19,6 +23,10 @@ const updateProfile = {
         .min(1),
 };
 
+/**
+ * Reuse Auth’s bcrypt byte limits; accept a non-empty existing password and a strong new one.
+ * The required device UUID identifies the session renewed after revoking prior refresh tokens.
+ */
 const changePassword = {
     body: Joi.object().keys({
         currentPassword: passwordField({ minimumLength: 1 }),

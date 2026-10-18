@@ -76,6 +76,10 @@ const vietnamDateFormatter = new Intl.DateTimeFormat('en-US', {
     day: '2-digit',
 });
 
+/**
+ * Count stocking day as DOC 1 against the Vietnam calendar, independent of server timezone.
+ * Future or missing stocking dates have no current culture day.
+ */
 const dayOfCulture = (stockingDate) => {
     if (!stockingDate) return null;
     const todayParts = Object.fromEntries(
@@ -94,6 +98,10 @@ const dayOfCulture = (stockingDate) => {
     return days > 0 ? days : null;
 };
 
+/**
+ * Convert Prisma numeric values for JSON and derive deletion eligibility from open seasons.
+ * canDelete is a UI hint; writes recheck state and database references transactionally.
+ */
 const normalizeFarmSummary = (farm, { includePonds = false } = {}) => {
     const { ponds = [], ...baseFarm } = farm;
     const openSeasons = ponds.flatMap((pond) => pond.seasons || []);
@@ -129,6 +137,9 @@ const normalizeFarmSummary = (farm, { includePonds = false } = {}) => {
     };
 };
 
+/**
+ * List only the authenticated owner’s farms with deterministic ordering and derived summaries.
+ */
 const getListFarm = async (ownerId) => {
     const farms = await prisma.farm.findMany({
         where: { ownerId },
@@ -139,6 +150,10 @@ const getListFarm = async (ownerId) => {
     return farms.map((farm) => normalizeFarmSummary(farm));
 };
 
+/**
+ * Read a farm and its pond context through an ownership predicate.
+ * Foreign IDs are indistinguishable from missing farms.
+ */
 const getFarmById = async (farmId, ownerId) => {
     const farm = await prisma.farm.findFirst({
         where: { id: farmId, ownerId },
@@ -152,6 +167,10 @@ const getFarmById = async (farmId, ownerId) => {
     return normalizeFarmSummary(farm, { includePonds: true });
 };
 
+/**
+ * Translate uniqueness, reference and serialization failures to actionable conflicts.
+ * Unexpected database failures retain the global error handler’s internal-error behavior.
+ */
 const mapWriteError = (error) => {
     if (error instanceof ApiError) throw error;
     if (error.code === 'P2002') {
@@ -166,6 +185,10 @@ const mapWriteError = (error) => {
     throw error;
 };
 
+/**
+ * Recheck the owner’s active role and create ownership in a serializable transaction.
+ * Unique constraints arbitrate duplicate farm names, including concurrent requests.
+ */
 const createFarm = async (farmData, ownerId) => {
     try {
         const farm = await prisma.$transaction(
@@ -197,6 +220,10 @@ const createFarm = async (farmData, ownerId) => {
     }
 };
 
+/**
+ * Keep ownership checks and metadata writes in a serializable transaction.
+ * Repeat ownership in updateMany and inspect count so a racing change cannot silently succeed.
+ */
 const updateFarm = async (farmId, farmData, ownerId) => {
     try {
         const farm = await prisma.$transaction(
@@ -232,6 +259,11 @@ const updateFarm = async (farmId, farmData, ownerId) => {
     }
 };
 
+/**
+ * Delete only an owned farm without PLANNING/ACTIVE seasons.
+ * Serializable isolation protects the season check; RESTRICT foreign keys preserve dependent history.
+ * This follows the existing physical-delete implementation, not a new lifecycle policy.
+ */
 const deleteFarm = async (farmId, ownerId) => {
     try {
         const farm = await prisma.$transaction(

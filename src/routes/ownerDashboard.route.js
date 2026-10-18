@@ -8,7 +8,7 @@ const router = express.Router();
 
 /**
  * @route   GET /api/v1/owner/dashboard
- * @desc    Get the authenticated owner's operational overview
+ * @desc    Get the authenticated owner's operational overview, including scoped alert and inventory links
  * @access  Owner
  */
 router.get('/', authenticate, authorize(ACCOUNT_ROLE.FARM_OWNER),

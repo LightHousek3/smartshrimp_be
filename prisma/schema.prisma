@@ -791,16 +791,6 @@ view ExpertKpi {
   @@map("v_expert_kpi")
 }
 
-/// Read-only Farm Owner KPI projection created by smartshrimp.sql.
-view FarmOwnerKpi {
-  farmOwnerId   String  @unique @map("farm_owner_id") @db.Uuid
-  farmsOwned    BigInt? @map("farms_owned")
-  pondsManaged  BigInt? @map("ponds_managed")
-  activeSeasons BigInt? @map("active_seasons")
-
-  @@map("v_farm_owner_kpi")
-}
-
 enum RagQueryStatus {
   ANSWERED  @map("answered")
   NO_SOURCE @map("no_source")

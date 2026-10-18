@@ -1,7 +1,6 @@
 const {
     Prisma,
     FarmStatus: FARM_STATUS,
-    ProductStatus: PRODUCT_STATUS,
 } = require('@prisma/client');
 const prisma = require('../config/prisma');
 const { ApiError } = require('../utils');
@@ -13,10 +12,12 @@ const {
     SEASON_STATUS,
     ALERT_KIND,
     DASHBOARD_PERIOD,
+    PRODUCT_UNIT,
 } = require('../constants');
 
 const DAY_MS = 86400000;
 const MAX_FINANCE_MONTHS = 60;
+const PACKAGED_UNITS = new Set([PRODUCT_UNIT.PACK, PRODUCT_UNIT.BOTTLE]);
 const localDate = new Intl.DateTimeFormat('en-CA', {
     timeZone: 'Asia/Ho_Chi_Minh',
     year: 'numeric',
@@ -46,11 +47,11 @@ const todayInVietnam = (now) => {
 };
 
 /** Only display/navigation fields leave the service; no account or protocol internals. */
-const contextForSeason = (season) => ({
+const contextForSeason = (season, { includePondName = true } = {}) => ({
     seasonId: season.id,
     seasonName: season.name,
     pondId: season.pond.id,
-    pondName: season.pond.name,
+    ...(includePondName && { pondName: season.pond.name }),
     farmId: season.pond.farm.id,
     farmName: season.pond.farm.name,
 });
@@ -79,7 +80,7 @@ const inventorySummary = (farms, products) => {
         stockValue: new Prisma.Decimal(0),
     }));
     const byFarm = new Map(inventories.map((item) => [item.farmId, item]));
-    const lowStock = [];
+    const lowStockByFarm = new Map();
     for (const product of products) {
         const inventory = byFarm.get(product.farmId);
         const quantity = product.inventoryBalances.reduce(
@@ -91,18 +92,31 @@ const inventorySummary = (farms, products) => {
             (sum, lot) => sum.plus(new Prisma.Decimal(lot.quantity).times(lot.unitPrice)),
             inventory.stockValue,
         );
-        // Match the business rule's strict threshold: equal to the minimum is not low.
-        if (quantity.lessThan(product.minAlertQuantity)) {
+        // Warehouse thresholds for bottles/packs use the conversion unit, while
+        // balances and stock valuation retain their original stock unit.
+        const usesConversion = PACKAGED_UNITS.has(product.unit)
+            && product.conversionUnit && new Prisma.Decimal(product.conversionQuantity ?? 0).gt(0);
+        const alertQuantity = usesConversion ? quantity.times(product.conversionQuantity) : quantity;
+        const threshold = new Prisma.Decimal(product.minAlertQuantity);
+        // A disabled threshold or stock exactly at the minimum is not low.
+        if (threshold.gt(0) && alertQuantity.lessThan(threshold)) {
             inventory.lowStockCount += 1;
-            lowStock.push({
+            const preview = {
                 id: product.id,
                 title: product.name,
                 farmId: product.farmId,
                 farmName: inventory.farmName,
-                quantity: Number(quantity),
+                quantity: Number(alertQuantity),
                 minAlertQuantity: Number(product.minAlertQuantity),
-                unit: product.unit,
-            });
+                unit: usesConversion ? product.conversionUnit : product.unit,
+            };
+            // Collect every low product in the same scope as the count and warehouse link.
+            const farmAlert = lowStockByFarm.get(product.farmId);
+            if (farmAlert) {
+                farmAlert.productNames.push(product.name);
+            } else {
+                lowStockByFarm.set(product.farmId, { preview, productNames: [product.name] });
+            }
         }
     }
     return {
@@ -110,13 +124,23 @@ const inventorySummary = (farms, products) => {
             ...item,
             stockValue: Number(item.stockValue.toFixed(2)),
         })),
-        lowStock,
+        lowStockAlerts: inventories.filter((item) => item.lowStockCount > 0).map((item) => {
+            const { preview, productNames } = lowStockByFarm.get(item.farmId);
+            return {
+                kind: ALERT_KIND.LOW_STOCK,
+                count: item.lowStockCount,
+                // Send complete names; only the presentation layer truncates the caption.
+                preview: { ...preview, title: productNames.join(', ') },
+            };
+        }),
     };
 };
 
 /**
  * Read the owner's operational overview in one consistent snapshot, including farm and pond
  * totals, active seasons, alerts, inventory, and personnel counts.
+ * Every alert and inventory preview carries its owned farm ID for scoped App navigation.
+ * RepeatableRead keeps alert counts and their preview records in the same snapshot.
  * @param {string} ownerId Authenticated farm owner's account ID.
  * @param {Date} [now=new Date()] Reference time used for the Vietnam-local date and season day.
  * @returns {Promise<Object>} Operational overview data for the owner dashboard.
@@ -176,18 +200,25 @@ const getOverview = async (ownerId, now = new Date()) =>
             const normalize = (item) => ({
                 id: item.id,
                 title: item.title,
-                ...contextForSeason(item.season),
+                // Protocol/case captions use farm and season; pondId still supports navigation.
+                ...contextForSeason(item.season, { includePondName: false }),
             });
             const [products, ...alerts] = await Promise.all([
                 tx.product.findMany({
-                    where: { farmId: { in: farmIds }, status: PRODUCT_STATUS.ACTIVE },
+                    // Use the warehouse's current catalog, not the legacy product status.
+                    where: { farmId: { in: farmIds }, archivedAt: null, isDeleted: false },
                     select: {
                         id: true,
                         name: true,
                         farmId: true,
                         unit: true,
                         minAlertQuantity: true,
-                        inventoryBalances: { select: { quantity: true, unitPrice: true } },
+                        conversionQuantity: true,
+                        conversionUnit: true,
+                        inventoryBalances: {
+                            where: { quantity: { gt: 0 } },
+                            select: { quantity: true, unitPrice: true },
+                        },
                     },
                     orderBy: [{ name: 'asc' }, { id: 'asc' }],
                 }),
@@ -257,13 +288,8 @@ const getOverview = async (ownerId, now = new Date()) =>
                     'updatedAt',
                 ),
             ]);
-            const { inventories, lowStock } = inventorySummary(farms, products);
-            if (lowStock.length)
-                alerts.splice(3, 0, {
-                    kind: ALERT_KIND.LOW_STOCK,
-                    count: lowStock.length,
-                    preview: lowStock[0],
-                });
+            const { inventories, lowStockAlerts } = inventorySummary(farms, products);
+            alerts.splice(3, 0, ...lowStockAlerts);
             const activeSeasons = seasons.filter(({ status }) => status === SEASON_STATUS.ACTIVE);
             const today = new Date(`${todayInVietnam(now)}T00:00:00Z`);
             return {

@@ -48,6 +48,9 @@ const CHANGE_PASSWORD_SELECT = {
     updatedAt: true,
 };
 
+/**
+ * Recheck active status and supported profile roles at the database boundary.
+ */
 const eligibleProfileWhere = (accountId) => ({
     id: accountId,
     status: ACCOUNT_STATUS.ACTIVE,
@@ -71,16 +74,9 @@ const normalizeExpertKpi = (kpi) => ({
     avgResolutionHours: nullableNumber(kpi?.avgResolutionHours),
 });
 
-const normalizeFarmOwnerKpi = (kpi) => ({
-    farmsOwned: numberOrZero(kpi?.farmsOwned),
-    pondsManaged: numberOrZero(kpi?.pondsManaged),
-    activeSeasons: numberOrZero(kpi?.activeSeasons),
-});
-
 const EMPTY_PROFILE_KPIS = Object.freeze({
     technicianKpi: null,
     expertKpi: null,
-    farmOwnerKpi: null,
 });
 
 const KPI_CONFIG_BY_ROLE = Object.freeze({
@@ -96,16 +92,17 @@ const KPI_CONFIG_BY_ROLE = Object.freeze({
         responseField: 'expertKpi',
         normalize: normalizeExpertKpi,
     },
-    [ACCOUNT_ROLE.FARM_OWNER]: {
-        delegate: 'farmOwnerKpi',
-        idField: 'farmOwnerId',
-        responseField: 'farmOwnerKpi',
-        normalize: normalizeFarmOwnerKpi,
-    },
 });
 
+/**
+ * Attach normalized read-only KPIs for staff using the caller’s database client.
+ * Profile updates must read their result inside the same transaction.
+ */
 const withProfileDetails = async (database, profile) => {
     const config = KPI_CONFIG_BY_ROLE[profile.role];
+    // Only staff have KPI projections. Owners receive identity and personnel context.
+    if (!config) return { ...profile, ...EMPTY_PROFILE_KPIS };
+
     const kpi = await database[config.delegate].findUnique({
         where: { [config.idField]: profile.id },
     });
@@ -117,6 +114,10 @@ const withProfileDetails = async (database, profile) => {
     };
 };
 
+/**
+ * Read an active Technician, Expert or Owner profile without selecting credentials.
+ * Missing or no-longer-eligible accounts produce the same not-found response.
+ */
 const getProfile = async (accountId) => {
     const profile = await prisma.account.findFirst({
         where: eligibleProfileWhere(accountId),
@@ -130,6 +131,10 @@ const getProfile = async (accountId) => {
     return withProfileDetails(prisma, profile);
 };
 
+/**
+ * Update editable identity fields only while the account remains eligible.
+ * The count predicate detects a concurrent status change; result and staff KPI reads share the transaction.
+ */
 const updateProfile = async (accountId, profileData) =>
     prisma.$transaction(async (transaction) => {
         const updateResult = await transaction.account.updateMany({
@@ -153,6 +158,11 @@ const updateProfile = async (accountId, profileData) =>
         return withProfileDetails(transaction, profile);
     });
 
+/**
+ * Verify the current password and reject password reuse before generating a new hash.
+ * Password replacement, revocation of all refresh tokens and current-device token issuance
+ * must commit together; the password hash is removed from the returned account.
+ */
 const changePassword = async (accountId, currentPassword, newPassword, deviceId) => {
     const account = await prisma.account.findFirst({
         where: eligibleProfileWhere(accountId),
@@ -205,5 +215,4 @@ module.exports = {
     PUBLIC_MANAGER_SELECT,
     normalizeTechnicianKpi,
     normalizeExpertKpi,
-    normalizeFarmOwnerKpi,
 };
