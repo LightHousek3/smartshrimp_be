@@ -17,13 +17,17 @@ const operationService = require('./operation.service');
 const inventoryService = require('./inventory.service');
 const supplierService = require('./supplier.service');
 const notificationNavigationService = require('./notificationNavigation.service');
+const taskService = require('./task.service');
 
 const ragDocumentService = require('./ragDocument.service');
 const ragService = require('./rag.service');
 const ragClientService = require('./ragClient.service');
 const ragStorageService = require('./ragStorage.service');
 
+const protocolService = require('./protocol.service');
+
 module.exports = {
+    protocolService,
     ragDocumentService,
     ragService,
     ragClientService,
@@ -47,4 +51,5 @@ module.exports = {
     inventoryService,
     supplierService,
     notificationNavigationService,
+    taskService,
 };

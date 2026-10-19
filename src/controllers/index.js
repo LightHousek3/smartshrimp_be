@@ -15,11 +15,15 @@ const waterLogController = require('./waterLog.controller');
 const operationController = require('./operation.controller');
 const inventoryController = require('./inventory.controller');
 const supplierController = require('./supplier.controller');
+const taskController = require('./task.controller');
 
 const ragDocumentController = require('./ragDocument.controller');
 const ragController = require('./rag.controller');
 
+const protocolController = require('./protocol.controller');
+
 module.exports = {
+    protocolController,
     ragDocumentController,
     ragController,
     authController,
@@ -39,4 +43,5 @@ module.exports = {
     operationController,
     inventoryController,
     supplierController,
+    taskController,
 };

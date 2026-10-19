@@ -287,6 +287,8 @@ model Account {
   refreshTokens          RefreshToken[]
   verificationChallenges EmailVerificationChallenge[]
   notifications          Notification[]
+  assignedTasks          Task[] @relation("TaskAssignee")
+  cancelledTasks         Task[] @relation("TaskCanceller")
   managedByOwner         Account?                     @relation("OwnerManagedAccounts", fields: [managedByOwnerId], references: [id], onDelete: Restrict)
   managedAccounts        Account[]                    @relation("OwnerManagedAccounts")
   seasonAssignments      SeasonPersonnelAssignment[]  @relation("SeasonAssignedAccount")
@@ -366,6 +368,7 @@ model Farm {
   updatedAt         DateTime  @default(now()) @map("updated_at") @db.Timestamptz(6)
   owner             Account   @relation(fields: [ownerId], references: [id], onDelete: Restrict)
   ponds             Pond[]
+  tasks             Task[]
 
   products  Product[]
   suppliers Supplier[]
@@ -414,6 +417,7 @@ model AquacultureSeason {
   schedules             OperationSchedule[]
   inventoryTransactions InventoryTransaction[]
   protocols             Protocol[]
+  tasks                 Task[]
 
   @@index([pondId, status], map: "idx_seasons_pond_status")
   @@map("aquaculture_seasons")
@@ -735,19 +739,26 @@ model Task {
   seasonId           String?      @map("season_id") @db.Uuid
   assignedBy         String       @map("assigned_by") @db.Uuid
   assignedTo         String       @map("assigned_to") @db.Uuid
-  title              String       @db.VarChar(500)
-  description        String?
+  title              String       @db.VarChar(255)
+  description        String?      @db.VarChar(500)
   priority           TaskPriority @default(NORMAL)
   status             TaskStatus   @default(PENDING)
-  dueAt              DateTime?    @map("due_at") @db.Timestamptz(6)
+  dueAt              DateTime     @map("due_at") @db.Timestamptz(6)
   startedAt          DateTime?    @map("started_at") @db.Timestamptz(6)
   completedAt        DateTime?    @map("completed_at") @db.Timestamptz(6)
-  cancellationReason String?      @map("cancellation_reason")
-  isDeleted          Boolean      @default(false) @map("is_deleted")
-  deletedAt          DateTime?    @map("deleted_at") @db.Timestamptz(6)
+  cancellationReason String?      @map("cancellation_reason") @db.VarChar(255)
+  cancelledBy        String?      @map("cancelled_by") @db.Uuid
+  cancelledAt        DateTime?    @map("cancelled_at") @db.Timestamptz(6)
+  history            Json         @default("[]")
+  farm               Farm         @relation(fields: [farmId], references: [id], onDelete: Restrict)
+  season             AquacultureSeason? @relation(fields: [seasonId], references: [id], onDelete: Restrict)
+  assignee           Account      @relation("TaskAssignee", fields: [assignedTo], references: [id], onDelete: Restrict)
+  cancelledByAccount Account?     @relation("TaskCanceller", fields: [cancelledBy], references: [id], onDelete: Restrict)
   createdAt          DateTime     @default(now()) @map("created_at") @db.Timestamptz(6)
   updatedAt          DateTime     @default(now()) @map("updated_at") @db.Timestamptz(6)
 
+  @@index([farmId, status, dueAt], map: "idx_tasks_farm_status_due")
+  @@index([assignedTo, status, dueAt], map: "idx_tasks_assignee_status_due")
   @@map("tasks")
 }
 
