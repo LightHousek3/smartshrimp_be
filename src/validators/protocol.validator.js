@@ -1,5 +1,5 @@
 const Joi = require('joi');
-const { PROTOCOL_TYPE, PROTOCOL_STATUS } = require('../constants/protocol');
+const { PROTOCOL_TYPE, PROTOCOL_STATUS } = require('../constants');
 const uuid = Joi.string().uuid({ version: 'uuidv4' });
 const params = Joi.object({ protocolId: uuid.required() }).unknown(false);
 const empty = Joi.object({}).unknown(false);

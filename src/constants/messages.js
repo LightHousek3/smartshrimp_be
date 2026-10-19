@@ -193,6 +193,34 @@ const messages = {
         CHANGE_CONFLICT: 'Vụ nuôi đã thay đổi. Vui lòng tải lại và thử lại',
     },
 
+    TASK: {
+        LIST_FETCHED: 'Tải danh sách nhiệm vụ thành công.',
+        CREATED: 'Tạo và giao nhiệm vụ thành công.',
+        UPDATED: 'Cập nhật nhiệm vụ thành công.',
+        CANCELLED: 'Hủy nhiệm vụ thành công.',
+        NOT_FOUND: 'Không tìm thấy nhiệm vụ.',
+        TERMINAL: 'Nhiệm vụ đã hoàn thành hoặc đã hủy, không thể thay đổi.',
+        CONFLICT: 'Nhiệm vụ hoặc phân công đã thay đổi. Vui lòng tải lại.',
+        LOCKED_FIELDS: 'Nhiệm vụ đang làm chỉ được sửa mô tả, ưu tiên và hạn hoàn thành.',
+        INVALID_FARM: 'Trang trại không tồn tại, không hoạt động hoặc không thuộc quyền quản lý.',
+        INVALID_SEASON: 'Vụ nuôi không hợp lệ hoặc không thuộc trang trại đã chọn.',
+        INVALID_ASSIGNEE: 'Kỹ thuật viên phải đang hoạt động và thuộc quyền quản lý của bạn.',
+        NO_TECHNICIAN: 'Vụ nuôi chưa có kỹ thuật viên đang phụ trách hợp lệ.',
+        INVALID_DEADLINE: 'Hạn hoàn thành phải lớn hơn thời gian hiện tại 10 phút.',
+        ASSIGNED_NOTIFICATION: 'Bạn được giao nhiệm vụ mới.',
+        CANCELLED_NOTIFICATION: (reason) => `Nhiệm vụ đã hủy. Lý do: ${reason}`,
+        UPDATED_NOTIFICATION: (changes) => `Nhiệm vụ đã cập nhật: ${changes}`,
+        FIELD_LABELS: {
+            title: 'Tiêu đề',
+            description: 'Mô tả',
+            priority: 'Ưu tiên',
+            dueAt: 'Hạn hoàn thành',
+            farmId: 'Trang trại',
+            seasonId: 'Vụ nuôi',
+            assignedTo: 'Kỹ thuật viên',
+        },
+    },
+
     ASSIGNED_SEASON: {
         LIST_FETCHED: 'Lấy danh sách vụ nuôi được phân công thành công',
         FETCHED: 'Lấy chi tiết vụ nuôi được phân công thành công',
@@ -225,6 +253,20 @@ const messages = {
 
     EXPERT_SEASON: {
         LIST_FETCHED: 'Lấy danh sách vụ nuôi được phân công thành công',
+    },
+
+    PROTOCOL: {
+        FETCHED: 'Lấy dữ liệu phác đồ thành công.',
+        REVIEWED: 'Đã lưu quyết định phác đồ.',
+        NOT_FOUND: 'Không tìm thấy phác đồ trong phạm vi quản lý.',
+        SEASON_NOT_FOUND: 'Không tìm thấy vụ nuôi trong phạm vi quản lý.',
+        CONFLICT: 'Phác đồ hoặc vụ nuôi đã thay đổi. Vui lòng tải lại trước khi quyết định.',
+        CLOSED: 'Không thể duyệt phác đồ khi vụ nuôi đã kết thúc hoặc trang trại không hoạt động.',
+        INVALID_CASE: 'Ca bệnh không hợp lệ hoặc đã được giải quyết.',
+        EMPTY: 'Phác đồ phải có ít nhất một hạng mục và giờ thực hiện hợp lệ.',
+        PRODUCT: 'Vật tư đã liên kết phải đang hoạt động và thuộc cùng trang trại.',
+        PREDECESSOR: 'Phiên bản thay thế không còn khớp với phác đồ đang áp dụng.',
+        INVALID_DAY: 'Ngày nằm ngoài thời gian của phác đồ.',
     },
 
     PRODUCTION_PROTOCOL: {

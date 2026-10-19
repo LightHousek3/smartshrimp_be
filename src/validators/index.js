@@ -15,11 +15,15 @@ const waterLogValidator = require('./waterLog.validator');
 const operationValidator = require('./operation.validator');
 const inventoryValidator = require('./inventory.validator');
 const supplierValidator = require('./supplier.validator');
+const taskValidator = require('./task.validator');
 
 const ragDocumentValidator = require('./ragDocument.validator');
 const ragValidator = require('./rag.validator');
 
+const protocolValidator = require('./protocol.validator');
+
 module.exports = {
+    protocolValidator,
     ragDocumentValidator,
     ragValidator,
     authValidator,
@@ -39,4 +43,5 @@ module.exports = {
     operationValidator,
     inventoryValidator,
     supplierValidator,
+    taskValidator,
 };

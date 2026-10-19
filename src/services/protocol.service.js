@@ -1,11 +1,11 @@
 const prisma = require('../config/prisma');
 const { ApiError } = require('../utils');
-const { NOTIFICATION_TYPE } = require('../constants');
 const {
     PROTOCOL_TYPE: T,
     PROTOCOL_STATUS: S,
-    PROTOCOL_MESSAGE: M,
-} = require('../constants/protocol');
+    NOTIFICATION_TYPE,
+    messages,
+} = require('../constants');
 const { emitNotification } = require('../realtime/notification.socket');
 const { dataAccess } = require('../plugins');
 
@@ -186,7 +186,7 @@ const list = async (ownerId, { seasonId, protocolType, status, page = 1, limit =
                     select: { id: true },
                 }))
             )
-                throw ApiError.notFound(M.SEASON_NOT_FOUND);
+                throw ApiError.notFound(messages.PROTOCOL.SEASON_NOT_FOUND);
             const base = {
                 ...ownedWhere(ownerId),
                 ...(seasonId && { seasonId }),
@@ -231,7 +231,7 @@ const findOwned = async (client, ownerId, id, select = DETAIL_SELECT) => {
         where: { id, ...ownedWhere(ownerId) },
         select,
     });
-    if (!protocol) throw ApiError.notFound(M.NOT_FOUND);
+    if (!protocol) throw ApiError.notFound(messages.PROTOCOL.NOT_FOUND);
     return protocol;
 };
 
@@ -334,7 +334,7 @@ const day = async (ownerId, id, selectedDay) =>
                 _max: { endDayOffset: true },
             });
             if (selectedDay > (duration._max.endDayOffset ?? 0))
-                throw ApiError.badRequest(M.INVALID_DAY);
+                throw ApiError.badRequest(messages.PROTOCOL.INVALID_DAY);
             // Database days are one-based; calendar arithmetic is zero-based.
             const offset = selectedDay - 1;
             const anchor = anchorDate(p);
@@ -415,7 +415,7 @@ const inventory = async (ownerId, id, scheduleId) => {
         where: { id: scheduleId, protocolItem: { protocolId: id } },
         select: { id: true },
     });
-    if (!schedule) throw ApiError.notFound(M.NOT_FOUND);
+    if (!schedule) throw ApiError.notFound(messages.PROTOCOL.NOT_FOUND);
     const rows = await prisma.inventoryTransaction.findMany({
         where: {
             referenceType: 'operation_execution',
@@ -458,7 +458,7 @@ const validateApproval = async (client, p) => {
             product: { select: { farmId: true, status: true, isDeleted: true } },
         },
     });
-    if (!items.length || items.some((i) => !i.plannedTime)) throw ApiError.forbidden(M.EMPTY);
+    if (!items.length || items.some((i) => !i.plannedTime)) throw ApiError.forbidden(messages.PROTOCOL.EMPTY);
     if (
         items.some(
             (i) =>
@@ -469,14 +469,14 @@ const validateApproval = async (client, p) => {
                     i.product.isDeleted),
         )
     ) {
-        throw ApiError.forbidden(M.PRODUCT);
+        throw ApiError.forbidden(messages.PROTOCOL.PRODUCT);
     }
     if (p.protocolType === T.TREATMENT) {
         const diseaseCase = await client.diseaseCase.findFirst({
             where: { id: p.diseaseCaseId, seasonId: p.seasonId, status: { not: 'RESOLVED' } },
             select: { id: true },
         });
-        if (p.season.status !== 'ACTIVE' || !diseaseCase) throw ApiError.forbidden(M.INVALID_CASE);
+        if (p.season.status !== 'ACTIVE' || !diseaseCase) throw ApiError.forbidden(messages.PROTOCOL.INVALID_CASE);
     }
 };
 
@@ -494,7 +494,7 @@ const supersede = async (client, p, ownerId, now) => {
         select: { id: true, versionNo: true },
     });
     if (!p.supersedesProtocolId) {
-        if (current) throw ApiError.conflict(M.PREDECESSOR);
+        if (current) throw ApiError.conflict(messages.PROTOCOL.PREDECESSOR);
         return;
     }
     const previous = await client.protocol.findFirst({
@@ -506,17 +506,17 @@ const supersede = async (client, p, ownerId, now) => {
         previous.versionNo + 1 !== p.versionNo ||
         (current && current.id !== previous.id)
     )
-        throw ApiError.conflict(M.PREDECESSOR);
+        throw ApiError.conflict(messages.PROTOCOL.PREDECESSOR);
     if (previous.status !== S.APPROVED) {
         if (![S.REJECTED, S.CANCELLED, S.ABORTED].includes(previous.status) || current)
-            throw ApiError.conflict(M.PREDECESSOR);
+            throw ApiError.conflict(messages.PROTOCOL.PREDECESSOR);
         return;
     }
     const changed = await client.protocol.updateMany({
         where: { id: previous.id, status: S.APPROVED },
         data: { status: S.SUPERSEDED, supersededAt: now, updatedAt: now },
     });
-    if (changed.count !== 1) throw ApiError.conflict(M.CONFLICT);
+    if (changed.count !== 1) throw ApiError.conflict(messages.PROTOCOL.CONFLICT);
     const reason = `Chuyển sang phác đồ phiên bản ${p.versionNo}`;
     await client.protocolStatusHistory.create({
         data: {
@@ -598,12 +598,12 @@ const review = async (ownerId, id, { updatedAt, reason }, approved) => {
                     updatedAt: true,
                     supersedesProtocolId: true,
                 });
-                if (p.status !== S.PENDING_APPROVAL) throw ApiError.conflict(M.CONFLICT);
+                if (p.status !== S.PENDING_APPROVAL) throw ApiError.conflict(messages.PROTOCOL.CONFLICT);
                 if (
                     !['PLANNING', 'ACTIVE'].includes(p.season.status) ||
                     p.season.pond.farm.status !== 'ACTIVE'
                 )
-                    throw ApiError.forbidden(M.CLOSED);
+                    throw ApiError.forbidden(messages.PROTOCOL.CLOSED);
                 const now = new Date();
                 // Touch the season to serialize this decision against season state changes and concurrent decisions.
                 const season = await client.aquacultureSeason.updateMany({
@@ -614,7 +614,7 @@ const review = async (ownerId, id, { updatedAt, reason }, approved) => {
                     },
                     data: { updatedAt: now },
                 });
-                if (season.count !== 1) throw ApiError.conflict(M.CONFLICT);
+                if (season.count !== 1) throw ApiError.conflict(messages.PROTOCOL.CONFLICT);
                 if (approved) {
                     await validateApproval(client, p);
                     await supersede(client, p, ownerId, now);
@@ -634,7 +634,7 @@ const review = async (ownerId, id, { updatedAt, reason }, approved) => {
                         updatedAt: now,
                     },
                 });
-                if (changed.count !== 1) throw ApiError.conflict(M.CONFLICT);
+                if (changed.count !== 1) throw ApiError.conflict(messages.PROTOCOL.CONFLICT);
                 await client.protocolStatusHistory.create({
                     data: {
                         protocolId: id,
@@ -665,7 +665,7 @@ const review = async (ownerId, id, { updatedAt, reason }, approved) => {
             { isolationLevel: 'Serializable' },
         );
     } catch (error) {
-        if (['P2002', 'P2003', 'P2034'].includes(error.code)) throw ApiError.conflict(M.CONFLICT);
+        if (['P2002', 'P2003', 'P2034'].includes(error.code)) throw ApiError.conflict(messages.PROTOCOL.CONFLICT);
         throw error;
     }
     result.notices.forEach(({ accountId, id: notificationId }) =>

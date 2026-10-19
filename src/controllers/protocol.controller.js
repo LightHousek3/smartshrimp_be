@@ -1,14 +1,14 @@
-const service = require('../services/protocol.service');
+const { protocolService } = require('../services');
 const { asyncHandler, ResponseHandler } = require('../utils');
-const { PROTOCOL_MESSAGE: M } = require('../constants/protocol');
+const { messages } = require('../constants');
 
 /**
  * GET /owner/protocols
  * Pass validated filters, including the pending inbox, within the authenticated owner scope.
  */
 const list = asyncHandler(async (req, res) => {
-    const { data, meta } = await service.list(req.account.id, req.query);
-    ResponseHandler.success(res, { message: M.FETCHED, data, meta });
+    const { data, meta } = await protocolService.list(req.account.id, req.query);
+    ResponseHandler.success(res, { message: messages.PROTOCOL.FETCHED, data, meta });
 });
 
 /**
@@ -17,8 +17,8 @@ const list = asyncHandler(async (req, res) => {
  */
 const detail = asyncHandler(async (req, res) => {
     ResponseHandler.success(res, {
-        message: M.FETCHED,
-        data: await service.detail(req.account.id, req.params.protocolId),
+        message: messages.PROTOCOL.FETCHED,
+        data: await protocolService.detail(req.account.id, req.params.protocolId),
     });
 });
 
@@ -27,8 +27,8 @@ const detail = asyncHandler(async (req, res) => {
  */
 const day = asyncHandler(async (req, res) => {
     ResponseHandler.success(res, {
-        message: M.FETCHED,
-        data: await service.day(req.account.id, req.params.protocolId, req.params.day),
+        message: messages.PROTOCOL.FETCHED,
+        data: await protocolService.day(req.account.id, req.params.protocolId, req.params.day),
     });
 });
 
@@ -38,13 +38,13 @@ const day = asyncHandler(async (req, res) => {
  */
 const review = asyncHandler(async (req, res) => {
     const { decision, ...input } = req.body;
-    const data = await service.review(
+    const data = await protocolService.review(
         req.account.id,
         req.params.protocolId,
         input,
         decision === 'APPROVE',
     );
-    ResponseHandler.success(res, { message: M.REVIEWED, data });
+    ResponseHandler.success(res, { message: messages.PROTOCOL.REVIEWED, data });
 });
 
 /**
@@ -52,8 +52,8 @@ const review = asyncHandler(async (req, res) => {
  */
 const inventory = asyncHandler(async (req, res) => {
     ResponseHandler.success(res, {
-        message: M.FETCHED,
-        data: await service.inventory(req.account.id, req.params.protocolId, req.params.scheduleId),
+        message: messages.PROTOCOL.FETCHED,
+        data: await protocolService.inventory(req.account.id, req.params.protocolId, req.params.scheduleId),
     });
 });
 module.exports = { list, detail, day, inventory, review };
