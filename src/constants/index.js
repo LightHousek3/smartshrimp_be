@@ -198,6 +198,7 @@ const RAG_DOCUMENT_STATUS = Object.freeze({
     DELETE_FAILED: 'DELETE_FAILED',
 });
 const RAG_DOCUMENT_MAX_FILE_BYTES = 10 * 1024 * 1024;
+const RAG_DOCUMENT_ASSET_FOLDER = 'smartshrimp/documents';
 const RAG_DOCUMENT_EXTENSIONS = ['.pdf', '.docx', '.md', '.txt'];
 const RAG_DOCUMENT_CATEGORIES = Object.freeze(['Kỹ thuật nuôi', 'Bệnh trên tôm', 'Khác']);
 // Cloudinary accepts upload signatures for one hour; allow an extra ten minutes for in-flight uploads.
@@ -330,6 +331,7 @@ module.exports = {
     RAG_STATUS,
     RAG_DOCUMENT_STATUS,
     RAG_DOCUMENT_MAX_FILE_BYTES,
+    RAG_DOCUMENT_ASSET_FOLDER,
     RAG_DOCUMENT_EXTENSIONS,
     RAG_DOCUMENT_CATEGORIES,
     RAG_UPLOAD_SIGNATURE_TTL_MS,
