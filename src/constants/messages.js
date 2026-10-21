@@ -228,6 +228,39 @@ const messages = {
         INVALID_CURSOR: 'Mốc phân trang vụ nuôi không hợp lệ',
     },
 
+    HARVEST: {
+        NOTE_TOO_LONG: (limit) => `Ghi chú thu hoạch tối đa ${limit} ký tự.`,
+        VARIANCE_REASON_REQUIRED: 'Số thu thực tế và số còn lại vượt ước tính hiện có. Vui lòng nhập lý do hiệu chỉnh ước tính.',
+        SCHEDULE_COMPLETED_REASON: 'Vụ nuôi đã hoàn tất thu hoạch cuối.',
+        WITHDRAWAL_UNVERIFIED_WARNING: 'Chưa kiểm tra thời gian ngừng thuốc: dữ liệu snapshot S07/S08 chưa được kích hoạt. Bản ghi này không xác nhận đã đủ thời gian ngừng thuốc.',
+        WITHDRAWAL_UNKNOWN: 'Có lần dùng thuốc chưa xác định thời gian ngừng thuốc. Cần rà soát snapshot trước khi thu hoạch.',
+        WITHDRAWAL_ACTIVE: 'Chưa đủ thời gian ngừng thuốc tại thời điểm thu hoạch đã chọn.',
+        WITHDRAWAL_PRODUCT_NOT_READY: 'Vật tư thực dùng chưa có hồ sơ đã đối chiếu hoặc chưa xác định thời gian ngừng thuốc.',
+        WITHDRAWAL_EXECUTION_TIME: 'Thời điểm dùng vật tư không hợp lệ hoặc vi phạm thời gian ngừng thuốc của lần thu hoạch đã ghi.',
+        NOT_FOUND: 'Không tìm thấy lần thu hoạch hoặc vụ nuôi.',
+        CONFLICT: 'Dữ liệu thu hoạch đã thay đổi. Vui lòng tải lại và thử lại.',
+        INACTIVE: 'Chỉ ghi nhận thu hoạch cho vụ nuôi đang hoạt động.',
+        INVALID_QUANTITY: 'Sản lượng hoặc số lượng thu hoạch không hợp lệ.',
+        INVALID_TIME: 'Thời điểm thu hoạch phải từ ngày thả giống, muộn hơn lần thu gần nhất và không ở tương lai.',
+        INVALID_CURSOR: 'Con trỏ phân trang không hợp lệ.',
+        KEY_CONFLICT: 'Khóa ghi nhận đã được sử dụng cho dữ liệu khác.',
+        LIST: 'Đã tải danh sách thu hoạch.',
+        DETAIL: 'Đã tải chi tiết thu hoạch.',
+        CREATED: 'Đã ghi nhận thu hoạch.',
+        INVALID_DATE_RANGE: 'from must not be after to',
+        PARTIAL_COUNT_REQUIRED: 'Vui lòng nhập số con thu hoạch khi thu tỉa.',
+        POPULATION_UNKNOWN: 'Chưa xác định được số tôm hiện có. Vui lòng cập nhật số lượng trước khi thu tỉa.',
+        PARTIAL_MISMATCH: (available, quantity, expected) =>
+            `Số lượng thu tỉa không khớp: hiện có ${available} con, thu ${quantity} con thì phải còn ${expected} con. Vui lòng kiểm tra lại; hao hụt cần được ghi nhận riêng.`,
+        PARTIAL_EXHAUSTED: 'Thu tỉa phải còn tôm trong ao. Nếu thu hết, vui lòng chọn thu hoạch cuối.',
+        EARLY_WARNING: (days, typicalDays) =>
+            `Lưu ý: thu hoạch sau ${days} ngày nuôi, sớm hơn chu kỳ tham khảo ${typicalDays} ngày của loài. Owner cân nhắc theo tình trạng thực tế; bản ghi vẫn hợp lệ.`,
+        RECORDED_TITLE: 'Đã ghi nhận thu tỉa',
+        COMPLETED_TITLE: 'Vụ nuôi đã hoàn tất thu hoạch',
+        RECORDED_CONTENT: (name, weight, isFinal) =>
+            `Vụ nuôi ${name} đã ghi nhận ${isFinal ? 'thu hoạch cuối' : 'thu tỉa'} ${weight} kg.${isFinal ? ' Vụ nuôi đã hoàn tất.' : ''}`,
+    },
+
     WATER_LOG: {
         METADATA_FETCHED: 'Lấy cấu hình chỉ số nước thành công',
         CREATED: 'Nhập nhật ký đo nước thành công',
@@ -236,6 +269,7 @@ const messages = {
         NOT_FOUND: 'Không tìm thấy nhật ký đo nước',
         INVALID_CURSOR: 'Mốc phân trang nhật ký đo nước không hợp lệ',
         SEASON_NOT_ACTIVE: 'Chỉ được nhập nhật ký cho vụ nuôi đang hoạt động',
+        CHANGE_CONFLICT: 'Vụ nuôi đã thay đổi. Vui lòng tải lại và thử lại',
         NO_ASSIGNMENT: 'Bạn không được phân công phụ trách vụ nuôi này',
         ALREADY_VOIDED: 'Nhật ký này đã bị hủy hiệu lực',
         VOID_FORBIDDEN_STATE: 'Chỉ được hủy hiệu lực nhật ký của vụ nuôi đang hoạt động',
@@ -362,6 +396,7 @@ const messages = {
 
     // Operation
     OPERATION: {
+        EXECUTION_CONFLICT: 'Dữ liệu vận hành đã thay đổi. Vui lòng tải lại và thử lại với mã ghi nhận cũ.',
         LIST_FETCHED: 'Lấy danh sách kế hoạch vận hành thành công',
         FETCHED: 'Lấy chi tiết kế hoạch vận hành thành công',
         EXECUTED: 'Ghi nhận thực hiện hoạt động thành công',

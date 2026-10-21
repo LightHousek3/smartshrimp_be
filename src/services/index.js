@@ -18,6 +18,7 @@ const inventoryService = require('./inventory.service');
 const supplierService = require('./supplier.service');
 const notificationNavigationService = require('./notificationNavigation.service');
 const taskService = require('./task.service');
+const harvestService = require('./harvest.service');
 
 const ragDocumentService = require('./ragDocument.service');
 const ragService = require('./rag.service');
@@ -52,4 +53,5 @@ module.exports = {
     supplierService,
     notificationNavigationService,
     taskService,
+    harvestService,
 };

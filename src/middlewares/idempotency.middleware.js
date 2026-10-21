@@ -6,7 +6,7 @@ const idempotencyKeySchema = Joi.string().uuid({ version: 'uuidv4' }).required()
 
 /**
  * Require a UUID v4 Idempotency-Key and store its normalized value on the request.
- * The inventory service uses this key to replay stock transactions on retry.
+ * Each service owns its replay, payload comparison and transaction checks.
  */
 const requireIdempotencyKey = (req, res, next) => {
     const { value, error } = idempotencyKeySchema.validate(req.get('Idempotency-Key'));

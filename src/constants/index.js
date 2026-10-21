@@ -1,6 +1,34 @@
 const httpStatus = require('./httpStatus');
 const messages = require('./messages');
 const NOTIFICATION_TYPE = require('./notificationType');
+const HARVEST_ERROR_CODE = Object.freeze({
+    TIME_NOT_AFTER_LATEST: 'HARVEST_TIME_NOT_AFTER_LATEST',
+    PARTIAL_COUNT_REQUIRED: 'HARVEST_PARTIAL_COUNT_REQUIRED',
+    POPULATION_UNKNOWN: 'HARVEST_POPULATION_UNKNOWN',
+    POPULATION_MISMATCH: 'HARVEST_POPULATION_MISMATCH',
+    WITHDRAWAL_UNKNOWN: 'HARVEST_WITHDRAWAL_UNKNOWN',
+    WITHDRAWAL_ACTIVE: 'HARVEST_WITHDRAWAL_ACTIVE',
+    VARIANCE_REASON_REQUIRED: 'HARVEST_VARIANCE_REASON_REQUIRED',
+});
+// Enable only after the v2 compliance/snapshot schema and legacy review are ready.
+const HARVEST_POLICY = Object.freeze({ withdrawalEnabled: process.env.HARVEST_WITHDRAWAL_ENABLED === 'true' });
+const HARVEST_LIMITS = Object.freeze({ noteMaxLength: 500, legacyNoteMaxLength: 5000 });
+
+// Advisory defaults, not harvest eligibility rules. Approximate months as 30 days.
+// FAO: whiteleg partial harvest commonly starts after 3 months;
+// black tiger grow-out typically lasts 4–5 months with water exchange.
+// https://www.fao.org/fishery/docs/DOCUMENT/aquaculture/CulturedSpecies/file/en/en_whitelegshrimp.htm
+// https://www.fao.org/fishery/docs/CDrom/aquaculture/I1129m/file/en/en_gianttigerprawn.htm
+const harvestWarningDays = (name, fallback) => {
+    const value = process.env[name];
+    if (value == null || value.trim() === '') return fallback;
+    const days = Number(value);
+    return Number.isSafeInteger(days) && days >= 0 ? days : fallback;
+};
+const SHRIMP_CULTIVATION = Object.freeze({
+    WHITELEG: Object.freeze({ typicalHarvestMinDays: harvestWarningDays('HARVEST_WHITELEG_WARNING_MIN_DAYS', 90) }),
+    BLACK_TIGER: Object.freeze({ typicalHarvestMinDays: harvestWarningDays('HARVEST_BLACK_TIGER_WARNING_MIN_DAYS', 120) }),
+});
 
 const DASHBOARD_PERIOD = Object.freeze({
     THIS_MONTH: 'THIS_MONTH',
@@ -183,6 +211,7 @@ const SCHEDULE_CANCELLATION_TYPE = {
     PROTOCOL_SUPERSEDED: 'PROTOCOL_SUPERSEDED',
     TREATMENT_ABORTED: 'TREATMENT_ABORTED',
     SEASON_CANCELLED: 'SEASON_CANCELLED',
+    SEASON_COMPLETED: 'SEASON_COMPLETED',
     MANUAL_CORRECTION: 'MANUAL_CORRECTION',
 };
 
@@ -313,7 +342,7 @@ const checkWaterThresholds = (shrimpType, values = {}) => {
     const exceeded = [];
     for (const [field, key] of Object.entries(THRESHOLD_FIELD_MAP)) {
         const raw = values[field];
-        if (raw === null || raw === undefined || raw === '') continue; // không đo -> bỏ qua
+        if (raw === null || raw === undefined || raw === '') continue; // Skip unmeasured metrics.
         const value = Number(raw);
         if (Number.isNaN(value)) continue;
         const { min, max, unit } = thresholds[key];
@@ -326,6 +355,10 @@ const checkWaterThresholds = (shrimpType, values = {}) => {
 };
 
 module.exports = {
+    HARVEST_POLICY,
+    HARVEST_LIMITS,
+    HARVEST_ERROR_CODE,
+    SHRIMP_CULTIVATION,
     DASHBOARD_PERIOD,
     ALERT_KIND,
     RAG_STATUS,

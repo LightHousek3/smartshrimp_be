@@ -16,6 +16,7 @@ const operationValidator = require('./operation.validator');
 const inventoryValidator = require('./inventory.validator');
 const supplierValidator = require('./supplier.validator');
 const taskValidator = require('./task.validator');
+const harvestValidator = require('./harvest.validator');
 
 const ragDocumentValidator = require('./ragDocument.validator');
 const ragValidator = require('./rag.validator');
@@ -44,4 +45,5 @@ module.exports = {
     inventoryValidator,
     supplierValidator,
     taskValidator,
+    harvestValidator,
 };

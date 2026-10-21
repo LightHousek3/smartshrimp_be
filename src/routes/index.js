@@ -18,6 +18,7 @@ const operationRoute = require('./operation.route');
 const protocolRoute = require('./protocol.route');
 const inventoryRoute = require('./inventory.route');
 const taskRoute = require('./task.route');
+const harvestRoute = require('./harvest.route');
 
 const router = express.Router();
 
@@ -33,6 +34,7 @@ const routes = [
     { path: '/owner/farms/:farmId/ponds', route: pondRoute },
     { path: '/owner/farms/:farmId', route: inventoryRoute },
     { path: '/owner/personnel', route: personnelRoute },
+    { path: '/owner/seasons/:seasonId/harvests', route: harvestRoute },
     { path: '/owner/seasons', route: seasonRoute },
     { path: '/owner/dashboard', route: ownerDashboardRoute },
     { path: '/me/seasons', route: assignedSeasonRoute },
