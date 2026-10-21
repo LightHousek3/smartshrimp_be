@@ -4,6 +4,7 @@ const { messages } = require('../constants');
 
 /**
  * GET /owner/farms/:farmId/suppliers
+ * List the owner-wide directory after the service verifies access to the destination farm.
  */
 const getSuppliers = asyncHandler(async (req, res) => {
     const { suppliers, meta } = await supplierService.getSuppliers(
@@ -14,6 +15,7 @@ const getSuppliers = asyncHandler(async (req, res) => {
 
 /**
  * GET /owner/farms/:farmId/suppliers/:supplierId
+ * Allow a supplier from another farm only when both farms belong to the same owner.
  */
 const getSupplier = asyncHandler(async (req, res) => {
     const data = await supplierService.getSupplier(req.params.farmId, req.params.supplierId, req.account.id);
@@ -22,6 +24,7 @@ const getSupplier = asyncHandler(async (req, res) => {
 
 /**
  * POST /owner/farms/:farmId/suppliers
+ * Keep the destination farm as the supplier origin and check names across the owner directory.
  */
 const createSupplier = asyncHandler(async (req, res) => {
     const data = await supplierService.createSupplier(req.params.farmId, req.body, req.account.id);
@@ -30,6 +33,7 @@ const createSupplier = asyncHandler(async (req, res) => {
 
 /**
  * PATCH /owner/farms/:farmId/suppliers/:supplierId
+ * Forward the version token for an owner-scoped update, including activity changes.
  */
 const updateSupplier = asyncHandler(async (req, res) => {
     const data = await supplierService.updateSupplier(
@@ -40,6 +44,7 @@ const updateSupplier = asyncHandler(async (req, res) => {
 
 /**
  * DELETE /owner/farms/:farmId/suppliers/:supplierId
+ * Return no content after soft deletion preserves receipt references and snapshots.
  */
 const deleteSupplier = asyncHandler(async (req, res) => {
     await supplierService.deleteSupplier(req.params.farmId, req.params.supplierId, req.account.id);

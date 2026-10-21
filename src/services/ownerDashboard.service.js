@@ -205,8 +205,7 @@ const getOverview = async (ownerId, now = new Date()) =>
             });
             const [products, ...alerts] = await Promise.all([
                 tx.product.findMany({
-                    // Use the warehouse's current catalog, not the legacy product status.
-                    where: { farmId: { in: farmIds }, archivedAt: null, isDeleted: false },
+                    where: { farmId: { in: farmIds }, status: 'ACTIVE', isDeleted: false },
                     select: {
                         id: true,
                         name: true,

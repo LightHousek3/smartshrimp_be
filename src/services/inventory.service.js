@@ -28,6 +28,9 @@ const PRODUCT_SELECT = {
     conversionUnit: true,
     minAlertQuantity: true,
     description: true,
+    status: true,
+    recommendationReason: true,
+    complianceDetails: true,
     imageUrl: true,
     imageUrls: true,
     archivedAt: true,
@@ -91,6 +94,8 @@ const calculateTransactionAmount = (quantity, unitPrice) => {
     return amount;
 };
 const normalizeNameKey = (value) => value.trim().replace(/\s+/gu, ' ').toLocaleLowerCase('vi');
+// API dates have millisecond precision; PostgreSQL rows may retain microseconds.
+const versionRange = (date) => ({ gte: date, lt: new Date(date.getTime() + 1) });
 
 const normalizeBalance = (balance) => {
     const { transactions, ...base } = balance;
@@ -124,6 +129,10 @@ const calculateStockMetrics = (balances = []) => {
     };
 };
 
+/**
+ * Convert Prisma decimals for JSON and derive stock value and alert state.
+ * status is authoritative; isArchived is the compatibility alias for INACTIVE.
+ */
 const normalizeProduct = (product, { includeLots = false } = {}) => {
     const { inventoryBalances = [], ...baseProduct } = product;
     const metrics = calculateStockMetrics(inventoryBalances);
@@ -137,7 +146,7 @@ const normalizeProduct = (product, { includeLots = false } = {}) => {
                 : Number(baseProduct.conversionQuantity),
         minAlertQuantity: Number(baseProduct.minAlertQuantity),
         ...metrics,
-        isArchived: baseProduct.archivedAt != null,
+        isArchived: baseProduct.status === 'INACTIVE',
         isLowStock:
             decimal(baseProduct.minAlertQuantity).gt(0)
             && stockInAlertUnit(baseProduct, metrics.currentStock).lt(baseProduct.minAlertQuantity),
@@ -150,6 +159,9 @@ const normalizeProduct = (product, { includeLots = false } = {}) => {
     };
 };
 
+/**
+ * Expose ledger quantities and related context without leaking the idempotency key.
+ */
 const normalizeTransaction = (transaction) => {
     const publicTransaction = { ...transaction };
     delete publicTransaction.idempotencyKey;
@@ -170,6 +182,10 @@ const normalizeTransaction = (transaction) => {
     };
 };
 
+/**
+ * Reject missing and foreign farms with the same not-found response.
+ * Accept the transaction client so authorization participates in the calling write.
+ */
 const requireOwnedFarm = async (client, farmId, ownerId) => {
     const farm = await client.farm.findFirst({
         where: { id: farmId, ownerId, isDeleted: false },
@@ -181,6 +197,9 @@ const requireOwnedFarm = async (client, farmId, ownerId) => {
     return farm;
 };
 
+/**
+ * Scope product reads to a non-deleted farm owned by the authenticated account.
+ */
 const findOwnedProduct = async (client, farmId, productId, ownerId, select = PRODUCT_SELECT) => {
     const product = await client.product.findFirst({
         where: {
@@ -197,6 +216,10 @@ const findOwnedProduct = async (client, farmId, productId, ownerId, select = PRO
     return product;
 };
 
+/**
+ * Check normalized names for the same unit across non-deleted products.
+ * Inactive products still reserve their name; callers perform writes serializably.
+ */
 const requireUniqueProductNameUnit = async (
     client,
     farmId,
@@ -208,7 +231,6 @@ const requireUniqueProductNameUnit = async (
         where: {
             farmId,
             unit,
-            archivedAt: null,
             isDeleted: false,
             ...(excludedProductId && { id: { not: excludedProductId } }),
         },
@@ -224,12 +246,16 @@ const requireUniqueProductNameUnit = async (
 };
 
 const requireActiveProduct = (product) => {
-    if (product.archivedAt) {
+    if (product.status !== 'ACTIVE') {
         throw new ApiError(httpStatus.CONFLICT, messages.INVENTORY.PRODUCT_ARCHIVED);
     }
     return product;
 };
 
+/**
+ * Require both conversion fields for PACK/BOTTLE and reject them for other units.
+ * Validate merged updates so a partial patch cannot bypass the conversion invariant.
+ */
 const validateConversion = ({ unit, conversionQuantity, conversionUnit }) => {
     const packaged = PACKAGED_UNITS.has(unit);
     const hasQuantity = conversionQuantity != null;
@@ -248,6 +274,10 @@ const validateConversion = ({ unit, conversionQuantity, conversionUnit }) => {
     }
 };
 
+/**
+ * Translate duplicate names, lots, idempotency keys and serialization failures to conflicts.
+ * Preserve business errors and let unexpected failures reach the global error handler.
+ */
 const mapWriteError = (error) => {
     if (error instanceof ApiError) throw error;
     if (error.code === 'P2002') {
@@ -281,17 +311,21 @@ const productWithBalancesSelect = {
     },
 };
 
+/**
+ * Read the owned farm catalog and filter low stock after applying unit conversions.
+ * Paginate the filtered results; summary totals cover all active products in the farm.
+ */
 const getProducts = async (farmId, ownerId, query) => {
     await requireOwnedFarm(prisma, farmId, ownerId);
     const { page, limit, search, category, stockStatus, archiveStatus } = query;
     const archiveWhere = archiveStatus === PRODUCT_ARCHIVE_STATUS.ALL
         ? {}
         : {
-            archivedAt: archiveStatus === PRODUCT_ARCHIVE_STATUS.ARCHIVED
-                ? { not: null }
-                : null,
+            status: archiveStatus === PRODUCT_ARCHIVE_STATUS.ARCHIVED
+                ? 'INACTIVE'
+                : 'ACTIVE',
         };
-    const baseWhere = { farmId, archivedAt: null, isDeleted: false };
+    const baseWhere = { farmId, status: 'ACTIVE', isDeleted: false };
     const filteredWhere = {
         farmId,
         isDeleted: false,
@@ -340,6 +374,10 @@ const getProducts = async (farmId, ownerId, query) => {
     };
 };
 
+/**
+ * Read all lots of an owned product, including exhausted lots for historical context.
+ * canArchive is a UI hint; pause writes recheck stock and planned schedules transactionally.
+ */
 const getProduct = async (farmId, productId, ownerId) => {
     const product = await findOwnedProduct(
         prisma,
@@ -375,6 +413,10 @@ const getProduct = async (farmId, productId, ownerId) => {
     };
 };
 
+/**
+ * Keep the legacy cover image in sync with imageUrls and normalize nullable fields.
+ * Omitted patch fields remain untouched unless creation requests default values.
+ */
 const prepareProductData = (productData, { fillDefaults = false } = {}) => ({
     ...productData,
     ...((Object.hasOwn(productData, 'imageUrls') || Object.hasOwn(productData, 'imageUrl') || fillDefaults) && {
@@ -392,6 +434,10 @@ const prepareProductData = (productData, { fillDefaults = false } = {}) => ({
     }),
 });
 
+/**
+ * Create a product after checking farm ownership and name/unit uniqueness.
+ * Keep the checks and insert in one serializable transaction.
+ */
 const createProduct = async (farmId, productData, ownerId) => {
     const data = prepareProductData(productData, { fillDefaults: true });
     validateConversion(data);
@@ -426,6 +472,10 @@ const productFieldChanged = (current, next, field) => {
     return current[field] !== next[field];
 };
 
+/**
+ * Update only an active owned product and reject stale version tokens.
+ * Existing ledger entries lock units and conversion fields; checks and writes are serializable.
+ */
 const updateProduct = async (farmId, productId, productData, ownerId) => {
     const { expectedUpdatedAt, ...requestedData } = productData;
     try {
@@ -472,7 +522,7 @@ const updateProduct = async (farmId, productId, productData, ownerId) => {
                         id: productId,
                         farmId,
                         isDeleted: false,
-                        updatedAt: expectedUpdatedAt,
+                        updatedAt: versionRange(expectedUpdatedAt),
                     },
                     data: { ...updateData, updatedAt: new Date() },
                 });
@@ -492,7 +542,11 @@ const updateProduct = async (farmId, productId, productData, ownerId) => {
     }
 };
 
-const deactivateProduct = async (farmId, productId, ownerId, { remove = false } = {}) => {
+/**
+ * Pause an active owned product only when no stock or planned use remains.
+ * Update status and archivedAt together; a version predicate rejects racing edits.
+ */
+const archiveProduct = async (farmId, productId, ownerId) => {
     try {
         const product = await prisma.$transaction(
             async (transaction) => {
@@ -516,13 +570,13 @@ const deactivateProduct = async (farmId, productId, ownerId, { remove = false } 
                 if (decimal(stock._sum.quantity).gt(0)) {
                     throw new ApiError(
                         httpStatus.CONFLICT,
-                        remove ? messages.INVENTORY.DELETE_STOCK_REMAINS : messages.INVENTORY.STOCK_REMAINS,
+                        messages.INVENTORY.STOCK_REMAINS,
                     );
                 }
                 if (plannedUseCount > 0) {
                     throw new ApiError(
                         httpStatus.CONFLICT,
-                        remove ? messages.INVENTORY.DELETE_PLANNED_USE_EXISTS : messages.INVENTORY.PLANNED_USE_EXISTS,
+                        messages.INVENTORY.PLANNED_USE_EXISTS,
                     );
                 }
 
@@ -532,13 +586,12 @@ const deactivateProduct = async (farmId, productId, ownerId, { remove = false } 
                         id: productId,
                         farmId,
                         isDeleted: false,
-                        archivedAt: null,
-                        updatedAt: current.updatedAt,
+                        status: 'ACTIVE',
+                        updatedAt: versionRange(current.updatedAt),
                     },
                     data: {
-                        ...(remove
-                            ? { isDeleted: true, deletedAt: changedAt }
-                            : { archivedAt: changedAt }),
+                        status: 'INACTIVE',
+                        archivedAt: changedAt,
                         updatedAt: changedAt,
                     },
                 });
@@ -558,10 +611,10 @@ const deactivateProduct = async (farmId, productId, ownerId, { remove = false } 
     }
 };
 
-const archiveProduct = (farmId, productId, ownerId) => deactivateProduct(farmId, productId, ownerId);
-const deleteProduct = (farmId, productId, ownerId) =>
-    deactivateProduct(farmId, productId, ownerId, { remove: true });
-
+/**
+ * Resume an inactive owned product after rechecking name/unit uniqueness.
+ * Clear archivedAt and update status in the same version-checked transaction.
+ */
 const restoreProduct = async (farmId, productId, ownerId) => {
     try {
         const product = await prisma.$transaction(
@@ -573,7 +626,7 @@ const restoreProduct = async (farmId, productId, ownerId) => {
                     productId,
                     ownerId,
                 );
-                if (!current.archivedAt) {
+                if (current.status !== 'INACTIVE') {
                     throw new ApiError(
                         httpStatus.CONFLICT,
                         messages.INVENTORY.PRODUCT_NOT_ARCHIVED,
@@ -593,10 +646,10 @@ const restoreProduct = async (farmId, productId, ownerId) => {
                         id: productId,
                         farmId,
                         isDeleted: false,
-                        archivedAt: { not: null },
-                        updatedAt: current.updatedAt,
+                        status: 'INACTIVE',
+                        updatedAt: versionRange(current.updatedAt),
                     },
-                    data: { archivedAt: null, updatedAt },
+                    data: { status: 'ACTIVE', archivedAt: null, updatedAt },
                 });
                 if (result.count !== 1) {
                     throw new ApiError(httpStatus.CONFLICT, messages.INVENTORY.CHANGE_CONFLICT);
@@ -641,6 +694,10 @@ const findIdempotentTransaction = (client, idempotencyKey) =>
 const nullableTextEqual = (left, right) => (left || null) === (right || null);
 const dateEqual = (left, right) => new Date(left).getTime() === new Date(right).getTime();
 
+/**
+ * Accept a replay only for the same owner, farm, product and movement payload.
+ * Receipt comparisons also cover lot, date, unit price and supplier identity.
+ */
 const idempotentTransactionMatches = (existing, farmId, productId, ownerId, data) => {
     if (
         existing.productId !== productId
@@ -684,6 +741,11 @@ const buildReplayResult = async (client, existing) => {
     };
 };
 
+/**
+ * Commit the lot change, ledger entry and low-stock notification atomically.
+ * Matching retries replay the saved movement; mismatched keys and insufficient stock conflict.
+ * Emit the socket event only after the serializable transaction commits.
+ */
 const recordStockTransaction = async (
     farmId,
     productId,
@@ -742,7 +804,12 @@ const recordStockTransaction = async (
                     let supplierName = transactionData.supplierName;
                     if (transactionData.supplierId) {
                         const supplier = await transaction.supplier.findFirst({
-                            where: { id: transactionData.supplierId, farmId, isDeleted: false },
+                            where: {
+                                id: transactionData.supplierId,
+                                farm: { ownerId },
+                                isDeleted: false,
+                                isActive: true,
+                            },
                             select: { name: true },
                         });
                         if (!supplier) {
@@ -931,6 +998,10 @@ const HISTORY_SELECT = {
     performer: { select: { id: true, fullName: true, email: true } },
 };
 
+/**
+ * Read the owned farm ledger with validated filters and a scoped pagination cursor.
+ * Preserve historical products; value totals use the full filtered set, not just the current page.
+ */
 const getInventoryHistory = async (farmId, ownerId, query) => {
     await requireOwnedFarm(prisma, farmId, ownerId);
     const {
@@ -1036,7 +1107,6 @@ module.exports = {
     updateProduct,
     archiveProduct,
     restoreProduct,
-    deleteProduct,
     recordStockTransaction,
     getInventoryHistory,
 };

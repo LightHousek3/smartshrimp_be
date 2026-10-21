@@ -678,6 +678,8 @@ model Product {
   minAlertQuantity      Decimal                @default(0) @map("min_alert_quantity") @db.Decimal(14, 3)
   description           String?
   status                ProductStatus          @default(ACTIVE)
+  recommendationReason  String?                @map("recommendation_reason")
+  complianceDetails     Json?                  @map("compliance_details")
   imageUrl              String?                @map("image_url") @db.VarChar(2048)
   imageUrls             String[]               @default([]) @map("image_urls")
   isDeleted             Boolean                @default(false) @map("is_deleted")
@@ -706,6 +708,7 @@ model Supplier {
   email             String?            @db.VarChar(320)
   address           String?            @db.VarChar(1000)
   note              String?            @db.VarChar(2000)
+  isActive          Boolean            @default(true) @map("is_active")
   isDeleted         Boolean            @default(false) @map("is_deleted")
   deletedAt         DateTime?          @map("deleted_at") @db.Timestamptz(6)
   createdAt         DateTime           @default(now()) @map("created_at") @db.Timestamptz(6)

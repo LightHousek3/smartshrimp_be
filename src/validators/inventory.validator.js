@@ -11,7 +11,13 @@ const {
 
 const uuid = Joi.string().uuid({ version: 'uuidv4' });
 const normalizeWhitespace = (value) => value.trim().replace(/\s+/gu, ' ');
+/**
+ * Collapse whitespace before checking persisted name and lot-number lengths.
+ */
 const normalizedText = (max) => Joi.string().custom(normalizeWhitespace).min(1).max(max);
+/**
+ * Match PostgreSQL quantity precision and reject implicit rounding at the request boundary.
+ */
 const quantity = Joi.number().positive().max(99999999999.999).precision(3).strict();
 const nonnegativeQuantity = Joi.number().min(0).max(99999999999.999).precision(3).strict();
 const unitPrice = Joi.number().min(0).max(999999999999.99).precision(2).strict();
@@ -31,10 +37,14 @@ const productFields = {
     conversionUnit: Joi.string().valid(...Object.values(CONVERSION_UNIT)).allow(null),
     minAlertQuantity: nonnegativeQuantity,
     description: Joi.string().trim().max(5000).allow('', null),
-    imageUrls: Joi.array().items(Joi.string().trim().uri({ scheme: ['https'] }).max(2048)).unique().max(2),
+    imageUrls: Joi.array().items(Joi.string().trim().uri({ scheme: ['https'] }).max(2048)).unique().max(3),
     imageUrl: Joi.string().trim().uri({ scheme: ['https'] }).max(2048).allow(null),
 };
 
+/**
+ * Require paired conversion fields for packaged products during creation.
+ * Partial updates are checked against the current product in the service.
+ */
 const validateConversion = (value, helpers) => {
     const packaged = [PRODUCT_UNIT.PACK, PRODUCT_UNIT.BOTTLE].includes(value.unit);
     const hasQuantity = value.conversionQuantity != null;
@@ -53,6 +63,9 @@ const validateConversion = (value, helpers) => {
     return value;
 };
 
+/**
+ * Validate catalog filters and pagination; ownership remains a service concern.
+ */
 const getProducts = {
     params: farmParams,
     query: Joi.object({
@@ -69,6 +82,9 @@ const getProducts = {
     }),
 };
 
+/**
+ * Require catalog identity and enforce conversion and image limits before creation.
+ */
 const createProduct = {
     params: farmParams,
     body: Joi.object({
@@ -80,6 +96,9 @@ const createProduct = {
     }).custom(validateConversion),
 };
 
+/**
+ * Reject empty patches and require a version token for optimistic concurrency.
+ */
 const updateProduct = {
     params: productParams,
     body: Joi.object({
@@ -88,6 +107,9 @@ const updateProduct = {
     }).or(...Object.keys(productFields)),
 };
 
+/**
+ * A receipt creates a lot and identifies its supplier by either directory ID or name.
+ */
 const stockInBody = Joi.object({
     transactionType: Joi.string().valid(INVENTORY_TRANSACTION_TYPE.STOCK_IN).required(),
     lotNumber: normalizedText(100).required(),
@@ -99,6 +121,9 @@ const stockInBody = Joi.object({
     reason: Joi.string().trim().max(2000).allow('', null),
 }).xor('supplierId', 'supplierName');
 
+/**
+ * Require a reason for every adjustment so manual corrections remain traceable.
+ */
 const adjustmentBody = Joi.object({
     transactionType: Joi.string()
         .valid(
@@ -118,6 +143,9 @@ const stockOutBody = Joi.object({
     reason: Joi.string().trim().max(2000).allow('', null),
 });
 
+/**
+ * Accept only Owner movement shapes; the service checks lot ownership and available stock.
+ */
 const recordStockTransaction = {
     params: productParams,
     body: Joi.alternatives()
@@ -131,6 +159,9 @@ const recordStockTransaction = {
         }),
 };
 
+/**
+ * Keep reference filters paired and reject reversed date ranges before querying the ledger.
+ */
 const getInventoryHistory = {
     params: farmParams,
     query: Joi.object({
@@ -159,7 +190,6 @@ module.exports = {
     createProduct,
     updateProduct,
     archiveProduct: { params: productParams },
-    deleteProduct: { params: productParams },
     restoreProduct: { params: productParams },
     recordStockTransaction,
     getInventoryHistory,
