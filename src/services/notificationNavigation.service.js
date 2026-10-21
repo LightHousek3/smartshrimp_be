@@ -34,7 +34,7 @@ const getNotificationReferenceContext = async (accountId, notificationId, role) 
     case 'product': {
         if (role !== ACCOUNT_ROLE.FARM_OWNER) return {};
         const product = await prisma.product.findFirst({
-            where: { id, isDeleted: false, farm: { ownerId: accountId, isDeleted: false } },
+            where: { id, farm: { ownerId: accountId } },
             select: { id: true, farmId: true },
         });
         return product ? { productId: product.id, farmId: product.farmId } : {};

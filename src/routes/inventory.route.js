@@ -46,7 +46,7 @@ router.patch('/suppliers/:supplierId', validate(supplierValidator.updateSupplier
 
 /**
  * @route   DELETE /api/v1/owner/farms/:farmId/suppliers/:supplierId
- * @desc    Soft-delete a supplier while preserving inventory history
+ * @desc    Delete an unreferenced supplier; reject existing inventory and manufacturer links
  * @access  Owner
  */
 router.delete('/suppliers/:supplierId', validate(supplierValidator.deleteSupplier), supplierController.deleteSupplier);
@@ -108,7 +108,7 @@ router.patch(
 
 /**
  * @route   POST /api/v1/owner/farms/:farmId/products/:productId/archive
- * @desc    Pause a product only when stock is empty and no planned use remains
+ * @desc    Stop new use without deleting stock or cancelling existing schedules
  * @access  Owner
  */
 router.post(
@@ -139,5 +139,19 @@ router.post(
     validate(inventoryValidator.recordStockTransaction),
     inventoryController.recordStockTransaction,
 );
+
+/**
+ * @route   DELETE /api/v1/owner/farms/:farmId/products/:productId
+ * @desc    Delete an unreferenced product and its owned compliance row
+ * @access  Owner
+ */
+router.delete('/products/:productId', validate(inventoryValidator.deleteProduct), inventoryController.deleteProduct);
+
+/**
+ * @route   PATCH /api/v1/owner/farms/:farmId/products/:productId/lots/:balanceId
+ * @desc    Fill an unknown expiry across unused receipt layers of the same manufacturer lot
+ * @access  Owner
+ */
+router.patch('/products/:productId/lots/:balanceId', validate(inventoryValidator.updateLotExpiry), inventoryController.updateLotExpiry);
 
 module.exports = router;

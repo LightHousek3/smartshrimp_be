@@ -8,27 +8,50 @@ const { messages } = require('../constants');
  */
 const getSuppliers = asyncHandler(async (req, res) => {
     const { suppliers, meta } = await supplierService.getSuppliers(
-        req.params.farmId, req.account.id, req.query,
+        req.params.farmId,
+        req.account.id,
+        req.query,
     );
-    ResponseHandler.paginated(res, { data: suppliers, meta, message: messages.SUPPLIER.LIST_FETCHED });
+
+    ResponseHandler.paginated(res, {
+        data: suppliers,
+        meta,
+        message: messages.SUPPLIER.LIST_FETCHED,
+    });
 });
 
 /**
  * GET /owner/farms/:farmId/suppliers/:supplierId
- * Allow a supplier from another farm only when both farms belong to the same owner.
+ * Read an owner-wide supplier after verifying access to the destination farm.
  */
 const getSupplier = asyncHandler(async (req, res) => {
-    const data = await supplierService.getSupplier(req.params.farmId, req.params.supplierId, req.account.id);
-    ResponseHandler.success(res, { data, message: messages.SUPPLIER.FETCHED });
+    const data = await supplierService.getSupplier(
+        req.params.farmId,
+        req.params.supplierId,
+        req.account.id,
+    );
+
+    ResponseHandler.success(res, {
+        data,
+        message: messages.SUPPLIER.FETCHED,
+    });
 });
 
 /**
  * POST /owner/farms/:farmId/suppliers
- * Keep the destination farm as the supplier origin and check names across the owner directory.
+ * Take supplier ownership from the session and check names across the owner directory.
  */
 const createSupplier = asyncHandler(async (req, res) => {
-    const data = await supplierService.createSupplier(req.params.farmId, req.body, req.account.id);
-    ResponseHandler.created(res, { data, message: messages.SUPPLIER.CREATED });
+    const data = await supplierService.createSupplier(
+        req.params.farmId,
+        req.body,
+        req.account.id,
+    );
+
+    ResponseHandler.created(res, {
+        data,
+        message: messages.SUPPLIER.CREATED,
+    });
 });
 
 /**
@@ -37,18 +60,36 @@ const createSupplier = asyncHandler(async (req, res) => {
  */
 const updateSupplier = asyncHandler(async (req, res) => {
     const data = await supplierService.updateSupplier(
-        req.params.farmId, req.params.supplierId, req.body, req.account.id,
+        req.params.farmId,
+        req.params.supplierId,
+        req.body,
+        req.account.id,
     );
-    ResponseHandler.success(res, { data, message: messages.SUPPLIER.UPDATED });
+
+    ResponseHandler.success(res, {
+        data,
+        message: messages.SUPPLIER.UPDATED,
+    });
 });
 
 /**
  * DELETE /owner/farms/:farmId/suppliers/:supplierId
- * Return no content after soft deletion preserves receipt references and snapshots.
+ * Delete only an unreferenced supplier; existing receipt and manufacturer FKs block deletion.
  */
 const deleteSupplier = asyncHandler(async (req, res) => {
-    await supplierService.deleteSupplier(req.params.farmId, req.params.supplierId, req.account.id);
+    await supplierService.deleteSupplier(
+        req.params.farmId,
+        req.params.supplierId,
+        req.account.id,
+    );
+
     ResponseHandler.noContent(res);
 });
 
-module.exports = { getSuppliers, getSupplier, createSupplier, updateSupplier, deleteSupplier };
+module.exports = {
+    getSuppliers,
+    getSupplier,
+    createSupplier,
+    updateSupplier,
+    deleteSupplier,
+};

@@ -1,6 +1,5 @@
 const {
     Prisma,
-    FarmStatus: FARM_STATUS,
 } = require('@prisma/client');
 const prisma = require('../config/prisma');
 const { ApiError } = require('../utils');
@@ -35,7 +34,7 @@ const seasonContextSelect = {
  */
 const visibleSeason = (ownerId) => ({
     status: { in: [SEASON_STATUS.PLANNING, SEASON_STATUS.ACTIVE] },
-    pond: { farm: { ownerId, status: FARM_STATUS.ACTIVE } },
+    pond: { farm: { ownerId, status: 'active' } },
 });
 
 /** Build a stable Vietnam calendar date, independent of the server's local timezone. */
@@ -150,7 +149,7 @@ const getOverview = async (ownerId, now = new Date()) =>
         async (tx) => {
             const [farms, financeFarms, seasons, personnel] = await Promise.all([
                 tx.farm.findMany({
-                    where: { ownerId, status: FARM_STATUS.ACTIVE },
+                    where: { ownerId, status: 'active' },
                     select: {
                         id: true,
                         name: true,
@@ -205,7 +204,7 @@ const getOverview = async (ownerId, now = new Date()) =>
             });
             const [products, ...alerts] = await Promise.all([
                 tx.product.findMany({
-                    where: { farmId: { in: farmIds }, status: 'ACTIVE', isDeleted: false },
+                    where: { farmId: { in: farmIds }, status: 'ACTIVE' },
                     select: {
                         id: true,
                         name: true,

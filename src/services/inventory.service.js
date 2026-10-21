@@ -14,6 +14,9 @@ const {
     INVENTORY_LIMITS,
 } = require('../constants');
 const { emitNotification } = require('../realtime/notification.socket');
+const { requireSelectableSupplier } = require('./supplier.service');
+const legacyRead = require('./inventoryLegacyRead.service');
+const { getHistoryOptions } = require('./inventoryHistoryOptions.service');
 
 const PACKAGED_UNITS = new Set([PRODUCT_UNIT.PACK, PRODUCT_UNIT.BOTTLE]);
 const UNIT_LOCKED_FIELDS = ['unit', 'conversionQuantity', 'conversionUnit'];
@@ -30,12 +33,17 @@ const PRODUCT_SELECT = {
     description: true,
     status: true,
     recommendationReason: true,
-    complianceDetails: true,
-    imageUrl: true,
+    manufacturerId: true,
+    manufacturer: {
+        select: {
+            id: true,
+            name: true,
+            status: true,
+            supplierType: true,
+        },
+    },
+    compliance: true,
     imageUrls: true,
-    archivedAt: true,
-    isDeleted: true,
-    deletedAt: true,
     createdAt: true,
     updatedAt: true,
 };
@@ -47,7 +55,8 @@ const BALANCE_SELECT = {
     receivedAt: true,
     quantity: true,
     unitPrice: true,
-    supplierName: true,
+    supplierNameSnapshot: true,
+    expiryDate: true,
     supplierId: true,
     createdAt: true,
     updatedAt: true,
@@ -82,6 +91,7 @@ const stockInAlertUnit = (product, quantity) => {
         ? stock.mul(product.conversionQuantity)
         : stock;
 };
+
 const alertUnit = (product) => PACKAGED_UNITS.has(product.unit)
     && product.conversionUnit && decimal(product.conversionQuantity).gt(0)
     ? product.conversionUnit : product.unit;
@@ -93,9 +103,13 @@ const calculateTransactionAmount = (quantity, unitPrice) => {
     }
     return amount;
 };
+
 const normalizeNameKey = (value) => value.trim().replace(/\s+/gu, ' ').toLocaleLowerCase('vi');
 // API dates have millisecond precision; PostgreSQL rows may retain microseconds.
-const versionRange = (date) => ({ gte: date, lt: new Date(date.getTime() + 1) });
+const versionRange = (date) => ({
+    gte: date,
+    lt: new Date(date.getTime() + 1),
+});
 
 const normalizeBalance = (balance) => {
     const { transactions, ...base } = balance;
@@ -103,6 +117,8 @@ const normalizeBalance = (balance) => {
         ? transactions.reduce((total, row) => total.add(row.quantity), decimal(0)) : null;
     return {
         ...base,
+        supplierName: base.supplierNameSnapshot,
+        quantityExact: base.quantity.toFixed(),
         quantity: Number(base.quantity),
         unitPrice: Number(base.unitPrice),
         inventoryValue: Number(decimal(base.quantity).mul(base.unitPrice)),
@@ -119,7 +135,9 @@ const calculateStockMetrics = (balances = []) => {
         const balanceQuantity = decimal(balance.quantity);
         currentStock = currentStock.add(balanceQuantity);
         inventoryValue = inventoryValue.add(balanceQuantity.mul(balance.unitPrice));
-        if (balanceQuantity.gt(0)) activeLotCount += 1;
+        if (balanceQuantity.gt(0)) {
+            activeLotCount += 1;
+        }
     }
 
     return {
@@ -138,8 +156,16 @@ const normalizeProduct = (product, { includeLots = false } = {}) => {
     const metrics = calculateStockMetrics(inventoryBalances);
     const normalized = {
         ...baseProduct,
-        imageUrls: baseProduct.imageUrls?.length ? baseProduct.imageUrls
-            : baseProduct.imageUrl ? [baseProduct.imageUrl] : [],
+        schemaVersion: 2,
+        requiresManufacturer: baseProduct.manufacturerId == null,
+        readOnly: false,
+        imageUrls: baseProduct.imageUrls || [],
+        imageUrl: baseProduct.imageUrls?.[0] || null,
+        metadataLocked: baseProduct.metadataLocked === true,
+        compliance: baseProduct.compliance && {
+            ...baseProduct.compliance,
+            withdrawalDays: baseProduct.compliance.withdrawalDays == null ? null : Number(baseProduct.compliance.withdrawalDays),
+        },
         conversionQuantity:
             baseProduct.conversionQuantity == null
                 ? null
@@ -152,7 +178,9 @@ const normalizeProduct = (product, { includeLots = false } = {}) => {
             && stockInAlertUnit(baseProduct, metrics.currentStock).lt(baseProduct.minAlertQuantity),
     };
 
-    if (!includeLots) return normalized;
+    if (!includeLots) {
+        return normalized;
+    }
     return {
         ...normalized,
         lots: inventoryBalances.map(normalizeBalance),
@@ -167,7 +195,9 @@ const normalizeTransaction = (transaction) => {
     delete publicTransaction.idempotencyKey;
     return {
         ...publicTransaction,
+        quantityExact: transaction.quantity.toFixed(),
         quantity: Number(transaction.quantity),
+        ...(transaction.product && { product: { ...transaction.product } }),
         totalAmount: Number(transaction.totalAmount),
         ...(transaction.inventoryBalance && {
             inventoryBalance: normalizeBalance(transaction.inventoryBalance),
@@ -188,8 +218,15 @@ const normalizeTransaction = (transaction) => {
  */
 const requireOwnedFarm = async (client, farmId, ownerId) => {
     const farm = await client.farm.findFirst({
-        where: { id: farmId, ownerId, isDeleted: false },
-        select: { id: true, ownerId: true, name: true },
+        where: {
+            id: farmId,
+            ownerId,
+        },
+        select: {
+            id: true,
+            ownerId: true,
+            name: true,
+        },
     });
     if (!farm) {
         throw new ApiError(httpStatus.NOT_FOUND, messages.INVENTORY.FARM_NOT_FOUND);
@@ -198,15 +235,14 @@ const requireOwnedFarm = async (client, farmId, ownerId) => {
 };
 
 /**
- * Scope product reads to a non-deleted farm owned by the authenticated account.
+ * Scope product reads to the farm owned by the authenticated account.
  */
 const findOwnedProduct = async (client, farmId, productId, ownerId, select = PRODUCT_SELECT) => {
     const product = await client.product.findFirst({
         where: {
             id: productId,
             farmId,
-            isDeleted: false,
-            farm: { ownerId, isDeleted: false },
+            farm: { ownerId },
         },
         select,
     });
@@ -217,7 +253,7 @@ const findOwnedProduct = async (client, farmId, productId, ownerId, select = PRO
 };
 
 /**
- * Check normalized names for the same unit across non-deleted products.
+ * Check normalized names for the same unit across active and inactive products.
  * Inactive products still reserve their name; callers perform writes serializably.
  */
 const requireUniqueProductNameUnit = async (
@@ -231,7 +267,6 @@ const requireUniqueProductNameUnit = async (
         where: {
             farmId,
             unit,
-            isDeleted: false,
             ...(excludedProductId && { id: { not: excludedProductId } }),
         },
         select: { name: true },
@@ -256,7 +291,9 @@ const requireActiveProduct = (product) => {
  * Require both conversion fields for PACK/BOTTLE and reject them for other units.
  * Validate merged updates so a partial patch cannot bypass the conversion invariant.
  */
-const validateConversion = ({ unit, conversionQuantity, conversionUnit }) => {
+const validateConversion = ({
+    unit, conversionQuantity, conversionUnit,
+}) => {
     const packaged = PACKAGED_UNITS.has(unit);
     const hasQuantity = conversionQuantity != null;
     const hasUnit = conversionUnit != null;
@@ -279,7 +316,9 @@ const validateConversion = ({ unit, conversionQuantity, conversionUnit }) => {
  * Preserve business errors and let unexpected failures reach the global error handler.
  */
 const mapWriteError = (error) => {
-    if (error instanceof ApiError) throw error;
+    if (error instanceof ApiError) {
+        throw error;
+    }
     if (error.code === 'P2002') {
         const target = JSON.stringify(error.meta?.target || '');
         if (target.includes('idempotency')) {
@@ -296,6 +335,9 @@ const mapWriteError = (error) => {
             messages.INVENTORY.NAME_UNIT_ALREADY_EXISTS,
         );
     }
+    if (error.code === 'P2003') {
+        throw new ApiError(httpStatus.CONFLICT, messages.INVENTORY.HAS_REFERENCES);
+    }
     if (error.code === 'P2034') {
         throw new ApiError(httpStatus.CONFLICT, messages.INVENTORY.CHANGE_CONFLICT);
     }
@@ -307,7 +349,12 @@ const productWithBalancesSelect = {
     inventoryBalances: {
         where: { quantity: { gt: 0 } },
         select: BALANCE_SELECT,
-        orderBy: [{ receivedAt: 'asc' }, { id: 'asc' }],
+        orderBy: [{
+            expiryDate: {
+                sort: 'asc',
+                nulls: 'last',
+            },
+        }, { receivedAt: 'asc' }, { id: 'asc' }],
     },
 };
 
@@ -317,7 +364,9 @@ const productWithBalancesSelect = {
  */
 const getProducts = async (farmId, ownerId, query) => {
     await requireOwnedFarm(prisma, farmId, ownerId);
-    const { page, limit, search, category, stockStatus, archiveStatus } = query;
+    const {
+        page, limit, search, category, stockStatus, archiveStatus,
+    } = query;
     const archiveWhere = archiveStatus === PRODUCT_ARCHIVE_STATUS.ALL
         ? {}
         : {
@@ -325,12 +374,19 @@ const getProducts = async (farmId, ownerId, query) => {
                 ? 'INACTIVE'
                 : 'ACTIVE',
         };
-    const baseWhere = { farmId, status: 'ACTIVE', isDeleted: false };
+    const baseWhere = {
+        farmId,
+        status: 'ACTIVE',
+    };
     const filteredWhere = {
         farmId,
-        isDeleted: false,
         ...archiveWhere,
-        ...(search && { name: { contains: search, mode: 'insensitive' } }),
+        ...(search && {
+            name: {
+                contains: search,
+                mode: 'insensitive',
+            },
+        }),
         ...(category && { category }),
     };
 
@@ -379,37 +435,48 @@ const getProducts = async (farmId, ownerId, query) => {
  * canArchive is a UI hint; pause writes recheck stock and planned schedules transactionally.
  */
 const getProduct = async (farmId, productId, ownerId) => {
-    const product = await findOwnedProduct(
-        prisma,
-        farmId,
-        productId,
-        ownerId,
-        {
-            ...productWithBalancesSelect,
-            inventoryBalances: {
-                select: {
-                    ...BALANCE_SELECT,
-                    transactions: {
-                        where: { transactionType: { in: [INVENTORY_TRANSACTION_TYPE.STOCK_IN, INVENTORY_TRANSACTION_TYPE.ADJUSTMENT_IN] } },
-                        select: { quantity: true },
-                    },
+    const product = await findOwnedProduct(prisma, farmId, productId, ownerId, {
+        ...PRODUCT_SELECT,
+        inventoryBalances: {
+            select: {
+                ...BALANCE_SELECT,
+                transactions: {
+                    where: { transactionType: { in: [INVENTORY_TRANSACTION_TYPE.STOCK_IN, INVENTORY_TRANSACTION_TYPE.ADJUSTMENT_IN] } },
+                    select: { quantity: true },
                 },
-                orderBy: [{ receivedAt: 'asc' }, { id: 'asc' }],
             },
-            farm: { select: { id: true, name: true } },
+            orderBy: [{
+                expiryDate: {
+                    sort: 'asc',
+                    nulls: 'last',
+                },
+            }, { receivedAt: 'asc' }, { id: 'asc' }],
         },
-    );
-    const plannedUseCount = await prisma.operationSchedule.count({
-        where: { productId, status: 'PLANNED' },
+        farm: {
+            select: {
+                id: true,
+                name: true,
+            },
+        },
     });
-    const normalized = normalizeProduct(product, { includeLots: true });
+    const [plannedUseCount, used, deletable] = await Promise.all([
+        prisma.operationSchedule.count({
+            where: {
+                productId,
+                status: 'PLANNED',
+            },
+        }),
+        hasProductUsage(prisma, productId),
+        canDeleteProduct(prisma, productId),
+    ]);
     return {
-        ...normalized,
+        ...normalizeProduct({
+            ...product,
+            metadataLocked: used,
+        }, { includeLots: true }),
         plannedUseCount,
-        canArchive:
-            !normalized.isArchived
-            && normalized.currentStock === 0
-            && plannedUseCount === 0,
+        canArchive: product.status === 'ACTIVE',
+        canDelete: deletable,
     };
 };
 
@@ -417,21 +484,14 @@ const getProduct = async (farmId, productId, ownerId) => {
  * Keep the legacy cover image in sync with imageUrls and normalize nullable fields.
  * Omitted patch fields remain untouched unless creation requests default values.
  */
-const prepareProductData = (productData, { fillDefaults = false } = {}) => ({
+const prepareProductData = ({ imageUrl, ...productData }, { fillDefaults = false } = {}) => ({
     ...productData,
-    ...((Object.hasOwn(productData, 'imageUrls') || Object.hasOwn(productData, 'imageUrl') || fillDefaults) && {
-        imageUrls: productData.imageUrls ?? (productData.imageUrl ? [productData.imageUrl] : []),
-        imageUrl: productData.imageUrls ? productData.imageUrls[0] ?? null : productData.imageUrl ?? null,
+    ...((Object.hasOwn(productData, 'imageUrls') || imageUrl !== undefined || fillDefaults) && {
+        imageUrls: productData.imageUrls ?? (imageUrl ? [imageUrl] : []),
     }),
-    ...((fillDefaults || Object.hasOwn(productData, 'description')) && {
-        description: productData.description || null,
-    }),
-    ...((fillDefaults || Object.hasOwn(productData, 'conversionQuantity')) && {
-        conversionQuantity: productData.conversionQuantity ?? null,
-    }),
-    ...((fillDefaults || Object.hasOwn(productData, 'conversionUnit')) && {
-        conversionUnit: productData.conversionUnit ?? null,
-    }),
+    ...((fillDefaults || Object.hasOwn(productData, 'description')) && { description: productData.description || null }),
+    ...((fillDefaults || Object.hasOwn(productData, 'conversionQuantity')) && { conversionQuantity: productData.conversionQuantity ?? null }),
+    ...((fillDefaults || Object.hasOwn(productData, 'conversionUnit')) && { conversionUnit: productData.conversionUnit ?? null }),
 });
 
 /**
@@ -439,33 +499,47 @@ const prepareProductData = (productData, { fillDefaults = false } = {}) => ({
  * Keep the checks and insert in one serializable transaction.
  */
 const createProduct = async (farmId, productData, ownerId) => {
-    const data = prepareProductData(productData, { fillDefaults: true });
+    const { compliance = {}, ...fields } = productData;
+    const data = prepareProductData(fields, { fillDefaults: true });
     validateConversion(data);
     try {
-        const product = await prisma.$transaction(
-            async (transaction) => {
-                await requireOwnedFarm(transaction, farmId, ownerId);
-                await requireUniqueProductNameUnit(
-                    transaction,
+        const product = await prisma.$transaction(async (transaction) => {
+            await requireOwnedFarm(transaction, farmId, ownerId);
+            await requireSelectableSupplier(transaction, ownerId, data.manufacturerId, true);
+            await requireUniqueProductNameUnit(transaction, farmId, data.name, data.unit);
+            return transaction.product.create({
+                data: {
+                    ...data,
                     farmId,
-                    data.name,
-                    data.unit,
-                );
-                return transaction.product.create({
-                    data: { ...data, farmId },
-                    select: PRODUCT_SELECT,
-                });
-            },
-            { isolationLevel: 'Serializable' },
-        );
-        return normalizeProduct({ ...product, inventoryBalances: [] });
+                    compliance: {
+                        create: {
+                            ...compliance,
+                            complianceStatus: 'draft',
+                        },
+                    },
+                },
+                select: PRODUCT_SELECT,
+            });
+        }, { isolationLevel: 'Serializable' });
+        return normalizeProduct({
+            ...product,
+            inventoryBalances: [],
+        });
     } catch (error) {
         return mapWriteError(error);
     }
 };
 
 const productFieldChanged = (current, next, field) => {
-    if (!Object.hasOwn(next, field)) return false;
+    if (!Object.hasOwn(next, field)) {
+        return false;
+    }
+    if (field === 'imageUrls') {
+        return JSON.stringify(current.imageUrls) !== JSON.stringify(next.imageUrls);
+    }
+    if (field === 'imageUrl') {
+        return (current.imageUrls?.[0] || null) !== next.imageUrl;
+    }
     if (field === 'conversionQuantity') {
         return !decimalEqual(current[field], next[field]);
     }
@@ -477,11 +551,14 @@ const productFieldChanged = (current, next, field) => {
  * Existing ledger entries lock units and conversion fields; checks and writes are serializable.
  */
 const updateProduct = async (farmId, productId, productData, ownerId) => {
-    const { expectedUpdatedAt, ...requestedData } = productData;
+    const {
+        expectedUpdatedAt, compliance, ...requestedData
+    } = productData;
     try {
         const product = await prisma.$transaction(
             async (transaction) => {
                 await requireOwnedFarm(transaction, farmId, ownerId);
+                await transaction.$queryRaw`SELECT id FROM products WHERE id = ${productId}::uuid FOR UPDATE`;
                 const current = await findOwnedProduct(
                     transaction,
                     farmId,
@@ -489,16 +566,32 @@ const updateProduct = async (farmId, productId, productData, ownerId) => {
                     ownerId,
                 );
                 requireActiveProduct(current);
-                const merged = prepareProductData({ ...current, ...requestedData });
+                const merged = prepareProductData({
+                    ...current,
+                    ...requestedData,
+                });
                 validateConversion(merged);
 
+                const used = await hasProductUsage(transaction, productId);
+                const identityFields = ['name', 'category', 'manufacturerId', 'description', 'imageUrls', 'imageUrl', ...UNIT_LOCKED_FIELDS];
+                // A first factual manufacturer assignment repairs an unmapped legacy row.
+                // Once present, the original identity remains immutable after use.
+                const lockedIdentityFields = current.manufacturerId == null
+                    ? identityFields.filter((field) => field !== 'manufacturerId') : identityFields;
+                if (used && (compliance !== undefined || lockedIdentityFields.some((field) => productFieldChanged(current, requestedData, field)))) {
+                    throw new ApiError(httpStatus.CONFLICT, messages.INVENTORY.METADATA_LOCKED);
+                }
+                if (requestedData.manufacturerId && requestedData.manufacturerId !== current.manufacturerId) {
+                    await requireSelectableSupplier(transaction, ownerId, requestedData.manufacturerId, true);
+                }
                 const changesLockedField = UNIT_LOCKED_FIELDS.some((field) =>
                     productFieldChanged(current, requestedData, field));
                 if (changesLockedField) {
-                    const transactionCount = await transaction.inventoryTransaction.count({
-                        where: { productId },
-                    });
-                    if (transactionCount > 0) {
+                    const [transactionCount, balanceCount] = await Promise.all([
+                        transaction.inventoryTransaction.count({ where: { productId } }),
+                        transaction.inventoryBalance.count({ where: { productId } }),
+                    ]);
+                    if (transactionCount > 0 || balanceCount > 0) {
                         throw new ApiError(
                             httpStatus.CONFLICT,
                             messages.INVENTORY.UNIT_LOCKED,
@@ -521,13 +614,31 @@ const updateProduct = async (farmId, productId, productData, ownerId) => {
                     where: {
                         id: productId,
                         farmId,
-                        isDeleted: false,
                         updatedAt: versionRange(expectedUpdatedAt),
                     },
-                    data: { ...updateData, updatedAt: new Date() },
+                    data: {
+                        ...updateData,
+                        updatedAt: new Date(),
+                    },
                 });
                 if (result.count !== 1) {
                     throw new ApiError(httpStatus.CONFLICT, messages.INVENTORY.CHANGE_CONFLICT);
+                }
+                if (compliance !== undefined || identityFields.some((field) => productFieldChanged(current, requestedData, field))) {
+                    await transaction.productCompliance.upsert({
+                        where: { productId },
+                        create: {
+                            ...compliance,
+                            productId,
+                            complianceStatus: 'draft',
+                        },
+                        update: {
+                            ...compliance,
+                            complianceStatus: 'draft',
+                            checkedBy: null,
+                            checkedAt: null,
+                        },
+                    });
                 }
                 return transaction.product.findUnique({
                     where: { id: productId },
@@ -543,125 +654,149 @@ const updateProduct = async (farmId, productId, productData, ownerId) => {
 };
 
 /**
- * Pause an active owned product only when no stock or planned use remains.
- * Update status and archivedAt together; a version predicate rejects racing edits.
+ * Set an owned product inactive without removing stock or cancelling existing schedules.
  */
-const archiveProduct = async (farmId, productId, ownerId) => {
-    try {
-        const product = await prisma.$transaction(
-            async (transaction) => {
-                await requireOwnedFarm(transaction, farmId, ownerId);
-                const current = await findOwnedProduct(
-                    transaction,
-                    farmId,
-                    productId,
-                    ownerId,
-                );
-                requireActiveProduct(current);
-                const [stock, plannedUseCount] = await Promise.all([
-                    transaction.inventoryBalance.aggregate({
-                        where: { productId },
-                        _sum: { quantity: true },
-                    }),
-                    transaction.operationSchedule.count({
-                        where: { productId, status: 'PLANNED' },
-                    }),
-                ]);
-                if (decimal(stock._sum.quantity).gt(0)) {
-                    throw new ApiError(
-                        httpStatus.CONFLICT,
-                        messages.INVENTORY.STOCK_REMAINS,
-                    );
-                }
-                if (plannedUseCount > 0) {
-                    throw new ApiError(
-                        httpStatus.CONFLICT,
-                        messages.INVENTORY.PLANNED_USE_EXISTS,
-                    );
-                }
+const archiveProduct = (farmId, productId, ownerId) => changeStatus(farmId, productId, ownerId, 'INACTIVE');
 
-                const changedAt = new Date();
-                const result = await transaction.product.updateMany({
-                    where: {
-                        id: productId,
-                        farmId,
-                        isDeleted: false,
-                        status: 'ACTIVE',
-                        updatedAt: versionRange(current.updatedAt),
-                    },
-                    data: {
-                        status: 'INACTIVE',
-                        archivedAt: changedAt,
-                        updatedAt: changedAt,
-                    },
-                });
-                if (result.count !== 1) {
-                    throw new ApiError(httpStatus.CONFLICT, messages.INVENTORY.CHANGE_CONFLICT);
-                }
-                return transaction.product.findUnique({
-                    where: { id: productId },
-                    select: PRODUCT_SELECT,
-                });
-            },
-            { isolationLevel: 'Serializable' },
-        );
-        return normalizeProduct({ ...product, inventoryBalances: [] });
+/**
+ * Resume an owned product; inactive rows have retained their name/unit identity.
+ */
+const restoreProduct = (farmId, productId, ownerId) => changeStatus(farmId, productId, ownerId, 'ACTIVE');
+
+/**
+ * V2 status changes never erase stock, references or historical evidence.
+ */
+const changeStatus = async (farmId, productId, ownerId, status) => {
+    try {
+        const product = await prisma.$transaction(async (tx) => {
+            await tx.$queryRaw`SELECT id FROM products WHERE id = ${productId}::uuid FOR UPDATE`;
+            const current = await findOwnedProduct(tx, farmId, productId, ownerId);
+            const changed = await tx.product.updateMany({
+                where: {
+                    id: productId,
+                    farmId,
+                    updatedAt: versionRange(current.updatedAt),
+                },
+                data: {
+                    status,
+                    updatedAt: new Date(),
+                },
+            });
+            if (changed.count !== 1) {
+                throw new ApiError(httpStatus.CONFLICT, messages.INVENTORY.CHANGE_CONFLICT);
+            }
+            return tx.product.findUnique({
+                where: { id: productId },
+                select: productWithBalancesSelect,
+            });
+        }, { isolationLevel: 'Serializable' });
+        return normalizeProduct(product);
     } catch (error) {
         return mapWriteError(error);
     }
 };
 
 /**
- * Resume an inactive owned product after rechecking name/unit uniqueness.
- * Clear archivedAt and update status in the same version-checked transaction.
+ * Check every V2 reference, including template items that have no Prisma delegate yet.
  */
-const restoreProduct = async (farmId, productId, ownerId) => {
-    try {
-        const product = await prisma.$transaction(
-            async (transaction) => {
-                await requireOwnedFarm(transaction, farmId, ownerId);
-                const current = await findOwnedProduct(
-                    transaction,
-                    farmId,
-                    productId,
-                    ownerId,
-                );
-                if (current.status !== 'INACTIVE') {
-                    throw new ApiError(
-                        httpStatus.CONFLICT,
-                        messages.INVENTORY.PRODUCT_NOT_ARCHIVED,
-                    );
-                }
-                await requireUniqueProductNameUnit(
-                    transaction,
-                    farmId,
-                    current.name,
-                    current.unit,
-                    productId,
-                );
+const canDeleteProduct = async (client, productId) => {
+    const [result] = await client.$queryRaw(Prisma.sql`SELECT NOT (
+        EXISTS(SELECT 1 FROM inventory_balances WHERE product_id = ${productId}::uuid)
+        OR EXISTS(SELECT 1 FROM inventory_transactions WHERE product_id = ${productId}::uuid)
+        OR EXISTS(SELECT 1 FROM production_protocol_template_items WHERE product_id = ${productId}::uuid)
+        OR EXISTS(SELECT 1 FROM protocol_items WHERE product_id = ${productId}::uuid)
+        OR EXISTS(SELECT 1 FROM operation_schedules WHERE product_id = ${productId}::uuid)
+        OR EXISTS(SELECT 1 FROM operation_executions WHERE actual_product_id = ${productId}::uuid)
+    ) AS allowed`);
+    return result.allowed;
+};
 
-                const updatedAt = new Date();
-                const result = await transaction.product.updateMany({
-                    where: {
-                        id: productId,
-                        farmId,
-                        isDeleted: false,
-                        status: 'INACTIVE',
-                        updatedAt: versionRange(current.updatedAt),
-                    },
-                    data: { status: 'ACTIVE', archivedAt: null, updatedAt },
-                });
-                if (result.count !== 1) {
-                    throw new ApiError(httpStatus.CONFLICT, messages.INVENTORY.CHANGE_CONFLICT);
-                }
-                return transaction.product.findUnique({
-                    where: { id: productId },
-                    select: PRODUCT_SELECT,
-                });
-            },
-            { isolationLevel: 'Serializable' },
-        );
-        return normalizeProduct({ ...product, inventoryBalances: [] });
+const hasProductUsage = async (client, productId) => (await client.operationExecution.count({
+    where: {
+        OR: [{ actualProductId: productId }, {
+            actualProductId: null,
+            schedule: { productId },
+        }],
+    },
+})) > 0;
+
+/**
+ * Hard-delete only masters without references; the 1-1 compliance row cascades.
+ */
+const deleteProduct = async (farmId, productId, ownerId) => {
+    try {
+        return await prisma.$transaction(async (tx) => {
+            await tx.$queryRaw`SELECT id FROM products WHERE id = ${productId}::uuid FOR UPDATE`;
+            await findOwnedProduct(tx, farmId, productId, ownerId);
+            if (!await canDeleteProduct(tx, productId)) {
+                throw new ApiError(httpStatus.CONFLICT, messages.INVENTORY.HAS_REFERENCES);
+            }
+            const changed = await tx.product.deleteMany({
+                where: {
+                    id: productId,
+                    farmId,
+                },
+            });
+            if (changed.count !== 1) {
+                throw new ApiError(httpStatus.CONFLICT, messages.INVENTORY.CHANGE_CONFLICT);
+            }
+        }, { isolationLevel: 'Serializable' });
+    } catch (error) {
+        return mapWriteError(error);
+    }
+};
+
+/**
+ * Fill an unknown manufacturer-lot expiry consistently without rewriting used-lot evidence.
+ */
+const updateLotExpiry = async (farmId, productId, balanceId, input, ownerId) => {
+    try {
+        return await prisma.$transaction(async (tx) => {
+            await tx.$queryRaw`SELECT id FROM products WHERE id = ${productId}::uuid FOR UPDATE`;
+            await findOwnedProduct(tx, farmId, productId, ownerId);
+            const current = await tx.inventoryBalance.findFirst({
+                where: {
+                    id: balanceId,
+                    productId,
+                },
+                select: BALANCE_SELECT,
+            });
+            if (!current) {
+                throw new ApiError(httpStatus.NOT_FOUND, messages.INVENTORY.BALANCE_NOT_FOUND);
+            }
+            if (current.updatedAt < input.expectedUpdatedAt || current.updatedAt >= new Date(input.expectedUpdatedAt.getTime() + 1)) {
+                throw new ApiError(httpStatus.CONFLICT, messages.INVENTORY.CHANGE_CONFLICT);
+            }
+            const layers = (await tx.inventoryBalance.findMany({
+                where: { productId },
+                select: BALANCE_SELECT,
+            }))
+                .filter((layer) => normalizeNameKey(layer.lotNumber) === normalizeNameKey(current.lotNumber));
+            const expiryDate = new Date(input.expiryDate);
+            if (layers.some((layer) => layer.expiryDate && !dateEqual(layer.expiryDate, expiryDate))) {
+                throw new ApiError(httpStatus.CONFLICT, messages.INVENTORY.LOT_EXPIRY_CONFLICT);
+            }
+            const used = await tx.inventoryTransaction.count({
+                where: {
+                    inventoryBalanceId: { in: layers.map((layer) => layer.id) },
+                    referenceType: 'operation_execution',
+                },
+            });
+            if (used) {
+                throw new ApiError(httpStatus.CONFLICT, messages.INVENTORY.LOT_EXPIRY_LOCKED);
+            }
+            await tx.inventoryBalance.updateMany({
+                where: {
+                    id: { in: layers.map((layer) => layer.id) },
+                    expiryDate: null,
+                },
+                data: { expiryDate },
+            });
+            return normalizeBalance(await tx.inventoryBalance.findUnique({
+                where: { id: balanceId },
+                select: BALANCE_SELECT,
+            }));
+        }, { isolationLevel: 'Serializable' });
     } catch (error) {
         return mapWriteError(error);
     }
@@ -713,11 +848,12 @@ const idempotentTransactionMatches = (existing, farmId, productId, ownerId, data
             normalizeNameKey(existing.inventoryBalance.lotNumber)
                 === normalizeNameKey(data.lotNumber)
             && dateEqual(existing.inventoryBalance.receivedAt, data.receivedAt)
+            && nullableTextEqual(existing.inventoryBalance.expiryDate?.toISOString().slice(0, 10), data.expiryDate ? new Date(data.expiryDate).toISOString().slice(0, 10) : null)
             && decimalEqual(existing.inventoryBalance.unitPrice, data.unitPrice)
             && (data.supplierId
                 ? existing.inventoryBalance.supplierId === data.supplierId
                 : !existing.inventoryBalance.supplierId
-                    && normalizeNameKey(existing.inventoryBalance.supplierName)
+                    && normalizeNameKey(existing.inventoryBalance.supplierNameSnapshot)
                         === normalizeNameKey(data.supplierName))
             && nullableTextEqual(existing.reason, data.reason)
         );
@@ -770,6 +906,7 @@ const recordStockTransaction = async (
     try {
         const result = await prisma.$transaction(
             async (transaction) => {
+                await transaction.$queryRaw`SELECT id FROM products WHERE id = ${productId}::uuid FOR UPDATE`;
                 const existing = await findIdempotentTransaction(transaction, idempotencyKey);
                 if (existing) {
                     if (!idempotentTransactionMatches(
@@ -794,45 +931,36 @@ const recordStockTransaction = async (
                     productId,
                     ownerId,
                 );
-                requireActiveProduct(product);
+                if ([INVENTORY_TRANSACTION_TYPE.STOCK_IN, INVENTORY_TRANSACTION_TYPE.ADJUSTMENT_IN].includes(transactionData.transactionType)) {
+                    requireActiveProduct(product);
+                }
                 const previousStock = await getProductStock(transaction, productId);
                 const movementQuantity = decimal(transactionData.quantity);
                 let balance;
                 let totalAmount;
 
                 if (transactionData.transactionType === INVENTORY_TRANSACTION_TYPE.STOCK_IN) {
-                    let supplierName = transactionData.supplierName;
-                    if (transactionData.supplierId) {
-                        const supplier = await transaction.supplier.findFirst({
-                            where: {
-                                id: transactionData.supplierId,
-                                farm: { ownerId },
-                                isDeleted: false,
-                                isActive: true,
-                            },
-                            select: { name: true },
-                        });
-                        if (!supplier) {
-                            throw new ApiError(httpStatus.NOT_FOUND, messages.SUPPLIER.NOT_FOUND);
-                        }
-                        supplierName = supplier.name;
+                    const supplierName = transactionData.supplierId
+                        ? (await requireSelectableSupplier(transaction, ownerId, transactionData.supplierId)).name
+                        : transactionData.supplierName;
+                    if (!supplierName?.trim()) {
+                        throw new ApiError(httpStatus.BAD_REQUEST, messages.INVENTORY.SUPPLIER_NAME_REQUIRED);
                     }
                     totalAmount = calculateTransactionAmount(
                         movementQuantity,
                         transactionData.unitPrice,
                     );
-                    const duplicateLot = await transaction.inventoryBalance.findFirst({
-                        where: {
-                            productId,
-                            lotNumber: { equals: transactionData.lotNumber, mode: 'insensitive' },
+                    const existingLayers = await transaction.inventoryBalance.findMany({
+                        where: { productId },
+                        select: {
+                            lotNumber: true,
+                            expiryDate: true,
                         },
-                        select: { id: true },
                     });
-                    if (duplicateLot) {
-                        throw new ApiError(
-                            httpStatus.CONFLICT,
-                            messages.INVENTORY.LOT_ALREADY_EXISTS,
-                        );
+                    const expiryDate = transactionData.expiryDate ? new Date(transactionData.expiryDate) : null;
+                    if (existingLayers.some((layer) => normalizeNameKey(layer.lotNumber) === normalizeNameKey(transactionData.lotNumber)
+                        && !nullableTextEqual(layer.expiryDate?.toISOString().slice(0, 10), expiryDate?.toISOString().slice(0, 10)))) {
+                        throw new ApiError(httpStatus.CONFLICT, messages.INVENTORY.LOT_EXPIRY_CONFLICT);
                     }
                     balance = await transaction.inventoryBalance.create({
                         data: {
@@ -841,7 +969,8 @@ const recordStockTransaction = async (
                             receivedAt: transactionData.receivedAt,
                             quantity: movementQuantity,
                             unitPrice: decimal(transactionData.unitPrice),
-                            supplierName,
+                            supplierNameSnapshot: supplierName,
+                            expiryDate,
                             ...(transactionData.supplierId && {
                                 supplierId: transactionData.supplierId,
                             }),
@@ -947,7 +1076,10 @@ const recordStockTransaction = async (
                             referenceType: 'PRODUCT',
                             referenceId: productId,
                         },
-                        select: { id: true, accountId: true },
+                        select: {
+                            id: true,
+                            accountId: true,
+                        },
                     });
                     notificationToEmit = notification;
                 }
@@ -991,11 +1123,28 @@ const recordStockTransaction = async (
 const HISTORY_SELECT = {
     ...TRANSACTION_SELECT,
     product: {
-        select: { id: true, name: true, category: true, unit: true, isDeleted: true },
+        select: {
+            id: true,
+            name: true,
+            category: true,
+            unit: true,
+        },
     },
     inventoryBalance: { select: BALANCE_SELECT },
-    season: { select: { id: true, name: true, pond: { select: { name: true } } } },
-    performer: { select: { id: true, fullName: true, email: true } },
+    season: {
+        select: {
+            id: true,
+            name: true,
+            pond: { select: { name: true } },
+        },
+    },
+    performer: {
+        select: {
+            id: true,
+            fullName: true,
+            email: true,
+        },
+    },
 };
 
 /**
@@ -1014,13 +1163,51 @@ const getInventoryHistory = async (farmId, ownerId, query) => {
         referenceId,
         createdFrom,
         createdTo,
+        search,
     } = query;
     const where = {
         product: { farmId },
         ...(productId && { productId }),
         ...(transactionType && { transactionType }),
         ...(seasonId && { seasonId }),
-        ...(referenceType && { referenceType, referenceId }),
+        ...(search && {
+            OR: [
+                {
+                    product: {
+                        name: {
+                            contains: search,
+                            mode: 'insensitive',
+                        },
+                    },
+                },
+                {
+                    inventoryBalance: {
+                        lotNumber: {
+                            contains: search,
+                            mode: 'insensitive',
+                        },
+                    },
+                },
+                {
+                    inventoryBalance: {
+                        supplierNameSnapshot: {
+                            contains: search,
+                            mode: 'insensitive',
+                        },
+                    },
+                },
+                {
+                    reason: {
+                        contains: search,
+                        mode: 'insensitive',
+                    },
+                },
+            ],
+        }),
+        ...(referenceType && {
+            referenceType,
+            referenceId,
+        }),
         ...((createdFrom || createdTo) && {
             createdAt: {
                 ...(createdFrom && { gte: createdFrom }),
@@ -1031,7 +1218,10 @@ const getInventoryHistory = async (farmId, ownerId, query) => {
 
     if (cursor) {
         const cursorTransaction = await prisma.inventoryTransaction.findFirst({
-            where: { ...where, id: cursor },
+            where: {
+                ...where,
+                id: cursor,
+            },
             select: { id: true },
         });
         if (!cursorTransaction) {
@@ -1039,13 +1229,16 @@ const getInventoryHistory = async (farmId, ownerId, query) => {
         }
     }
 
-    const [rows, totalResults, inbound, outbound] = await Promise.all([
+    const [rows, totalResults, inbound, outbound, filterOptions] = await Promise.all([
         prisma.inventoryTransaction.findMany({
             where,
             select: HISTORY_SELECT,
             orderBy: [{ createdAt: 'desc' }, { id: 'desc' }],
             take: limit + 1,
-            ...(cursor && { cursor: { id: cursor }, skip: 1 }),
+            ...(cursor && {
+                cursor: { id: cursor },
+                skip: 1,
+            }),
         }),
         prisma.inventoryTransaction.count({ where }),
         prisma.inventoryTransaction.aggregate({
@@ -1080,6 +1273,7 @@ const getInventoryHistory = async (farmId, ownerId, query) => {
             },
             _sum: { totalAmount: true },
         }),
+        getHistoryOptions(farmId),
     ]);
     const hasNextPage = rows.length > limit;
     const transactions = (hasNextPage ? rows.slice(0, limit) : rows)
@@ -1092,6 +1286,7 @@ const getInventoryHistory = async (farmId, ownerId, query) => {
             totalResults,
             hasNextPage,
             nextCursor: hasNextPage ? transactions[transactions.length - 1].id : null,
+            filterOptions,
             summary: {
                 totalInboundValue: Number(inbound._sum.totalAmount || 0),
                 totalOutboundValue: Number(outbound._sum.totalAmount || 0),
@@ -1101,12 +1296,14 @@ const getInventoryHistory = async (farmId, ownerId, query) => {
 };
 
 module.exports = {
-    getProducts,
-    getProduct,
-    createProduct,
-    updateProduct,
-    archiveProduct,
-    restoreProduct,
-    recordStockTransaction,
-    getInventoryHistory,
+    getProducts: async (...args) => (await legacyRead.isV2() ? getProducts : legacyRead.getProducts)(...args),
+    getProduct: async (...args) => (await legacyRead.isV2() ? getProduct : legacyRead.getProduct)(...args),
+    createProduct: legacyRead.guardWrite(createProduct),
+    updateProduct: legacyRead.guardWrite(updateProduct),
+    archiveProduct: legacyRead.guardWrite(archiveProduct),
+    restoreProduct: legacyRead.guardWrite(restoreProduct),
+    deleteProduct: legacyRead.guardWrite(deleteProduct),
+    updateLotExpiry: legacyRead.guardWrite(updateLotExpiry),
+    recordStockTransaction: legacyRead.guardWrite(recordStockTransaction),
+    getInventoryHistory: async (...args) => (await legacyRead.isV2() ? getInventoryHistory : legacyRead.getInventoryHistory)(...args),
 };

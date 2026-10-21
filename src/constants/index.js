@@ -11,7 +11,7 @@ const HARVEST_ERROR_CODE = Object.freeze({
     VARIANCE_REASON_REQUIRED: 'HARVEST_VARIANCE_REASON_REQUIRED',
 });
 // Enable only after the v2 compliance/snapshot schema and legacy review are ready.
-const HARVEST_POLICY = Object.freeze({ withdrawalEnabled: process.env.HARVEST_WITHDRAWAL_ENABLED === 'true' });
+const HARVEST_POLICY = Object.freeze({ withdrawalEnabled: true });
 const HARVEST_LIMITS = Object.freeze({ noteMaxLength: 500, legacyNoteMaxLength: 5000 });
 
 // Advisory defaults, not harvest eligibility rules. Approximate months as 30 days.
@@ -131,7 +131,6 @@ const PRODUCT_UNIT = Object.freeze({
     ML: 'ML',
     PACK: 'PACK',
     BOTTLE: 'BOTTLE',
-    PCS: 'PCS',
 });
 
 const CONVERSION_UNIT = Object.freeze({
@@ -168,7 +167,7 @@ const PRODUCT_ARCHIVE_STATUS = Object.freeze({
 });
 
 const INVENTORY_LIMITS = Object.freeze({
-    MAX_BALANCE_QUANTITY: '99999999999.999',
+    MAX_BALANCE_QUANTITY: '99999999999.999999999',
     MAX_TRANSACTION_AMOUNT: '9999999999999999.99',
 });
 

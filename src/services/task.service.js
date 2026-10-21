@@ -21,8 +21,8 @@ const present = ({ assignee, cancelledByAccount, ...row }) => ({
     ...row, assignee: nameOf(assignee),
     ...(cancelledByAccount !== undefined && { cancelledBy: nameOf(cancelledByAccount) }),
 });
-const scope = (ownerId) => ({ farm: { ownerId, isDeleted: false } });
-const activeFarm = (ownerId) => ({ ownerId, isDeleted: false, status: 'ACTIVE' });
+const scope = (ownerId) => ({ farm: { ownerId } });
+const activeFarm = (ownerId) => ({ ownerId, status: 'active' });
 const technician = (ownerId) => ({ managedByOwnerId: ownerId, role: 'TECHNICIAN', status: 'ACTIVE' });
 
 /**
@@ -61,7 +61,7 @@ const getTask = async (ownerId, taskId, client = prisma) => {
  */
 const getOptions = async (ownerId, farmId) => {
     const selectedFarm = farmId ? await prisma.farm.findFirst({
-        where: { id: farmId, ownerId, isDeleted: false }, select: { id: true, status: true },
+        where: { id: farmId, ownerId }, select: { id: true, status: true },
     }) : null;
     if (farmId && !selectedFarm) {
         throw new ApiError(httpStatus.FORBIDDEN, messages.TASK.INVALID_FARM);
@@ -69,7 +69,7 @@ const getOptions = async (ownerId, farmId) => {
     const [farms, accounts, seasons] = await Promise.all([
         prisma.farm.findMany({ where: activeFarm(ownerId), select: { id: true, name: true }, orderBy: { name: 'asc' } }),
         prisma.account.findMany({ where: technician(ownerId), select: identity, orderBy: [{ fullName: 'asc' }, { id: 'asc' }] }),
-        selectedFarm?.status === 'ACTIVE' ? prisma.aquacultureSeason.findMany({
+        selectedFarm?.status?.toUpperCase() === 'ACTIVE' ? prisma.aquacultureSeason.findMany({
             where: { pond: { farmId, farm: activeFarm(ownerId) }, status: { in: ['PLANNING', 'ACTIVE'] } },
             select: { id: true, name: true, pond: { select: { name: true } }, personnelAssignments: {
                 where: { role: 'TECHNICIAN', unassignedAt: null, account: technician(ownerId) },

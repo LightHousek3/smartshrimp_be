@@ -109,9 +109,6 @@ const SCOPE_RESOLVERS = {
 const toNumberOrNull = (value) =>
     value === null || value === undefined ? null : Number(value);
 
-const toBigIntStringOrNull = (value) =>
-    value === null || value === undefined ? null : value.toString();
-
 const toIsoOrNull = (value) =>
     value === null || value === undefined ? null : value.toISOString();
 
