@@ -88,14 +88,14 @@ const SEASON_WITH_FARM_SELECT = {
 // Phạm vi truy cập (scope)
 // ---------------------------------------------------------------------------
 
-const findSeason = (seasonId) =>
-    prisma.aquacultureSeason.findUnique({
+const findSeason = (seasonId, client = prisma) =>
+    client.aquacultureSeason.findUnique({
         where: { id: seasonId },
         select: SEASON_WITH_FARM_SELECT,
     });
 
-const hasActiveAssignment = (accountId, seasonId, role) =>
-    prisma.seasonPersonnelAssignment.findFirst({
+const hasActiveAssignment = (accountId, seasonId, role, client = prisma) =>
+    client.seasonPersonnelAssignment.findFirst({
         where: { seasonId, accountId, role, unassignedAt: null },
         select: { id: true },
     });
@@ -104,12 +104,12 @@ const hasActiveAssignment = (accountId, seasonId, role) =>
  * KTV: phải có assignment technician đang hiệu lực trên vụ.
  * requireActiveSeason=true cho các thao tác ghi (BR-OPS-01).
  */
-const resolveKtvScope = async (accountId, seasonId, { requireActiveSeason = false } = {}) => {
-    const season = await findSeason(seasonId);
+const resolveKtvScope = async (accountId, seasonId, { requireActiveSeason = false, client = prisma } = {}) => {
+    const season = await findSeason(seasonId, client);
     if (!season) {
         throw ApiError.notFound(messages.WATER_LOG.NOT_FOUND);
     }
-    const assignment = await hasActiveAssignment(accountId, seasonId, PERSONNEL_ROLE.TECHNICIAN);
+    const assignment = await hasActiveAssignment(accountId, seasonId, PERSONNEL_ROLE.TECHNICIAN, client);
     if (!assignment) {
         throw ApiError.forbidden(messages.WATER_LOG.NO_ASSIGNMENT);
     }
@@ -319,6 +319,10 @@ const createWaterLog = async (accountId, seasonId, payload, idempotencyKey) => {
 
     try {
         const { log, exceeded, ownerId, notificationId } = await prisma.$transaction(async (tx) => {
+            // Final harvest holds this same aggregate lock until completion commits.
+            // Re-read state and assignment after waiting; the earlier scope is only a fast rejection.
+            await tx.$queryRaw`SELECT id FROM aquaculture_seasons WHERE id = ${seasonId}::uuid FOR UPDATE`;
+            const season = await resolveKtvScope(accountId, seasonId, { requireActiveSeason: true, client: tx });
             const created = await tx.waterQualityLog.create({
                 data: {
                     seasonId,
@@ -367,6 +371,10 @@ const createWaterLog = async (accountId, seasonId, payload, idempotencyKey) => {
         // Tuyến cuối chống double-submit: unique(season_id, recorded_at, recorded_by).
         if (error?.code === 'P2002') {
             throw ApiError.conflict(messages.WATER_LOG.DUPLICATE_LOG);
+        }
+        if (error?.code === 'P2034'
+            || (error?.code === 'P2010' && ['40001', '40P01'].includes(error.meta?.code))) {
+            throw ApiError.conflict(messages.WATER_LOG.CHANGE_CONFLICT);
         }
         throw error;
     }

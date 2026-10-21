@@ -2,6 +2,7 @@ const crypto = require('crypto');
 const prisma = require('../config/prisma');
 const { emitNotification } = require('../realtime/notification.socket');
 const { ApiError } = require('../utils');
+const withdrawal = require('./harvestWithdrawal.service');
 const {
     messages,
     PERSONNEL_ROLE,
@@ -9,6 +10,7 @@ const {
     OPERATION_STATUS,
     OPERATION_TYPE,
     NOTIFICATION_TYPE,
+    HARVEST_POLICY,
 } = require('../constants');
 
 const toNumber = (val) => (val == null ? null : Number(val));
@@ -402,6 +404,16 @@ const executeSchedule = async (technicianId, scheduleId, payload) => {
     }
 
     return await prisma.$transaction(async (tx) => {
+        // Share the season lock with final harvest, then recheck status after any lock wait.
+        // This prevents execution and inventory writes after the season has completed.
+        await tx.$queryRaw`SELECT id FROM aquaculture_seasons WHERE id = ${schedule.seasonId}::uuid FOR UPDATE`;
+        const freshSeason = await tx.aquacultureSeason.findUnique({ where: { id: schedule.seasonId } });
+        if (!freshSeason || freshSeason.status !== SEASON_STATUS.ACTIVE) {
+            throw ApiError.badRequest(messages.OPERATION.SEASON_NOT_ACTIVE);
+        }
+        if (HARVEST_POLICY.withdrawalEnabled) {
+            await tx.$queryRaw`SELECT id FROM operation_schedules WHERE id = ${scheduleId}::uuid FOR UPDATE`;
+        }
         // Re-check schedule status in transaction
         const freshSchedule = await tx.operationSchedule.findUnique({
             where: { id: scheduleId },
@@ -409,6 +421,10 @@ const executeSchedule = async (technicianId, scheduleId, payload) => {
         if (freshSchedule.status !== OPERATION_STATUS.PLANNED) {
             throw ApiError.conflict(messages.OPERATION.SCHEDULE_NOT_PLANNED);
         }
+        const executedAt = payload.executedAt ? new Date(payload.executedAt) : new Date();
+        const withdrawalDays = await withdrawal.prepareExecution(
+            tx, schedule.seasonId, targetProductId, schedule.operationType, executedAt,
+        );
 
         // Deduct inventory if a product is linked
         if (targetProductId) {
@@ -469,7 +485,7 @@ const executeSchedule = async (technicianId, scheduleId, payload) => {
                 actualQuantity: actualQty,
                 executedBy: technicianId,
                 idempotencyKey: payload.idempotencyKey,
-                executedAt: payload.executedAt ? new Date(payload.executedAt) : new Date(),
+                executedAt,
                 note: payload.note || null,
                 varianceReason: payload.varianceReason || null,
             },
@@ -479,6 +495,8 @@ const executeSchedule = async (technicianId, scheduleId, payload) => {
                 },
             },
         });
+
+        await withdrawal.saveSnapshot(tx, execution.id, withdrawalDays);
 
         // Complete schedule
         await tx.operationSchedule.update({
@@ -490,6 +508,12 @@ const executeSchedule = async (technicianId, scheduleId, payload) => {
             ...execution,
             actualQuantity: toNumber(execution.actualQuantity),
         };
+    }, HARVEST_POLICY.withdrawalEnabled ? { isolationLevel: 'Serializable' } : undefined).catch((error) => {
+        if (HARVEST_POLICY.withdrawalEnabled && (['P2002', 'P2034'].includes(error.code)
+            || (error.code === 'P2010' && ['23505', '40001', '40P01'].includes(error.meta?.code)))) {
+            throw ApiError.conflict(messages.OPERATION.EXECUTION_CONFLICT);
+        }
+        throw error;
     });
 };
 

@@ -16,6 +16,7 @@ const operationController = require('./operation.controller');
 const inventoryController = require('./inventory.controller');
 const supplierController = require('./supplier.controller');
 const taskController = require('./task.controller');
+const harvestController = require('./harvest.controller');
 
 const ragDocumentController = require('./ragDocument.controller');
 const ragController = require('./rag.controller');
@@ -44,4 +45,5 @@ module.exports = {
     inventoryController,
     supplierController,
     taskController,
+    harvestController,
 };

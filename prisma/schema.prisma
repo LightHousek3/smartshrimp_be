@@ -195,6 +195,7 @@ enum ScheduleCancellationType {
   PROTOCOL_SUPERSEDED @map("protocol_superseded")
   TREATMENT_ABORTED   @map("treatment_aborted")
   SEASON_CANCELLED    @map("season_cancelled")
+  SEASON_COMPLETED    @map("season_completed")
   MANUAL_CORRECTION   @map("manual_correction")
 
   @@map("schedule_cancellation_type")
