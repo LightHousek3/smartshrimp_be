@@ -95,6 +95,13 @@ const PERSONNEL_ROLE = {
     EXPERT: 'EXPERT',
 };
 
+const HEALTH_STATUS = Object.freeze({
+    EXCELLENT: 'EXCELLENT',
+    GOOD: 'GOOD',
+    WARNING: 'WARNING',
+    CRITICAL: 'CRITICAL',
+});
+
 const OPERATION_TYPE = {
     FEEDING: 'FEEDING',
     MINERAL: 'MINERAL',
@@ -381,6 +388,7 @@ module.exports = {
     TASK_STATUSES,
     TASK_LIMITS,
     PERSONNEL_ROLE,
+    HEALTH_STATUS,
     OPERATION_TYPE,
     OPERATION_STATUS,
     DOSE_BASIS,
