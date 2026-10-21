@@ -1,8 +1,8 @@
 const express = require('express');
-const { seasonController, waterLogController } = require('../controllers');
+const { seasonController, waterLogController, shrimpHealthController } = require('../controllers');
 const { ACCOUNT_ROLE } = require('../constants');
 const { authenticate, authorize, validate } = require('../middlewares');
-const { seasonValidator, waterLogValidator } = require('../validators');
+const { seasonValidator, waterLogValidator, shrimpHealthValidator } = require('../validators');
 
 const router = express.Router();
 
@@ -37,5 +37,10 @@ router.patch('/:seasonId', validate(seasonValidator.updateSeason), seasonControl
 router.get('/:seasonId/water-logs/metadata', validate(waterLogValidator.getMetadata), waterLogController.getMetadataAsOwner);
 router.get('/:seasonId/water-logs', validate(waterLogValidator.listWaterLogs), waterLogController.listWaterLogsAsOwner);
 router.get('/:seasonId/water-logs/statistics', validate(waterLogValidator.getStatistics), waterLogController.getStatisticsAsOwner);
+
+// Nhật ký sức khỏe tôm — chủ trại chỉ đọc
+router.get('/:seasonId/shrimp-health-logs', validate(shrimpHealthValidator.listShrimpHealthLogs), shrimpHealthController.listShrimpHealthLogsAsOwner);
+router.get('/:seasonId/shrimp-health-logs/statistics', validate(shrimpHealthValidator.getStatistics), shrimpHealthController.getStatisticsAsOwner);
+router.get('/:seasonId/shrimp-health-logs/:logId', validate(shrimpHealthValidator.getShrimpHealthLogDetail), shrimpHealthController.getShrimpHealthLogDetailAsOwner);
 
 module.exports = router;

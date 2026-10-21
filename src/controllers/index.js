@@ -12,6 +12,7 @@ const ownerDashboardController = require('./ownerDashboard.controller');
 const expertSeasonController = require('./expertSeason.controller');
 const expertProductionProtocolController = require('./expertProductionProtocol.controller');
 const waterLogController = require('./waterLog.controller');
+const shrimpHealthController = require('./shrimpHealth.controller');
 const operationController = require('./operation.controller');
 const inventoryController = require('./inventory.controller');
 const supplierController = require('./supplier.controller');
@@ -41,6 +42,7 @@ module.exports = {
     expertSeasonController,
     expertProductionProtocolController,
     waterLogController,
+    shrimpHealthController,
     operationController,
     inventoryController,
     supplierController,

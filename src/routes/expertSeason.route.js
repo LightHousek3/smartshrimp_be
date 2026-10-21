@@ -1,7 +1,7 @@
 const express = require('express');
-const { expertSeasonController, waterLogController, expertProductionProtocolController: protocolController } = require('../controllers');
+const { expertSeasonController, waterLogController, shrimpHealthController, expertProductionProtocolController: protocolController } = require('../controllers');
 const { authenticate, authorize, validate } = require('../middlewares');
-const { expertSeasonValidator, waterLogValidator, expertProductionProtocolValidator: protocolValidator } = require('../validators');
+const { expertSeasonValidator, waterLogValidator, shrimpHealthValidator, expertProductionProtocolValidator: protocolValidator } = require('../validators');
 const { ACCOUNT_ROLE } = require('../constants');
 
 const router = express.Router();
@@ -77,5 +77,18 @@ router.get('/:seasonId/water-logs', authenticate, authorize(ACCOUNT_ROLE.EXPERT)
 router.get('/:seasonId/water-logs/statistics', authenticate, authorize(ACCOUNT_ROLE.EXPERT),
     validate(waterLogValidator.getStatistics),
     waterLogController.getStatisticsAsExpert);
+
+// Shrimp health logs: experts have read-only access.
+router.get('/:seasonId/shrimp-health-logs', authenticate, authorize(ACCOUNT_ROLE.EXPERT),
+    validate(shrimpHealthValidator.listShrimpHealthLogs),
+    shrimpHealthController.listShrimpHealthLogsAsExpert);
+
+router.get('/:seasonId/shrimp-health-logs/statistics', authenticate, authorize(ACCOUNT_ROLE.EXPERT),
+    validate(shrimpHealthValidator.getStatistics),
+    shrimpHealthController.getStatisticsAsExpert);
+
+router.get('/:seasonId/shrimp-health-logs/:logId', authenticate, authorize(ACCOUNT_ROLE.EXPERT),
+    validate(shrimpHealthValidator.getShrimpHealthLogDetail),
+    shrimpHealthController.getShrimpHealthLogDetailAsExpert);
 
 module.exports = router;
