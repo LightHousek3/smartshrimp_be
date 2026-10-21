@@ -281,6 +281,28 @@ const messages = {
         INVALID_DATE_RANGE: 'Khoảng thời gian thống kê tối đa 90 ngày',
     },
 
+    SHRIMP_HEALTH_LOG: {
+        CREATED: 'Ghi nhận sức khỏe tôm thành công',
+        LIST_FETCHED: 'Lấy danh sách nhật ký sức khỏe tôm thành công',
+        DETAIL_FETCHED: 'Lấy chi tiết nhật ký sức khỏe tôm thành công',
+        STATISTICS_FETCHED: 'Lấy thống kê sức khỏe và tăng trưởng thành công',
+        NOT_FOUND: 'Không tìm thấy nhật ký sức khỏe tôm',
+        INVALID_CURSOR: 'Mốc phân trang nhật ký sức khỏe tôm không hợp lệ',
+        SEASON_NOT_ACTIVE: 'Chỉ được ghi nhận sức khỏe cho vụ nuôi đang hoạt động',
+        NO_ASSIGNMENT: 'Bạn không được phân công phụ trách vụ nuôi này',
+        ALREADY_VOIDED: 'Bản ghi sức khỏe này đã bị hủy hiệu lực',
+        VOID_FORBIDDEN_STATE: 'Chỉ được hủy hiệu lực bản ghi của vụ nuôi đang hoạt động',
+        VOID_ONLY_TODAY: 'Chỉ được hủy hiệu lực bản ghi sức khỏe tôm trong ngày hôm nay',
+        VOIDED: 'Hủy hiệu lực bản ghi sức khỏe tôm thành công',
+        VOID_REASON_REQUIRED: 'Lý do hủy bản ghi là bắt buộc',
+        AT_LEAST_ONE_METRIC: 'Phải nhập ít nhất một chỉ số sức khỏe hoặc thể trạng tôm',
+        ESTIMATED_POPULATION_EXCEEDS_INITIAL: 'Số lượng tôm ước tính không được vượt quá số lượng giống thả ban đầu',
+        DUPLICATE_LOG: 'Bản ghi sức khỏe tôm cho thời điểm này đã tồn tại',
+        IDEMPOTENCY_KEY_REUSED: 'Khóa lưu bản ghi đã được dùng cho nội dung khác',
+        RECORDED_AT_TOO_FAR_FUTURE: 'Thời điểm ghi nhận không được vượt quá hiện tại 5 phút',
+        INVALID_DATE_RANGE: 'Khoảng thời gian thống kê không hợp lệ hoặc vượt quá 90 ngày',
+    },
+
     EXPERT_DASHBOARD: {
         FETCHED: 'Lấy tổng quan chuyên gia thành công',
     },

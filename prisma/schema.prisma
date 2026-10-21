@@ -427,12 +427,21 @@ model AquacultureSeason {
 model ShrimpHealthLog {
   id                  String              @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
   seasonId            String              @map("season_id") @db.Uuid
+  recordedBy          String              @map("recorded_by") @db.Uuid
   recordedAt          DateTime            @map("recorded_at") @db.Timestamptz(6)
-  estimatedBiomassKg  Decimal?            @map("estimated_biomass_kg") @db.Decimal(14, 3)
-  estimatedPopulation BigInt?             @map("estimated_population") @db.BigInt
+  sampleSize          Int?                @map("sample_size")
   avgWeightG          Decimal?            @map("avg_weight_g") @db.Decimal(10, 3)
+  avgLengthCm         Decimal?            @map("avg_length_cm") @db.Decimal(8, 2)
+  mortalityCount      BigInt              @default(0) @map("mortality_count") @db.BigInt
+  estimatedPopulation BigInt?             @map("estimated_population") @db.BigInt
+  estimatedBiomassKg  Decimal?            @map("estimated_biomass_kg") @db.Decimal(14, 3)
   healthStatus        HealthStatus        @default(GOOD) @map("health_status")
+  note                String?
   isVoided            Boolean             @default(false) @map("is_voided")
+  voidedBy            String?             @map("voided_by") @db.Uuid
+  voidedAt            DateTime?           @map("voided_at") @db.Timestamptz(6)
+  voidReason          String?             @map("void_reason")
+  createdAt           DateTime            @default(now()) @map("created_at") @db.Timestamptz(6)
   season              AquacultureSeason   @relation(fields: [seasonId], references: [id], onDelete: Restrict)
   schedules           OperationSchedule[]
 
