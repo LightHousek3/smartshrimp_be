@@ -103,7 +103,7 @@ const SCHEDULE_SELECT = {
 const ownedWhere = (ownerId) => ({
     status: { not: S.DRAFT },
     submittedAt: { not: null },
-    season: { pond: { farm: { ownerId, isDeleted: false } } },
+    season: { pond: { farm: { ownerId } } },
 });
 
 /**
@@ -182,7 +182,7 @@ const list = async (ownerId, { seasonId, protocolType, status, page = 1, limit =
             if (
                 seasonId &&
                 !(await client.aquacultureSeason.findFirst({
-                    where: { id: seasonId, pond: { farm: { ownerId, isDeleted: false } } },
+                    where: { id: seasonId, pond: { farm: { ownerId } } },
                     select: { id: true },
                 }))
             )
@@ -310,7 +310,7 @@ const detail = async (ownerId, id) =>
                 canReview:
                     p.status === S.PENDING_APPROVAL &&
                     ['PLANNING', 'ACTIVE'].includes(p.season.status) &&
-                    p.season.pond.farm.status === 'ACTIVE',
+                    p.season.pond.farm.status.toUpperCase() === 'ACTIVE',
             };
         },
         { isolationLevel: 'RepeatableRead' },
@@ -455,7 +455,7 @@ const validateApproval = async (client, p) => {
         select: {
             plannedTime: true,
             productId: true,
-            product: { select: { farmId: true, status: true, isDeleted: true } },
+            product: { select: { farmId: true, status: true } },
         },
     });
     if (!items.length || items.some((i) => !i.plannedTime)) throw ApiError.forbidden(messages.PROTOCOL.EMPTY);
@@ -465,8 +465,7 @@ const validateApproval = async (client, p) => {
                 i.productId &&
                 (!i.product ||
                     i.product.farmId !== p.season.pond.farmId ||
-                    i.product.status !== 'ACTIVE' ||
-                    i.product.isDeleted),
+                    i.product.status !== 'ACTIVE'),
         )
     ) {
         throw ApiError.forbidden(messages.PROTOCOL.PRODUCT);
@@ -601,7 +600,7 @@ const review = async (ownerId, id, { updatedAt, reason }, approved) => {
                 if (p.status !== S.PENDING_APPROVAL) throw ApiError.conflict(messages.PROTOCOL.CONFLICT);
                 if (
                     !['PLANNING', 'ACTIVE'].includes(p.season.status) ||
-                    p.season.pond.farm.status !== 'ACTIVE'
+                    p.season.pond.farm.status.toUpperCase() !== 'ACTIVE'
                 )
                     throw ApiError.forbidden(messages.PROTOCOL.CLOSED);
                 const now = new Date();

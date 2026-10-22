@@ -180,7 +180,7 @@ const buildActivationEligibility = (season) => {
     );
 
     if (season.status !== SEASON_STATUS.PLANNING) missingConditions.push('SEASON_NOT_PLANNING');
-    if (season.pond.farm.status !== 'ACTIVE') missingConditions.push('FARM_NOT_ACTIVE');
+    if (season.pond.farm.status.toUpperCase() !== 'ACTIVE') missingConditions.push('FARM_NOT_ACTIVE');
     if (season.pond.status !== 'AVAILABLE') missingConditions.push('POND_NOT_AVAILABLE');
     if (season.pond.type !== 'AQUACULTURE') missingConditions.push('POND_NOT_AQUACULTURE');
     if (!season.stockingDate) missingConditions.push('STOCKING_DATE_REQUIRED');
@@ -373,7 +373,7 @@ const buildCreateData = (seasonData, ownerId, areaM2) => {
 };
 
 const assertEligiblePond = (pond) => {
-    if (pond.farm.status !== 'ACTIVE') {
+    if (pond.farm.status.toUpperCase() !== 'ACTIVE') {
         throw new ApiError(httpStatus.CONFLICT, messages.SEASON.FARM_NOT_ACTIVE);
     }
     if (pond.status !== 'AVAILABLE') {
