@@ -30,7 +30,7 @@ const PROTOCOL_INCLUDE = {
     },
 };
 const isWritable = (season) => PRODUCTION_PROTOCOL_WRITABLE_SEASONS.includes(season.status)
-    && season.currentAssignment && season.pond.farm.status === 'ACTIVE';
+    && season.currentAssignment && season.pond.farm.status.toUpperCase() === 'ACTIVE';
 const mapError = (error) => {
     if (['P2002', 'P2034', 'P2025', 'P2003', 'P2028'].includes(error.code)
         || (error.code === 'P2010' && ['40001', '40P01', '55P03'].includes(error.meta?.code))) {
@@ -141,7 +141,7 @@ const scope = async (tx, accountId, seasonId, write = false) => {
         ...season,
         currentAssignment,
     };
-    if (write && (!isWritable(result) || season.pond.farm.status !== 'ACTIVE')) {
+    if (write && (!isWritable(result) || season.pond.farm.status.toUpperCase() !== 'ACTIVE')) {
         throw ApiError.conflict(messages.PRODUCTION_PROTOCOL.STATE);
     }
     return result;
@@ -341,7 +341,7 @@ const getSeason = (accountId, seasonId) => transaction(async (tx) => {
         approvedProductionProtocol: approved,
         availableActions: {
             create: Boolean(currentAssignment && isWritable(season)
-        && season.pond.farm.status === 'ACTIVE' && !inProgress),
+        && season.pond.farm.status.toUpperCase() === 'ACTIVE' && !inProgress),
         },
     };
 });

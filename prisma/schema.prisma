@@ -149,7 +149,6 @@ enum ProductUnit {
   ML     @map("ml")
   PACK   @map("pack")
   BOTTLE @map("bottle")
-  PCS    @map("pcs")
 
   @@map("product_unit")
 }
@@ -267,6 +266,14 @@ enum NotificationType {
   @@map("notification_type")
 }
 
+enum SupplierType {
+  MANUFACTURER @map("manufacturer")
+  DISTRIBUTOR  @map("distributor")
+  BOTH         @map("both")
+
+  @@map("supplier_type")
+}
+
 model Account {
   id                     String                       @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
   email                  String                       @unique @db.VarChar(320)
@@ -288,11 +295,13 @@ model Account {
   refreshTokens          RefreshToken[]
   verificationChallenges EmailVerificationChallenge[]
   notifications          Notification[]
-  assignedTasks          Task[] @relation("TaskAssignee")
-  cancelledTasks         Task[] @relation("TaskCanceller")
+  assignedTasks          Task[]                       @relation("TaskAssignee")
+  cancelledTasks         Task[]                       @relation("TaskCanceller")
   managedByOwner         Account?                     @relation("OwnerManagedAccounts", fields: [managedByOwnerId], references: [id], onDelete: Restrict)
   managedAccounts        Account[]                    @relation("OwnerManagedAccounts")
   seasonAssignments      SeasonPersonnelAssignment[]  @relation("SeasonAssignedAccount")
+  ownedSuppliers         Supplier[]
+  complianceChecks       ProductCompliance[]
   ownedFarms             Farm[]
   reportedDiseaseCases   DiseaseCase[]                @relation("DiseaseCaseReporter")
   ragConversations       RagConversation[]
@@ -355,24 +364,21 @@ model RefreshToken {
 }
 
 model Farm {
-  id                String    @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
-  ownerId           String    @map("owner_id") @db.Uuid
-  name              String    @db.VarChar(255)
+  id                String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  ownerId           String   @map("owner_id") @db.Uuid
+  name              String   @db.VarChar(255)
   address           String?
-  latitude          Decimal?  @db.Decimal(10, 8)
-  longitude         Decimal?  @db.Decimal(11, 8)
-  totalAreaHectares Decimal?  @map("total_area_hectares") @db.Decimal(10, 2)
-  status            FarmStatus @default(ACTIVE)
-  isDeleted         Boolean   @default(false) @map("is_deleted")
-  deletedAt         DateTime? @map("deleted_at") @db.Timestamptz(6)
-  createdAt         DateTime  @default(now()) @map("created_at") @db.Timestamptz(6)
-  updatedAt         DateTime  @default(now()) @map("updated_at") @db.Timestamptz(6)
-  owner             Account   @relation(fields: [ownerId], references: [id], onDelete: Restrict)
+  latitude          Decimal? @db.Decimal(10, 8)
+  longitude         Decimal? @db.Decimal(11, 8)
+  totalAreaHectares Decimal? @map("total_area_hectares") @db.Decimal(10, 2)
+  status            String   @default("active") @db.VarChar(8)
+  createdAt         DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt         DateTime @default(now()) @map("updated_at") @db.Timestamptz(6)
+  owner             Account  @relation(fields: [ownerId], references: [id], onDelete: Restrict)
   ponds             Pond[]
   tasks             Task[]
 
-  products  Product[]
-  suppliers Supplier[]
+  products Product[]
 
   @@map("farms")
 }
@@ -515,23 +521,23 @@ model Protocol {
   createdAt            DateTime       @default(now()) @map("created_at") @db.Timestamptz(6)
   updatedAt            DateTime       @default(now()) @map("updated_at") @db.Timestamptz(6)
 
-  season               AquacultureSeason @relation(fields: [seasonId], references: [id], onDelete: Restrict)
-  items                ProtocolItem[]
-  statusHistory        ProtocolStatusHistory[]
+  season        AquacultureSeason       @relation(fields: [seasonId], references: [id], onDelete: Restrict)
+  items         ProtocolItem[]
+  statusHistory ProtocolStatusHistory[]
 
   @@map("protocols")
 }
 
 /// Maps the existing protocol_status_history table; no database DDL is required.
 model ProtocolStatusHistory {
-  id         String         @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
-  protocolId String         @map("protocol_id") @db.Uuid
+  id         String          @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  protocolId String          @map("protocol_id") @db.Uuid
   fromStatus ProtocolStatus? @map("from_status")
   toStatus   ProtocolStatus  @map("to_status")
-  changedBy  String         @map("changed_by") @db.Uuid
+  changedBy  String          @map("changed_by") @db.Uuid
   reason     String?
-  changedAt  DateTime       @default(now()) @map("changed_at") @db.Timestamptz(6)
-  protocol   Protocol       @relation(fields: [protocolId], references: [id], onDelete: Restrict)
+  changedAt  DateTime        @default(now()) @map("changed_at") @db.Timestamptz(6)
+  protocol   Protocol        @relation(fields: [protocolId], references: [id], onDelete: Restrict)
 
   @@index([protocolId, changedAt], map: "idx_protocol_status_history")
   @@map("protocol_status_history")
@@ -572,7 +578,7 @@ model OperationSchedule {
   operationType      OperationType             @map("operation_type")
   productId          String?                   @map("product_id") @db.Uuid
   scheduledAt        DateTime                  @map("scheduled_at") @db.Timestamptz(6)
-  plannedQuantity    Decimal                   @map("planned_quantity") @db.Decimal(14, 3)
+  plannedQuantity    Decimal                   @map("planned_quantity") @db.Decimal(20, 9)
   unit               ProductUnit
   doseBasisSnapshot  DoseBasis                 @map("dose_basis_snapshot")
   doseValueSnapshot  Decimal                   @map("dose_value_snapshot") @db.Decimal(14, 4)
@@ -604,16 +610,17 @@ model OperationSchedule {
 }
 
 model OperationExecution {
-  id              String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
-  scheduleId      String   @unique @map("schedule_id") @db.Uuid
-  actualProductId String?  @map("actual_product_id") @db.Uuid
-  actualQuantity  Decimal  @map("actual_quantity") @db.Decimal(14, 3)
-  executedBy      String   @map("executed_by") @db.Uuid
-  idempotencyKey  String   @unique @map("idempotency_key") @db.Uuid
-  executedAt      DateTime @map("executed_at") @db.Timestamptz(6)
-  note            String?
-  varianceReason  String?  @map("variance_reason")
-  createdAt       DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  id                     String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  scheduleId             String   @unique @map("schedule_id") @db.Uuid
+  actualProductId        String?  @map("actual_product_id") @db.Uuid
+  withdrawalDaysSnapshot Decimal? @map("withdrawal_days_snapshot") @db.Decimal(7, 3)
+  actualQuantity         Decimal  @map("actual_quantity") @db.Decimal(20, 9)
+  executedBy             String   @map("executed_by") @db.Uuid
+  idempotencyKey         String   @unique @map("idempotency_key") @db.Uuid
+  executedAt             DateTime @map("executed_at") @db.Timestamptz(6)
+  note                   String?
+  varianceReason         String?  @map("variance_reason")
+  createdAt              DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
 
   schedule      OperationSchedule @relation(fields: [scheduleId], references: [id], onDelete: Restrict)
   actualProduct Product?          @relation("ExecutionActualProduct", fields: [actualProductId], references: [id], onDelete: Restrict)
@@ -623,24 +630,22 @@ model OperationExecution {
 }
 
 model InventoryBalance {
-  id         String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
-  productId  String   @map("product_id") @db.Uuid
-  lotNumber  String   @map("lot_number") @db.VarChar(100)
-  receivedAt DateTime @default(now()) @map("received_at") @db.Timestamptz(6)
-  quantity   Decimal  @default(0) @db.Decimal(14, 3)
-  unitPrice  Decimal  @map("unit_price") @db.Decimal(14, 2)
-  createdAt  DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
-  updatedAt  DateTime @default(now()) @map("updated_at") @db.Timestamptz(6)
+  id                   String                 @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  productId            String                 @map("product_id") @db.Uuid
+  lotNumber            String                 @map("lot_number") @db.VarChar(100)
+  receivedAt           DateTime               @default(now()) @map("received_at") @db.Timestamptz(6)
+  quantity             Decimal                @default(0) @db.Decimal(20, 9)
+  unitPrice            Decimal                @map("unit_price") @db.Decimal(14, 2)
+  supplierNameSnapshot String                 @map("supplier_name_snapshot") @db.VarChar(255)
+  supplierId           String?                @map("supplier_id") @db.Uuid
+  expiryDate           DateTime?              @map("expiry_date") @db.Date
+  createdAt            DateTime               @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt            DateTime               @default(now()) @map("updated_at") @db.Timestamptz(6)
+  product              Product                @relation(fields: [productId], references: [id], onDelete: Restrict)
+  supplier             Supplier?              @relation(fields: [supplierId], references: [id], onDelete: Restrict)
+  transactions         InventoryTransaction[]
 
-  product      Product                @relation(fields: [productId], references: [id], onDelete: Restrict)
-  transactions InventoryTransaction[]
-
-  supplierName String    @map("supplier_name") @db.VarChar(255)
-  supplierId   String?   @map("supplier_id") @db.Uuid
-  supplier     Supplier? @relation(fields: [supplierId], references: [id], onDelete: Restrict)
-
-  @@unique([productId, lotNumber], map: "uq_inventory_balance_product_lot")
-  @@index([productId, receivedAt, id], map: "idx_inventory_balances_fifo")
+  @@unique([id, productId], map: "uq_inventory_balance_id_product")
   @@index([productId], map: "idx_inventory_balances_product")
   @@index([supplierId], map: "idx_inventory_balances_supplier")
   @@map("inventory_balances")
@@ -653,18 +658,18 @@ model InventoryTransaction {
   inventoryBalanceId String                   @map("inventory_balance_id") @db.Uuid
   seasonId           String?                  @map("season_id") @db.Uuid
   transactionType    InventoryTransactionType @map("transaction_type")
-  quantity           Decimal                  @db.Decimal(14, 3)
+  quantity           Decimal                  @db.Decimal(20, 9)
   unitSnapshot       ProductUnit              @map("unit_snapshot")
   totalAmount        Decimal                  @map("total_amount") @db.Decimal(18, 2)
   referenceType      String?                  @map("reference_type") @db.VarChar(50)
   referenceId        String?                  @map("reference_id") @db.Uuid
-  reason             String?
+  reason             String?                  @db.VarChar(255)
   performedBy        String                   @map("performed_by") @db.Uuid
   idempotencyKey     String                   @unique @map("idempotency_key") @db.Uuid
   createdAt          DateTime                 @default(now()) @map("created_at") @db.Timestamptz(6)
 
   product          Product            @relation(fields: [productId], references: [id], onDelete: Restrict)
-  inventoryBalance InventoryBalance   @relation(fields: [inventoryBalanceId], references: [id], onDelete: Restrict)
+  inventoryBalance InventoryBalance   @relation(fields: [inventoryBalanceId, productId], references: [id, productId], onDelete: Restrict)
   season           AquacultureSeason? @relation(fields: [seasonId], references: [id], onDelete: Restrict)
   performer        Account            @relation("InventoryTransactionPerformedBy", fields: [performedBy], references: [id], onDelete: Restrict)
 
@@ -681,48 +686,71 @@ model Product {
   farmId                String                 @map("farm_id") @db.Uuid
   name                  String                 @db.VarChar(255)
   category              ProductCategory
+  /// Existing rows may lack a verified manufacturer during the additive upgrade.
+  manufacturerId        String?                @map("manufacturer_id") @db.Uuid
   unit                  ProductUnit
   conversionQuantity    Decimal?               @map("conversion_quantity") @db.Decimal(14, 4)
   conversionUnit        ConversionUnit?        @map("conversion_unit")
   minAlertQuantity      Decimal                @default(0) @map("min_alert_quantity") @db.Decimal(14, 3)
-  description           String?
-  status                ProductStatus          @default(ACTIVE)
-  imageUrl              String?                @map("image_url") @db.VarChar(2048)
+  description           String?                @db.VarChar(500)
+  recommendationReason  String?                @map("recommendation_reason") @db.VarChar(500)
   imageUrls             String[]               @default([]) @map("image_urls")
-  isDeleted             Boolean                @default(false) @map("is_deleted")
-  deletedAt             DateTime?              @map("deleted_at") @db.Timestamptz(6)
+  status                ProductStatus          @default(ACTIVE)
   createdAt             DateTime               @default(now()) @map("created_at") @db.Timestamptz(6)
   updatedAt             DateTime               @default(now()) @map("updated_at") @db.Timestamptz(6)
+  farm                  Farm                   @relation(fields: [farmId], references: [id], onDelete: Restrict)
+  manufacturer          Supplier?              @relation(fields: [manufacturerId], references: [id], onDelete: Restrict)
+  compliance            ProductCompliance?
   protocolItems         ProtocolItem[]
   schedules             OperationSchedule[]
   executions            OperationExecution[]   @relation("ExecutionActualProduct")
   inventoryBalances     InventoryBalance[]
   inventoryTransactions InventoryTransaction[]
 
-  archivedAt DateTime? @map("archived_at") @db.Timestamptz(6)
-  farm       Farm      @relation(fields: [farmId], references: [id], onDelete: Restrict)
-
-  @@index([farmId], map: "idx_products_farm")
+  @@index([farmId, status, category], map: "idx_products_farm_status_category")
+  @@index([manufacturerId], map: "idx_products_manufacturer")
   @@map("products")
 }
 
-model Supplier {
-  id                String             @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
-  farmId            String             @map("farm_id") @db.Uuid
-  name              String             @db.VarChar(255)
-  contactName       String?            @map("contact_name") @db.VarChar(255)
-  phone             String?            @db.VarChar(20)
-  email             String?            @db.VarChar(320)
-  address           String?            @db.VarChar(1000)
-  note              String?            @db.VarChar(2000)
-  isDeleted         Boolean            @default(false) @map("is_deleted")
-  deletedAt         DateTime?          @map("deleted_at") @db.Timestamptz(6)
-  createdAt         DateTime           @default(now()) @map("created_at") @db.Timestamptz(6)
-  updatedAt         DateTime           @default(now()) @map("updated_at") @db.Timestamptz(6)
-  farm              Farm               @relation(fields: [farmId], references: [id], onDelete: Restrict)
-  inventoryBalances InventoryBalance[]
+model ProductCompliance {
+  productId          String    @id @map("product_id") @db.Uuid
+  regulatoryType     String    @default("unclassified") @map("regulatory_type") @db.VarChar(24)
+  registrationNumber String?   @map("registration_number") @db.VarChar(100)
+  ingredientsText    String?   @map("ingredients_text")
+  containsAntibiotic Boolean?  @map("contains_antibiotic")
+  usageInstructions  String?   @map("usage_instructions")
+  withdrawalDays     Decimal?  @map("withdrawal_days") @db.Decimal(7, 3)
+  evidenceUrls       String[]  @default([]) @map("evidence_urls")
+  complianceStatus   String    @default("draft") @map("compliance_status") @db.VarChar(16)
+  checkedBy          String?   @map("checked_by") @db.Uuid
+  checkedAt          DateTime? @map("checked_at") @db.Timestamptz(6)
+  reviewNote         String?   @map("review_note")
+  updatedAt          DateTime  @default(now()) @map("updated_at") @db.Timestamptz(6)
+  product            Product   @relation(fields: [productId], references: [id], onDelete: Cascade)
+  checker            Account?  @relation(fields: [checkedBy], references: [id], onDelete: Restrict)
 
-  @@index([farmId, isDeleted], map: "idx_suppliers_farm_active")
+  @@map("product_compliance")
+}
+
+model Supplier {
+  id                   String             @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  ownerId              String             @map("owner_id") @db.Uuid
+  name                 String             @db.VarChar(255)
+  /// NULL preserves an unconfirmed legacy role; all new API writes select a role.
+  supplierType         SupplierType?      @default(MANUFACTURER) @map("supplier_type")
+  contactName          String?            @map("contact_name") @db.VarChar(255)
+  phone                String?            @db.VarChar(20)
+  email                String?            @db.VarChar(320)
+  address              String?            @db.VarChar(1000)
+  note                 String?            @db.VarChar(2000)
+  status               String             @default("active") @db.VarChar(8)
+  createdAt            DateTime           @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt            DateTime           @default(now()) @map("updated_at") @db.Timestamptz(6)
+  owner                Account            @relation(fields: [ownerId], references: [id], onDelete: Restrict)
+  manufacturedProducts Product[]
+  inventoryBalances    InventoryBalance[]
+
+  @@index([ownerId, status, supplierType], map: "idx_suppliers_owner_status_type")
   @@map("suppliers")
 }
 
@@ -744,28 +772,28 @@ model ProductionProtocolTemplate {
 }
 
 model Task {
-  id                 String       @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
-  farmId             String       @map("farm_id") @db.Uuid
-  seasonId           String?      @map("season_id") @db.Uuid
-  assignedBy         String       @map("assigned_by") @db.Uuid
-  assignedTo         String       @map("assigned_to") @db.Uuid
-  title              String       @db.VarChar(255)
-  description        String?      @db.VarChar(500)
-  priority           TaskPriority @default(NORMAL)
-  status             TaskStatus   @default(PENDING)
-  dueAt              DateTime     @map("due_at") @db.Timestamptz(6)
-  startedAt          DateTime?    @map("started_at") @db.Timestamptz(6)
-  completedAt        DateTime?    @map("completed_at") @db.Timestamptz(6)
-  cancellationReason String?      @map("cancellation_reason") @db.VarChar(255)
-  cancelledBy        String?      @map("cancelled_by") @db.Uuid
-  cancelledAt        DateTime?    @map("cancelled_at") @db.Timestamptz(6)
-  history            Json         @default("[]")
-  farm               Farm         @relation(fields: [farmId], references: [id], onDelete: Restrict)
+  id                 String             @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  farmId             String             @map("farm_id") @db.Uuid
+  seasonId           String?            @map("season_id") @db.Uuid
+  assignedBy         String             @map("assigned_by") @db.Uuid
+  assignedTo         String             @map("assigned_to") @db.Uuid
+  title              String             @db.VarChar(255)
+  description        String?            @db.VarChar(500)
+  priority           TaskPriority       @default(NORMAL)
+  status             TaskStatus         @default(PENDING)
+  dueAt              DateTime           @map("due_at") @db.Timestamptz(6)
+  startedAt          DateTime?          @map("started_at") @db.Timestamptz(6)
+  completedAt        DateTime?          @map("completed_at") @db.Timestamptz(6)
+  cancellationReason String?            @map("cancellation_reason") @db.VarChar(255)
+  cancelledBy        String?            @map("cancelled_by") @db.Uuid
+  cancelledAt        DateTime?          @map("cancelled_at") @db.Timestamptz(6)
+  history            Json               @default("[]")
+  farm               Farm               @relation(fields: [farmId], references: [id], onDelete: Restrict)
   season             AquacultureSeason? @relation(fields: [seasonId], references: [id], onDelete: Restrict)
-  assignee           Account      @relation("TaskAssignee", fields: [assignedTo], references: [id], onDelete: Restrict)
-  cancelledByAccount Account?     @relation("TaskCanceller", fields: [cancelledBy], references: [id], onDelete: Restrict)
-  createdAt          DateTime     @default(now()) @map("created_at") @db.Timestamptz(6)
-  updatedAt          DateTime     @default(now()) @map("updated_at") @db.Timestamptz(6)
+  assignee           Account            @relation("TaskAssignee", fields: [assignedTo], references: [id], onDelete: Restrict)
+  cancelledByAccount Account?           @relation("TaskCanceller", fields: [cancelledBy], references: [id], onDelete: Restrict)
+  createdAt          DateTime           @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt          DateTime           @default(now()) @map("updated_at") @db.Timestamptz(6)
 
   @@index([farmId, status, dueAt], map: "idx_tasks_farm_status_due")
   @@index([assignedTo, status, dueAt], map: "idx_tasks_assignee_status_due")
@@ -885,29 +913,29 @@ enum RagDocumentStatus {
 }
 
 model RagDocument {
-  id                    String    @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
-  title                 String    @db.VarChar(255)
-  description           String?
-  category              String?   @db.VarChar(100)
-  originalFilename      String    @map("original_filename") @db.VarChar(500)
-  storageProvider       String    @default("cloudinary") @map("storage_provider") @db.VarChar(30)
-  storageKey            String    @unique @map("storage_key") @db.VarChar(500)
-  storageResourceType   String    @default("raw") @map("storage_resource_type") @db.VarChar(20)
-  mimeType              String    @map("mime_type") @db.VarChar(100)
-  fileSize              Int       @map("file_size")
-  fileHash              String    @map("file_hash") @db.Char(64)
-  status                RagDocumentStatus @default(PENDING)
-  isActive              Boolean   @default(true) @map("is_active")
-  chunkCount            Int       @default(0) @map("chunk_count")
-  errorMessage          String?   @map("error_message")
-  jobAttempts           Int       @default(0) @map("job_attempts")
-  processingStartedAt   DateTime? @map("processing_started_at") @db.Timestamptz(6)
-  indexedAt             DateTime? @map("indexed_at") @db.Timestamptz(6)
-  nextAttemptAt         DateTime  @default(now()) @map("next_attempt_at") @db.Timestamptz(6)
-  uploadedBy            String    @map("uploaded_by") @db.Uuid
-  uploader              Account   @relation(fields: [uploadedBy], references: [id], onDelete: Restrict)
-  createdAt             DateTime  @default(now()) @map("created_at") @db.Timestamptz(6)
-  updatedAt             DateTime  @default(now()) @updatedAt @map("updated_at") @db.Timestamptz(6)
+  id                  String            @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  title               String            @db.VarChar(255)
+  description         String?
+  category            String?           @db.VarChar(100)
+  originalFilename    String            @map("original_filename") @db.VarChar(500)
+  storageProvider     String            @default("cloudinary") @map("storage_provider") @db.VarChar(30)
+  storageKey          String            @unique @map("storage_key") @db.VarChar(500)
+  storageResourceType String            @default("raw") @map("storage_resource_type") @db.VarChar(20)
+  mimeType            String            @map("mime_type") @db.VarChar(100)
+  fileSize            Int               @map("file_size")
+  fileHash            String            @map("file_hash") @db.Char(64)
+  status              RagDocumentStatus @default(PENDING)
+  isActive            Boolean           @default(true) @map("is_active")
+  chunkCount          Int               @default(0) @map("chunk_count")
+  errorMessage        String?           @map("error_message")
+  jobAttempts         Int               @default(0) @map("job_attempts")
+  processingStartedAt DateTime?         @map("processing_started_at") @db.Timestamptz(6)
+  indexedAt           DateTime?         @map("indexed_at") @db.Timestamptz(6)
+  nextAttemptAt       DateTime          @default(now()) @map("next_attempt_at") @db.Timestamptz(6)
+  uploadedBy          String            @map("uploaded_by") @db.Uuid
+  uploader            Account           @relation(fields: [uploadedBy], references: [id], onDelete: Restrict)
+  createdAt           DateTime          @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt           DateTime          @default(now()) @updatedAt @map("updated_at") @db.Timestamptz(6)
 
   @@index([status, createdAt])
   @@index([category, createdAt])
