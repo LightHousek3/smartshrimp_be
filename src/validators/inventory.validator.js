@@ -46,6 +46,19 @@ const conversionQuantity = Joi.number().positive().max(9999999999.9999)
     .precision(4)
     .strict();
 
+/**
+ * Compare calendar days in Vietnam (UTC+7), allowing today regardless of the server timezone.
+ * Reject impossible dates before lexically comparing normalized YYYY-MM-DD values.
+ */
+const expiryDate = Joi.string().pattern(/^\d{4}-\d{2}-\d{2}$/u).custom((value, helpers) => {
+    const date = new Date(value);
+    const today = new Date(Date.now() + 7 * 60 * 60 * 1000).toISOString().slice(0, 10);
+    if (!Number.isFinite(date.getTime()) || date.toISOString().slice(0, 10) !== value) {
+        return helpers.error('any.invalid');
+    }
+    return value >= today ? value : helpers.message({ custom: 'Hạn sử dụng không được trong quá khứ' });
+});
+
 const farmParams = Joi.object({ farmId: uuid.required() });
 const productParams = Joi.object({
     farmId: uuid.required(),
@@ -122,7 +135,7 @@ const getProducts = {
             .default(1),
         limit: Joi.number().integer().min(1)
             .max(100)
-            .default(20),
+            .default(10),
         search: Joi.string().trim().max(255)
             .allow('')
             .default(''),
@@ -137,7 +150,8 @@ const getProducts = {
 };
 
 /**
- * Require catalog identity and enforce conversion and image limits before creation.
+ * Require catalog identity and essential label facts before creation.
+ * Notes and images remain optional; packaged units require both conversion fields.
  */
 const createProduct = {
     params: farmParams,
@@ -147,7 +161,15 @@ const createProduct = {
         manufacturerId: uuid.required(),
         category: Joi.string().valid(...Object.values(PRODUCT_CATEGORY)).required(),
         unit: Joi.string().valid(...Object.values(PRODUCT_UNIT)).required(),
-        minAlertQuantity: nonnegativeQuantity.default(0),
+        minAlertQuantity: nonnegativeQuantity.required(),
+        compliance: productFields.compliance.keys({
+            regulatoryType: Joi.string().valid('feed', 'environment', 'dual_purpose', 'medicine').required(),
+            registrationNumber: Joi.string().trim().min(1).max(100).required(),
+            ingredientsText: Joi.string().trim().min(1).max(50000).required(),
+            usageInstructions: Joi.string().trim().min(1).max(50000).required(),
+            containsAntibiotic: Joi.boolean().required(),
+            withdrawalDays: Joi.number().min(0).max(9999.999).precision(3).strict().required(),
+        }).required(),
     }).custom(validateConversion),
 };
 
@@ -174,12 +196,7 @@ const stockInBody = Joi.object({
     unitPrice: unitPrice.required(),
     supplierName: normalizedText(255),
     supplierId: uuid,
-    expiryDate: Joi.string().pattern(/^\d{4}-\d{2}-\d{2}$/u).custom((value, helpers) => {
-        const date = new Date(value);
-        return Number.isFinite(date.getTime()) && date.toISOString().slice(0, 10) === value
-            ? value : helpers.error('any.invalid');
-    })
-        .allow(null),
+    expiryDate: expiryDate.required(),
     reason: Joi.string().trim().max(255)
         .allow('', null),
 }).or('supplierId', 'supplierName');
@@ -281,12 +298,7 @@ module.exports = {
         }),
         body: Joi.object({
             expectedUpdatedAt: Joi.date().iso().required(),
-            expiryDate: Joi.string().pattern(/^\d{4}-\d{2}-\d{2}$/u).custom((value, helpers) => {
-                const date = new Date(value);
-                return Number.isFinite(date.getTime()) && date.getUTCFullYear() > 0 && date.toISOString().slice(0, 10) === value
-                    ? value : helpers.error('any.invalid');
-            })
-                .required(),
+            expiryDate: expiryDate.required(),
         }),
     },
     recordStockTransaction,

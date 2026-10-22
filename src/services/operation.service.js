@@ -1,9 +1,10 @@
 const crypto = require('crypto');
 const { Prisma } = require('@prisma/client');
-const { stockQuantity, vietnamDate } = require('../utils/inventoryQuantity');
 const prisma = require('../config/prisma');
-const { emitNotification } = require('../realtime/notification.socket');
-const { ApiError } = require('../utils');
+const { emitNotification } = require('../realtime');
+const {
+    ApiError, stockQuantity, vietnamDate, requireCompleteInventoryProduct,
+} = require('../utils');
 const withdrawal = require('./harvestWithdrawal.service');
 const {
     messages,
@@ -377,10 +378,14 @@ const executeSchedule = async (technicianId, scheduleId, payload) => {
                 const days = await withdrawal.prepareExecution(tx, schedule.seasonId, targetProductId, schedule.operationType, executedAt, protocol);
                 const executionId = crypto.randomUUID();
                 if (targetProductId) {
+                    await tx.$queryRaw`SELECT id FROM products WHERE id = ${targetProductId}::uuid FOR UPDATE`;
                     const product = await tx.product.findFirst({
                         where: { id: targetProductId, farmId: schedule.season.pond.farmId },
+                        include: { compliance: true },
                     });
                     if (!product) throw ApiError.badRequest(messages.HARVEST.WITHDRAWAL_PRODUCT_NOT_READY);
+                    if (product.status !== 'ACTIVE') throw ApiError.badRequest(messages.HARVEST.WITHDRAWAL_PRODUCT_NOT_READY);
+                    requireCompleteInventoryProduct(product);
                     const requested = stockQuantity(actual, schedule.unit, product);
                     const balances = await tx.inventoryBalance.findMany({
                         where: { productId: targetProductId, quantity: { gt: 0 }, expiryDate: { gte: vietnamDate(executedAt) } },

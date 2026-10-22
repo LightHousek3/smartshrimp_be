@@ -2,7 +2,7 @@ const { Prisma } = require('@prisma/client');
 const prisma = require('../config/prisma');
 const { ApiError } = require('../utils');
 const { httpStatus, messages } = require('../constants');
-const legacyRead = require('./inventoryLegacyRead.service');
+const { inventoryLegacyReadService: legacyRead } = require('./index');
 
 const SUPPLIER_SELECT = {
     id: true,
@@ -49,6 +49,8 @@ const requireOwnedFarm = async (client, farmId, ownerId) => {
 
 /**
  * Unmapped template references also prevent deletion, even before a product is accepted.
+ * Name and role lock only after orders or transactions, independently of deletion eligibility.
+ * Raw SQL covers recommended-manufacturer links not exposed by the current Prisma delegates.
  */
 const deletionHints = async (client, ownerId) => {
     const rows = await client.$queryRaw(Prisma.sql`
@@ -57,8 +59,23 @@ const deletionHints = async (client, ownerId) => {
             OR EXISTS (SELECT 1 FROM inventory_balances b WHERE b.supplier_id = s.id)
             OR EXISTS (SELECT 1 FROM production_protocol_template_items i WHERE i.recommended_manufacturer_id = s.id)
             OR EXISTS (SELECT 1 FROM protocol_items i WHERE i.recommended_manufacturer_id = s.id)
-        ) AS "canDelete" FROM suppliers s WHERE s.owner_id = ${ownerId}::uuid`);
-    return new Map(rows.map((row) => [row.id, row.canDelete]));
+        ) AS "canDelete",
+        (
+            EXISTS (SELECT 1 FROM inventory_balances b WHERE b.supplier_id = s.id)
+            OR EXISTS (SELECT 1 FROM products p WHERE p.manufacturer_id = s.id AND (
+                EXISTS (SELECT 1 FROM inventory_transactions t WHERE t.product_id = p.id)
+                OR EXISTS (SELECT 1 FROM inventory_balances b WHERE b.product_id = p.id)
+                OR EXISTS (SELECT 1 FROM operation_schedules o WHERE o.product_id = p.id)
+                OR EXISTS (SELECT 1 FROM operation_executions e WHERE e.actual_product_id = p.id)
+                OR EXISTS (SELECT 1 FROM protocol_items i JOIN protocols r ON r.id = i.protocol_id
+                    WHERE i.product_id = p.id AND r.status <> 'draft')
+            ))
+            OR EXISTS (SELECT 1 FROM protocol_items i JOIN protocols r ON r.id = i.protocol_id
+                WHERE i.recommended_manufacturer_id = s.id AND r.status <> 'draft')
+        ) AS "identityLocked" FROM suppliers s WHERE s.owner_id = ${ownerId}::uuid`);
+    const hints = new Map(rows.map((row) => [row.id, row.canDelete]));
+    hints.identityLocked = new Set(rows.filter((row) => row.identityLocked).map((row) => row.id));
+    return hints;
 };
 
 const normalizeSupplier = ({ _count, ...supplier }, hints) => ({
@@ -72,6 +89,7 @@ const normalizeSupplier = ({ _count, ...supplier }, hints) => ({
     status: supplier.status.toUpperCase(),
     isActive: supplier.status === 'active',
     canDelete: hints.get(supplier.id) === true,
+    metadataLocked: hints.identityLocked?.has(supplier.id) === true,
 });
 const findSupplier = async (client, ownerId, supplierId) => {
     const supplier = await client.supplier.findFirst({
@@ -270,13 +288,19 @@ const createSupplier = (farmId, data, ownerId) => writeSupplier(async (client) =
 });
 
 /**
- * Inactivation leaves existing stock usable; changing the manufacturer role must preserve links.
+ * Inactivation leaves existing stock usable; orders and transactions freeze the name and role.
+ * Even without orders, removing the manufacturer role must preserve existing manufacturer links.
  */
 const updateSupplier = (farmId, supplierId, input, ownerId) => writeSupplier(async (client) => {
     await requireOwnedFarm(client, farmId, ownerId);
     await client.$queryRaw`SELECT id FROM suppliers WHERE id = ${supplierId}::uuid AND owner_id = ${ownerId}::uuid FOR UPDATE`;
-    await findSupplier(client, ownerId, supplierId);
+    const current = await findSupplier(client, ownerId, supplierId);
     const { expectedUpdatedAt, ...data } = input;
+    const changesIdentity = (data.name !== undefined && data.name !== current.name)
+        || (data.supplierType !== undefined && data.supplierType !== current.supplierType);
+    if (changesIdentity && (await deletionHints(client, ownerId)).identityLocked.has(supplierId)) {
+        throw new ApiError(httpStatus.CONFLICT, messages.SUPPLIER.IDENTITY_LOCKED);
+    }
     if (data.name) {
         await requireUniqueName(client, ownerId, data.name, supplierId);
     }

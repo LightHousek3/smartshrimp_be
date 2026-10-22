@@ -18,15 +18,13 @@ const fields = {
         .max(255),
     contactName: nullableText(255),
     phone: Joi.string().trim().max(20)
-        .pattern(/^\+?[0-9 ()\-.]{6,20}$/u)
-        .allow('', null)
-        .custom((value) => value || null),
+        .pattern(/^\+?[0-9 ()\-.]{6,20}$/u),
     email: Joi.string().trim().lowercase()
         .email({ tlds: { allow: false } })
         .max(320)
         .allow('', null)
         .custom((value) => value || null),
-    address: nullableText(1000),
+    address: Joi.string().trim().min(1).max(1000),
     note: nullableText(2000),
     isActive: Joi.boolean(),
     status: Joi.string().valid('ACTIVE', 'INACTIVE'),
@@ -68,13 +66,15 @@ module.exports = {
      */
     getSupplier: { params: supplierParams },
     /**
-     * Require a name and normalize optional details for a new directory entry.
+     * Require name, phone and address; normalize optional details for a new directory entry.
      */
     createSupplier: {
         params: farmParams,
         body: Joi.object({
             ...fields,
             name: fields.name.required(),
+            phone: fields.phone.required(),
+            address: fields.address.required(),
         }).without('status', 'isActive').custom(normalizeOptionalFields),
     },
     /**

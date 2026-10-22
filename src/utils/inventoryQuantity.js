@@ -1,5 +1,5 @@
 const { Prisma } = require('@prisma/client');
-const ApiError = require('./ApiError');
+const { ApiError } = require('./index');
 
 const units = {
     MG: {

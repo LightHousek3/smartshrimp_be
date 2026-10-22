@@ -13,10 +13,12 @@ const {
     NOTIFICATION_TYPE,
     INVENTORY_LIMITS,
 } = require('../constants');
-const { emitNotification } = require('../realtime/notification.socket');
-const { requireSelectableSupplier } = require('./supplier.service');
-const legacyRead = require('./inventoryLegacyRead.service');
-const { getHistoryOptions } = require('./inventoryHistoryOptions.service');
+const { emitNotification } = require('../realtime');
+const {
+    supplierService: { requireSelectableSupplier },
+    inventoryLegacyReadService: legacyRead,
+    inventoryHistoryOptionsService: { getHistoryOptions },
+} = require('./index');
 
 const PACKAGED_UNITS = new Set([PRODUCT_UNIT.PACK, PRODUCT_UNIT.BOTTLE]);
 const UNIT_LOCKED_FIELDS = ['unit', 'conversionQuantity', 'conversionUnit'];
@@ -548,7 +550,8 @@ const productFieldChanged = (current, next, field) => {
 
 /**
  * Update only an active owned product and reject stale version tokens.
- * Existing ledger entries lock units and conversion fields; checks and writes are serializable.
+ * Orders or stock history lock identity and compliance; only threshold and description remain editable.
+ * Reference checks and writes share the serializable transaction and product row lock.
  */
 const updateProduct = async (farmId, productId, productData, ownerId) => {
     const {
@@ -573,11 +576,8 @@ const updateProduct = async (farmId, productId, productData, ownerId) => {
                 validateConversion(merged);
 
                 const used = await hasProductUsage(transaction, productId);
-                const identityFields = ['name', 'category', 'manufacturerId', 'description', 'imageUrls', 'imageUrl', ...UNIT_LOCKED_FIELDS];
-                // A first factual manufacturer assignment repairs an unmapped legacy row.
-                // Once present, the original identity remains immutable after use.
-                const lockedIdentityFields = current.manufacturerId == null
-                    ? identityFields.filter((field) => field !== 'manufacturerId') : identityFields;
+                const identityFields = ['name', 'category', 'manufacturerId', 'imageUrls', 'imageUrl', 'recommendationReason', ...UNIT_LOCKED_FIELDS];
+                const lockedIdentityFields = identityFields;
                 if (used && (compliance !== undefined || lockedIdentityFields.some((field) => productFieldChanged(current, requestedData, field)))) {
                     throw new ApiError(httpStatus.CONFLICT, messages.INVENTORY.METADATA_LOCKED);
                 }
@@ -711,14 +711,27 @@ const canDeleteProduct = async (client, productId) => {
     return result.allowed;
 };
 
-const hasProductUsage = async (client, productId) => (await client.operationExecution.count({
-    where: {
-        OR: [{ actualProductId: productId }, {
-            actualProductId: null,
-            schedule: { productId },
-        }],
-    },
-})) > 0;
+/**
+ * Keep identity immutable after an order is issued or stock history is recorded.
+ * Draft protocol references alone do not lock edits; cancelled schedules retain their history.
+ */
+const hasProductUsage = async (client, productId) => {
+    const counts = await Promise.all([
+        client.inventoryTransaction.count({ where: { productId } }),
+        client.inventoryBalance.count({ where: { productId } }),
+        client.operationSchedule.count({ where: { productId } }),
+        client.protocolItem.count({ where: { productId, protocol: { status: { not: 'DRAFT' } } } }),
+        client.operationExecution.count({
+            where: {
+                OR: [{ actualProductId: productId }, {
+                    actualProductId: null,
+                    schedule: { productId },
+                }],
+            },
+        }),
+    ]);
+    return counts.some((count) => count > 0);
+};
 
 /**
  * Hard-delete only masters without references; the 1-1 compliance row cascades.

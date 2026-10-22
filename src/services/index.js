@@ -15,8 +15,6 @@ const expertProductionProtocolService = require('./expertProductionProtocol.serv
 const waterLogService = require('./waterLog.service');
 const shrimpHealthService = require('./shrimpHealth.service');
 const operationService = require('./operation.service');
-const inventoryService = require('./inventory.service');
-const supplierService = require('./supplier.service');
 const notificationNavigationService = require('./notificationNavigation.service');
 const taskService = require('./task.service');
 const harvestService = require('./harvest.service');
@@ -51,8 +49,19 @@ module.exports = {
     waterLogService,
     shrimpHealthService,
     operationService,
-    inventoryService,
-    supplierService,
+    // Resolve linked inventory services after index initialization to avoid circular imports.
+    get inventoryService() {
+        return require('./inventory.service');
+    },
+    get inventoryHistoryOptionsService() {
+        return require('./inventoryHistoryOptions.service');
+    },
+    get inventoryLegacyReadService() {
+        return require('./inventoryLegacyRead.service');
+    },
+    get supplierService() {
+        return require('./supplier.service');
+    },
     notificationNavigationService,
     taskService,
     harvestService,

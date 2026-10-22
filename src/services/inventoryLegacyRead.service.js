@@ -1,7 +1,9 @@
 const { Prisma } = require('@prisma/client');
 const prisma = require('../config/prisma');
-const ApiError = require('../utils/ApiError');
-const { getHistoryOptions } = require('./inventoryHistoryOptions.service');
+const { ApiError } = require('../utils');
+const {
+    inventoryHistoryOptionsService: { getHistoryOptions },
+} = require('./index');
 
 const READ_ONLY_MESSAGE = 'Kho hiện chỉ hỗ trợ xem dữ liệu. Cần đồng bộ dữ liệu kho trước khi cập nhật.';
 let modePromise;

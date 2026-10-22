@@ -108,6 +108,7 @@ const messages = {
     },
 
     SUPPLIER: {
+        IDENTITY_LOCKED: 'Nhà cung cấp đã có đơn hoặc giao dịch. Không thể đổi tên hoặc vai trò cung ứng',
         NOT_SELECTABLE: 'Chọn đối tác đang hoạt động, đúng vai trò và thuộc danh bạ của bạn',
         HAS_REFERENCES: 'Nhà cung cấp đã có tham chiếu. Hãy chuyển sang tạm ngưng thay vì xóa',
         MANUFACTURER_REFERENCED: 'Không thể bỏ vai trò nhà sản xuất khi đã được vật tư hoặc đề xuất tham chiếu',
@@ -123,7 +124,7 @@ const messages = {
     INVENTORY: {
         DELETED: 'Xóa vật tư chưa có phát sinh thành công',
         HAS_REFERENCES: 'Vật tư đã có phát sinh hoặc tham chiếu nên không thể xóa',
-        METADATA_LOCKED: 'Vật tư đã được sử dụng. Không thể sửa định danh, ảnh nhãn hoặc hồ sơ gốc',
+        METADATA_LOCKED: 'Vật tư đã có đơn hoặc giao dịch. Chỉ được sửa ngưỡng cảnh báo và mô tả',
         LOT_EXPIRY_CONFLICT: 'Các lần nhập cùng vật tư và số lô phải có cùng hạn sử dụng',
         LOT_EXPIRY_LOCKED: 'Lô đã được dùng. Cần đối chiếu chuyên môn, không tự thay đổi bằng chứng hạn dùng',
         SUPPLIER_NAME_REQUIRED: 'Vui lòng chọn nhà cung cấp hoặc nhập tên bên bán thực tế',
