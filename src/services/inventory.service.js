@@ -1,27 +1,33 @@
 const { randomUUID } = require('crypto');
 const { Prisma } = require('@prisma/client');
 const prisma = require('../config/prisma');
-const { ApiError } = require('../utils');
+const { ApiError, requireCompleteInventoryProduct, isInventoryProductReviewable } = require('../utils');
 const {
     httpStatus,
     messages,
     PRODUCT_UNIT,
     PRODUCT_STOCK_STATUS,
     PRODUCT_ARCHIVE_STATUS,
+    PRODUCT_STATUS,
+    OPERATION_STATUS,
+    PROTOCOL_STATUS,
     INVENTORY_TRANSACTION_TYPE,
     OWNER_INVENTORY_TRANSACTION_TYPES,
     NOTIFICATION_TYPE,
     INVENTORY_LIMITS,
+    PRODUCT_COMPLIANCE_STATUS,
 } = require('../constants');
 const { emitNotification } = require('../realtime');
-const {
-    supplierService: { requireSelectableSupplier },
-    inventoryLegacyReadService: legacyRead,
-    inventoryHistoryOptionsService: { getHistoryOptions },
-} = require('./index');
+const { requireSelectableSupplier } = require('./supplier.service');
+const legacyRead = require('./inventoryLegacyRead.service');
+const { getHistoryOptions } = require('./inventoryHistoryOptions.service');
 
 const PACKAGED_UNITS = new Set([PRODUCT_UNIT.PACK, PRODUCT_UNIT.BOTTLE]);
 const UNIT_LOCKED_FIELDS = ['unit', 'conversionQuantity', 'conversionUnit'];
+const COMPLIANCE_FACT_FIELDS = [
+    'regulatoryType', 'registrationNumber', 'ingredientsText', 'containsAntibiotic',
+    'usageInstructions', 'withdrawalDays', 'evidenceUrls',
+];
 
 const PRODUCT_SELECT = {
     id: true,
@@ -174,7 +180,7 @@ const normalizeProduct = (product, { includeLots = false } = {}) => {
                 : Number(baseProduct.conversionQuantity),
         minAlertQuantity: Number(baseProduct.minAlertQuantity),
         ...metrics,
-        isArchived: baseProduct.status === 'INACTIVE',
+        isArchived: baseProduct.status === PRODUCT_STATUS.INACTIVE,
         isLowStock:
             decimal(baseProduct.minAlertQuantity).gt(0)
             && stockInAlertUnit(baseProduct, metrics.currentStock).lt(baseProduct.minAlertQuantity),
@@ -283,7 +289,7 @@ const requireUniqueProductNameUnit = async (
 };
 
 const requireActiveProduct = (product) => {
-    if (product.status !== 'ACTIVE') {
+    if (product.status !== PRODUCT_STATUS.ACTIVE) {
         throw new ApiError(httpStatus.CONFLICT, messages.INVENTORY.PRODUCT_ARCHIVED);
     }
     return product;
@@ -302,13 +308,13 @@ const validateConversion = ({
     if (packaged && (!hasQuantity || !hasUnit)) {
         throw new ApiError(
             httpStatus.BAD_REQUEST,
-            'PACK và BOTTLE bắt buộc phải có số lượng và đơn vị quy đổi',
+            messages.INVENTORY.CONVERSION_REQUIRED,
         );
     }
     if (!packaged && (hasQuantity || hasUnit)) {
         throw new ApiError(
             httpStatus.BAD_REQUEST,
-            'Thông tin quy đổi chỉ áp dụng cho PACK và BOTTLE',
+            messages.INVENTORY.CONVERSION_NOT_ALLOWED,
         );
     }
 };
@@ -373,12 +379,12 @@ const getProducts = async (farmId, ownerId, query) => {
         ? {}
         : {
             status: archiveStatus === PRODUCT_ARCHIVE_STATUS.ARCHIVED
-                ? 'INACTIVE'
-                : 'ACTIVE',
+                ? PRODUCT_STATUS.INACTIVE
+                : PRODUCT_STATUS.ACTIVE,
         };
     const baseWhere = {
         farmId,
-        status: 'ACTIVE',
+        status: PRODUCT_STATUS.ACTIVE,
     };
     const filteredWhere = {
         farmId,
@@ -434,7 +440,7 @@ const getProducts = async (farmId, ownerId, query) => {
 
 /**
  * Read all lots of an owned product, including exhausted lots for historical context.
- * canArchive is a UI hint; pause writes recheck stock and planned schedules transactionally.
+ * Pausing is allowed with stock and planned schedules; their history is retained.
  */
 const getProduct = async (farmId, productId, ownerId) => {
     const product = await findOwnedProduct(prisma, farmId, productId, ownerId, {
@@ -465,7 +471,7 @@ const getProduct = async (farmId, productId, ownerId) => {
         prisma.operationSchedule.count({
             where: {
                 productId,
-                status: 'PLANNED',
+                status: OPERATION_STATUS.PLANNED,
             },
         }),
         hasProductUsage(prisma, productId),
@@ -477,7 +483,7 @@ const getProduct = async (farmId, productId, ownerId) => {
             metadataLocked: used,
         }, { includeLots: true }),
         plannedUseCount,
-        canArchive: product.status === 'ACTIVE',
+        canArchive: product.status === PRODUCT_STATUS.ACTIVE,
         canDelete: deletable,
     };
 };
@@ -497,6 +503,43 @@ const prepareProductData = ({ imageUrl, ...productData }, { fillDefaults = false
 });
 
 /**
+ * Owner saves derive readiness from label facts, never a client status; photos are optional.
+ * A manual block survives ordinary edits until an Admin explicitly lifts it.
+ */
+const prepareOwnerCompliance = (product, requested, ownerId, checkedAt, current = null, photosChanged = false) => {
+    const facts = Object.fromEntries(COMPLIANCE_FACT_FIELDS
+        .filter((field) => Object.hasOwn(current || {}, field))
+        .map((field) => [field, current[field]]));
+    for (const field of COMPLIANCE_FACT_FIELDS) {
+        if (Object.hasOwn(requested || {}, field)) facts[field] = requested[field];
+    }
+    if (photosChanged && !Object.hasOwn(requested || {}, 'evidenceUrls')) {
+        facts.evidenceUrls = product.imageUrls || [];
+    } else if (!facts.evidenceUrls?.length) {
+        facts.evidenceUrls = product.imageUrls || [];
+    }
+    if (current?.complianceStatus === PRODUCT_COMPLIANCE_STATUS.BLOCKED) {
+        return {
+            ...facts,
+            complianceStatus: PRODUCT_COMPLIANCE_STATUS.BLOCKED,
+            checkedBy: current.checkedBy,
+            checkedAt: current.checkedAt,
+            reviewNote: current.reviewNote,
+            updatedAt: checkedAt,
+        };
+    }
+    const ready = isInventoryProductReviewable({ ...product, compliance: facts });
+    return {
+        ...facts,
+        complianceStatus: ready ? PRODUCT_COMPLIANCE_STATUS.REVIEWED : PRODUCT_COMPLIANCE_STATUS.DRAFT,
+        checkedBy: ready ? ownerId : null,
+        checkedAt: ready ? checkedAt : null,
+        reviewNote: ready ? messages.INVENTORY.AUTO_REVIEW_NOTE : null,
+        updatedAt: checkedAt,
+    };
+};
+
+/**
  * Create a product after checking farm ownership and name/unit uniqueness.
  * Keep the checks and insert in one serializable transaction.
  */
@@ -514,10 +557,7 @@ const createProduct = async (farmId, productData, ownerId) => {
                     ...data,
                     farmId,
                     compliance: {
-                        create: {
-                            ...compliance,
-                            complianceStatus: 'draft',
-                        },
+                        create: prepareOwnerCompliance(data, compliance, ownerId, new Date()),
                     },
                 },
                 select: PRODUCT_SELECT,
@@ -610,6 +650,7 @@ const updateProduct = async (farmId, productId, productData, ownerId) => {
                 }
 
                 const updateData = prepareProductData(requestedData);
+                const updatedAt = new Date(Math.max(Date.now(), current.updatedAt.getTime() + 1));
                 const result = await transaction.product.updateMany({
                     where: {
                         id: productId,
@@ -618,26 +659,25 @@ const updateProduct = async (farmId, productId, productData, ownerId) => {
                     },
                     data: {
                         ...updateData,
-                        updatedAt: new Date(),
+                        updatedAt,
                     },
                 });
                 if (result.count !== 1) {
                     throw new ApiError(httpStatus.CONFLICT, messages.INVENTORY.CHANGE_CONFLICT);
                 }
                 if (compliance !== undefined || identityFields.some((field) => productFieldChanged(current, requestedData, field))) {
+                    const complianceData = prepareOwnerCompliance(
+                        merged, compliance, ownerId, updatedAt, current.compliance,
+                        productFieldChanged(current, requestedData, 'imageUrls')
+                            || productFieldChanged(current, requestedData, 'imageUrl'),
+                    );
                     await transaction.productCompliance.upsert({
                         where: { productId },
                         create: {
-                            ...compliance,
+                            ...complianceData,
                             productId,
-                            complianceStatus: 'draft',
                         },
-                        update: {
-                            ...compliance,
-                            complianceStatus: 'draft',
-                            checkedBy: null,
-                            checkedAt: null,
-                        },
+                        update: complianceData,
                     });
                 }
                 return transaction.product.findUnique({
@@ -654,14 +694,84 @@ const updateProduct = async (farmId, productId, productData, ownerId) => {
 };
 
 /**
+ * Admin review reads are explicit V2 operations, never inferred from legacy facts.
+ */
+const getProductsForReview = async ({ page, limit, complianceStatus, farmId }) => {
+    const where = {
+        ...(farmId && { farmId }),
+        compliance: { is: { complianceStatus } },
+    };
+    const [products, totalResults] = await Promise.all([
+        prisma.product.findMany({
+            where,
+            select: productWithBalancesSelect,
+            orderBy: [{ updatedAt: 'asc' }, { id: 'asc' }],
+            skip: (page - 1) * limit,
+            take: limit,
+        }),
+        prisma.product.count({ where }),
+    ]);
+    return {
+        products: products.map((product) => normalizeProduct(product)),
+        meta: { page, limit, totalResults, totalPages: Math.ceil(totalResults / limit) },
+    };
+};
+
+const getProductForReview = async (productId) => {
+    const product = await prisma.product.findUnique({ where: { id: productId }, select: productWithBalancesSelect });
+    if (!product) throw ApiError.notFound(messages.INVENTORY.PRODUCT_NOT_FOUND);
+    return normalizeProduct(product);
+};
+
+/**
+ * Share the product lock with Owner edits and execution so review applies to exact label facts.
+ * Review changes also advance the product version, invalidating stale edits and reviews.
+ */
+const reviewProductCompliance = async (productId, input, reviewerId) => {
+    const { expectedUpdatedAt, complianceStatus, reviewNote } = input;
+    try {
+        const product = await prisma.$transaction(async (tx) => {
+            await tx.$queryRaw`SELECT id FROM products WHERE id = ${productId}::uuid FOR UPDATE`;
+            const current = await tx.product.findUnique({ where: { id: productId }, select: PRODUCT_SELECT });
+            if (!current) throw ApiError.notFound(messages.INVENTORY.PRODUCT_NOT_FOUND);
+            requireActiveProduct(current);
+            if (!current.compliance || current.compliance.complianceStatus === complianceStatus) {
+                throw ApiError.conflict(messages.INVENTORY.REVIEW_STATE_CONFLICT);
+            }
+            if (complianceStatus === PRODUCT_COMPLIANCE_STATUS.REVIEWED) {
+                requireCompleteInventoryProduct(current);
+                if (!isInventoryProductReviewable(current)) {
+                    throw ApiError.badRequest(messages.INVENTORY.REVIEW_FACTS_REQUIRED);
+                }
+            }
+            const checkedAt = new Date(Math.max(Date.now(), current.updatedAt.getTime() + 1));
+            const changed = await tx.product.updateMany({
+                where: { id: productId, updatedAt: versionRange(expectedUpdatedAt) },
+                data: { updatedAt: checkedAt },
+            });
+            if (changed.count !== 1) throw ApiError.conflict(messages.INVENTORY.CHANGE_CONFLICT);
+            const reviewed = await tx.productCompliance.updateMany({
+                where: { productId, complianceStatus: current.compliance.complianceStatus },
+                data: { complianceStatus, checkedBy: reviewerId, checkedAt, reviewNote, updatedAt: checkedAt },
+            });
+            if (reviewed.count !== 1) throw ApiError.conflict(messages.INVENTORY.CHANGE_CONFLICT);
+            return tx.product.findUnique({ where: { id: productId }, select: productWithBalancesSelect });
+        }, { isolationLevel: 'Serializable' });
+        return normalizeProduct(product);
+    } catch (error) {
+        return mapWriteError(error);
+    }
+};
+
+/**
  * Set an owned product inactive without removing stock or cancelling existing schedules.
  */
-const archiveProduct = (farmId, productId, ownerId) => changeStatus(farmId, productId, ownerId, 'INACTIVE');
+const archiveProduct = (farmId, productId, ownerId) => changeStatus(farmId, productId, ownerId, PRODUCT_STATUS.INACTIVE);
 
 /**
  * Resume an owned product; inactive rows have retained their name/unit identity.
  */
-const restoreProduct = (farmId, productId, ownerId) => changeStatus(farmId, productId, ownerId, 'ACTIVE');
+const restoreProduct = (farmId, productId, ownerId) => changeStatus(farmId, productId, ownerId, PRODUCT_STATUS.ACTIVE);
 
 /**
  * V2 status changes never erase stock, references or historical evidence.
@@ -720,7 +830,7 @@ const hasProductUsage = async (client, productId) => {
         client.inventoryTransaction.count({ where: { productId } }),
         client.inventoryBalance.count({ where: { productId } }),
         client.operationSchedule.count({ where: { productId } }),
-        client.protocolItem.count({ where: { productId, protocol: { status: { not: 'DRAFT' } } } }),
+        client.protocolItem.count({ where: { productId, protocol: { status: { not: PROTOCOL_STATUS.DRAFT } } } }),
         client.operationExecution.count({
             where: {
                 OR: [{ actualProductId: productId }, {
@@ -1309,6 +1419,9 @@ const getInventoryHistory = async (farmId, ownerId, query) => {
 };
 
 module.exports = {
+    getProductsForReview: legacyRead.guardWrite(getProductsForReview),
+    getProductForReview: legacyRead.guardWrite(getProductForReview),
+    reviewProductCompliance: legacyRead.guardWrite(reviewProductCompliance),
     getProducts: async (...args) => (await legacyRead.isV2() ? getProducts : legacyRead.getProducts)(...args),
     getProduct: async (...args) => (await legacyRead.isV2() ? getProduct : legacyRead.getProduct)(...args),
     createProduct: legacyRead.guardWrite(createProduct),

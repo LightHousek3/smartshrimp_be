@@ -8,6 +8,10 @@ const {
     INVENTORY_TRANSACTION_TYPE,
     PRODUCT_STOCK_STATUS,
     PRODUCT_ARCHIVE_STATUS,
+    PRODUCT_COMPLIANCE_STATUS,
+    PRODUCT_REGULATORY_TYPE,
+    INVENTORY_LIMITS,
+    messages,
 } = require('../constants');
 
 const uuid = Joi.string().uuid({ version: 'uuidv4' });
@@ -56,7 +60,7 @@ const expiryDate = Joi.string().pattern(/^\d{4}-\d{2}-\d{2}$/u).custom((value, h
     if (!Number.isFinite(date.getTime()) || date.toISOString().slice(0, 10) !== value) {
         return helpers.error('any.invalid');
     }
-    return value >= today ? value : helpers.message({ custom: 'Hạn sử dụng không được trong quá khứ' });
+    return value >= today ? value : helpers.message({ custom: messages.INVENTORY.EXPIRY_IN_PAST });
 });
 
 const farmParams = Joi.object({ farmId: uuid.required() });
@@ -78,7 +82,7 @@ const productFields = {
     recommendationReason: Joi.string().trim().max(500)
         .allow('', null),
     compliance: Joi.object({
-        regulatoryType: Joi.string().valid('unclassified', 'feed', 'environment', 'dual_purpose', 'medicine'),
+        regulatoryType: Joi.string().valid(...Object.values(PRODUCT_REGULATORY_TYPE)),
         registrationNumber: Joi.string().trim().min(1)
             .max(100)
             .allow(null),
@@ -114,12 +118,12 @@ const validateConversion = (value, helpers) => {
 
     if (packaged && (!hasQuantity || !hasUnit)) {
         return helpers.message({
-            custom: 'conversionQuantity and conversionUnit are required for PACK and BOTTLE',
+            custom: messages.INVENTORY.CONVERSION_REQUIRED,
         });
     }
     if (!packaged && (hasQuantity || hasUnit)) {
         return helpers.message({
-            custom: 'conversionQuantity and conversionUnit are only allowed for PACK and BOTTLE',
+            custom: messages.INVENTORY.CONVERSION_NOT_ALLOWED,
         });
     }
     return value;
@@ -151,7 +155,7 @@ const getProducts = {
 
 /**
  * Require catalog identity and essential label facts before creation.
- * Notes and images remain optional; packaged units require both conversion fields.
+ * Photos and evidence are optional; packaged units require both conversion fields.
  */
 const createProduct = {
     params: farmParams,
@@ -163,7 +167,8 @@ const createProduct = {
         unit: Joi.string().valid(...Object.values(PRODUCT_UNIT)).required(),
         minAlertQuantity: nonnegativeQuantity.required(),
         compliance: productFields.compliance.keys({
-            regulatoryType: Joi.string().valid('feed', 'environment', 'dual_purpose', 'medicine').required(),
+            regulatoryType: Joi.string().valid(...Object.values(PRODUCT_REGULATORY_TYPE)
+                .filter((type) => type !== PRODUCT_REGULATORY_TYPE.UNCLASSIFIED)).required(),
             registrationNumber: Joi.string().trim().min(1).max(100).required(),
             ingredientsText: Joi.string().trim().min(1).max(50000).required(),
             usageInstructions: Joi.string().trim().min(1).max(50000).required(),
@@ -274,6 +279,24 @@ const getInventoryHistory = {
 };
 
 module.exports = {
+    getProductsForReview: {
+        query: Joi.object({
+            page: Joi.number().integer().min(1).default(1),
+            limit: Joi.number().integer().min(1).max(100).default(10),
+            farmId: uuid,
+            complianceStatus: Joi.string().valid(...Object.values(PRODUCT_COMPLIANCE_STATUS))
+                .default(PRODUCT_COMPLIANCE_STATUS.DRAFT),
+        }),
+    },
+    getProductForReview: { params: Joi.object({ productId: uuid.required() }) },
+    reviewProductCompliance: {
+        params: Joi.object({ productId: uuid.required() }),
+        body: Joi.object({
+            expectedUpdatedAt: Joi.date().iso().required(),
+            complianceStatus: Joi.string().valid(PRODUCT_COMPLIANCE_STATUS.REVIEWED, PRODUCT_COMPLIANCE_STATUS.BLOCKED).required(),
+            reviewNote: Joi.string().trim().min(1).max(INVENTORY_LIMITS.REVIEW_NOTE_MAX_LENGTH).required(),
+        }),
+    },
     getProducts,
     /**
      * Validate product navigation IDs before checking the authenticated owner's scope.
