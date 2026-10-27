@@ -25,6 +25,10 @@ const ragClientService = require('./ragClient.service');
 const ragStorageService = require('./ragStorage.service');
 
 const protocolService = require('./protocol.service');
+const inventoryService = require('./inventory.service');
+const inventoryHistoryOptionsService = require('./inventoryHistoryOptions.service');
+const inventoryLegacyReadService = require('./inventoryLegacyRead.service');
+const supplierService = require('./supplier.service');
 
 module.exports = {
     protocolService,
@@ -49,19 +53,10 @@ module.exports = {
     waterLogService,
     shrimpHealthService,
     operationService,
-    // Resolve linked inventory services after index initialization to avoid circular imports.
-    get inventoryService() {
-        return require('./inventory.service');
-    },
-    get inventoryHistoryOptionsService() {
-        return require('./inventoryHistoryOptions.service');
-    },
-    get inventoryLegacyReadService() {
-        return require('./inventoryLegacyRead.service');
-    },
-    get supplierService() {
-        return require('./supplier.service');
-    },
+    inventoryService,
+    inventoryHistoryOptionsService,
+    inventoryLegacyReadService,
+    supplierService,
     notificationNavigationService,
     taskService,
     harvestService,

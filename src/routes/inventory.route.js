@@ -119,7 +119,7 @@ router.post(
 
 /**
  * @route   POST /api/v1/owner/farms/:farmId/products/:productId/restore
- * @desc    Resume an inactive product after checking name and unit uniqueness
+ * @desc    Resume an inactive product retaining its reserved name and unit
  * @access  Owner
  */
 router.post(

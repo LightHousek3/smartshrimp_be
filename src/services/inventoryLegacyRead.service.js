@@ -1,11 +1,9 @@
 const { Prisma } = require('@prisma/client');
 const prisma = require('../config/prisma');
 const { ApiError } = require('../utils');
-const {
-    inventoryHistoryOptionsService: { getHistoryOptions },
-} = require('./index');
+const { httpStatus, messages, INVENTORY_LIMITS } = require('../constants');
+const { getHistoryOptions } = require('./inventoryHistoryOptions.service');
 
-const READ_ONLY_MESSAGE = 'Kho hiện chỉ hỗ trợ xem dữ liệu. Cần đồng bộ dữ liệu kho trước khi cập nhật.';
 let modePromise;
 let modeExpires = 0;
 
@@ -14,7 +12,7 @@ let modeExpires = 0;
  */
 const isV2 = () => {
     if (!modePromise || Date.now() >= modeExpires) {
-        modeExpires = Date.now() + 30000;
+        modeExpires = Date.now() + INVENTORY_LIMITS.SCHEMA_CACHE_MS;
         modePromise = prisma.$queryRaw`SELECT
             EXISTS (SELECT 1 FROM information_schema.columns WHERE table_schema=current_schema() AND table_name='products' AND column_name='manufacturer_id')
             AND EXISTS (SELECT 1 FROM information_schema.columns WHERE table_schema=current_schema() AND table_name='suppliers' AND column_name='owner_id')
@@ -33,7 +31,7 @@ const isV2 = () => {
  */
 const requireV2 = async () => {
     if (!await isV2()) {
-        throw new ApiError(409, READ_ONLY_MESSAGE);
+        throw new ApiError(httpStatus.CONFLICT, messages.INVENTORY.READ_ONLY);
     }
 };
 
@@ -58,7 +56,7 @@ const flags = {
 const requireFarm = async (farmId, ownerId) => {
     const [farm] = await prisma.$queryRaw`SELECT id, name FROM farms f WHERE id=${farmId}::uuid AND owner_id=${ownerId}::uuid AND COALESCE(to_jsonb(f)->>'is_deleted','false') <> 'true'`;
     if (!farm) {
-        throw new ApiError(404, 'Không tìm thấy trang trại.');
+        throw new ApiError(httpStatus.NOT_FOUND, messages.INVENTORY.FARM_NOT_FOUND);
     }
     return farm;
 };
@@ -160,7 +158,7 @@ const getProduct = async (farmId, productId, ownerId) => {
     const farm = await requireFarm(farmId, ownerId);
     const [row] = await productRows(farmId, ownerId, productId);
     if (!row) {
-        throw new ApiError(404, 'Không tìm thấy vật tư.');
+        throw new ApiError(httpStatus.NOT_FOUND, messages.INVENTORY.PRODUCT_NOT_FOUND);
     }
     return {
         ...productDto(row.product, row.balances.map(balanceDto), true),
@@ -221,7 +219,7 @@ const getSupplier = async (farmId, supplierId, ownerId) => {
     await requireFarm(farmId, ownerId);
     const [row] = await supplierRows(ownerId, supplierId);
     if (!row) {
-        throw new ApiError(404, 'Không tìm thấy nhà cung cấp.');
+        throw new ApiError(httpStatus.NOT_FOUND, messages.SUPPLIER.NOT_FOUND);
     }
     const receipts = await prisma.$queryRaw`SELECT b.id,b.product_id AS "productId",p.name AS "productName",p.farm_id AS "farmId",f.name AS "farmName",
         b.lot_number AS "lotNumber",b.received_at AS "receivedAt",b.quantity::text AS "quantityExact",p.unit::text AS unit
@@ -262,7 +260,7 @@ const getInventoryHistory = async (farmId, ownerId, query) => {
     if (cursor) {
         const [row] = await prisma.$queryRaw(Prisma.sql`SELECT t.created_at FROM inventory_transactions t JOIN products p ON p.id=t.product_id JOIN farms f ON f.id=p.farm_id WHERE ${filteredWhere} AND t.id=${cursor}::uuid`);
         if (!row) {
-            throw new ApiError(400, 'Con trỏ lịch sử kho không hợp lệ.');
+            throw new ApiError(httpStatus.BAD_REQUEST, messages.INVENTORY.INVALID_CURSOR);
         }
         after = Prisma.sql`AND (t.created_at,t.id)<(SELECT c.created_at,c.id FROM inventory_transactions c WHERE c.id=${cursor}::uuid)`;
     }

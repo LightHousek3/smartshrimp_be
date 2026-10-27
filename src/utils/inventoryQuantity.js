@@ -1,5 +1,8 @@
 const { Prisma } = require('@prisma/client');
-const { ApiError } = require('./index');
+const ApiError = require('./ApiError');
+const { messages, PRODUCT_UNIT, INVENTORY_LIMITS } = require('../constants');
+
+const packagedUnits = [PRODUCT_UNIT.PACK, PRODUCT_UNIT.BOTTLE];
 
 const units = {
     MG: {
@@ -30,27 +33,27 @@ const units = {
 const stockQuantity = (actual, sourceUnit, product) => {
     const quantity = new Prisma.Decimal(actual);
     if (!quantity.isFinite() || quantity.lte(0)) {
-        throw ApiError.badRequest('Số lượng thực dùng không hợp lệ');
+        throw ApiError.badRequest(messages.INVENTORY.INVALID_EXECUTION_QUANTITY);
     }
     let result = quantity;
     if (sourceUnit !== product.unit) {
         const source = units[sourceUnit];
-        const targetUnit = ['PACK', 'BOTTLE'].includes(product.unit) ? product.conversionUnit : product.unit;
+        const targetUnit = packagedUnits.includes(product.unit) ? product.conversionUnit : product.unit;
         const target = units[targetUnit];
         if (!source || !target || source.family !== target.family) {
-            throw ApiError.badRequest('Đơn vị thực dùng không quy đổi được sang đơn vị kho của vật tư');
+            throw ApiError.badRequest(messages.INVENTORY.INCOMPATIBLE_EXECUTION_UNIT);
         }
         result = quantity.mul(source.factor).div(target.factor);
-        if (['PACK', 'BOTTLE'].includes(product.unit)) {
+        if (packagedUnits.includes(product.unit)) {
             if (!product.conversionQuantity || new Prisma.Decimal(product.conversionQuantity).lte(0)) {
-                throw ApiError.badRequest('Vật tư chưa có quy cách quy đổi hợp lệ');
+                throw ApiError.badRequest(messages.INVENTORY.INVALID_CONVERSION);
             }
             result = result.div(product.conversionQuantity);
         }
     }
     result = result.toDecimalPlaces(9);
-    if (result.lte(0) || result.gt('99999999999.999999999')) {
-        throw ApiError.badRequest('Lượng quy đổi vượt giới hạn độ chính xác của kho');
+    if (result.lte(0) || result.gt(INVENTORY_LIMITS.MAX_BALANCE_QUANTITY)) {
+        throw ApiError.badRequest(messages.INVENTORY.CONVERTED_QUANTITY_LIMIT);
     }
     return result;
 };

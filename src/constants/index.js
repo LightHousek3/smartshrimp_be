@@ -166,9 +166,30 @@ const PRODUCT_ARCHIVE_STATUS = Object.freeze({
     ALL: 'ALL',
 });
 
+const PRODUCT_STATUS = Object.freeze({
+    ACTIVE: 'ACTIVE',
+    INACTIVE: 'INACTIVE',
+});
+
 const INVENTORY_LIMITS = Object.freeze({
     MAX_BALANCE_QUANTITY: '99999999999.999999999',
     MAX_TRANSACTION_AMOUNT: '9999999999999999.99',
+    SCHEMA_CACHE_MS: 30000,
+    REVIEW_NOTE_MAX_LENGTH: 5000,
+});
+
+const PRODUCT_COMPLIANCE_STATUS = Object.freeze({
+    DRAFT: 'draft',
+    REVIEWED: 'reviewed',
+    BLOCKED: 'blocked',
+});
+
+const PRODUCT_REGULATORY_TYPE = Object.freeze({
+    UNCLASSIFIED: 'unclassified',
+    FEED: 'feed',
+    ENVIRONMENT: 'environment',
+    DUAL_PURPOSE: 'dual_purpose',
+    MEDICINE: 'medicine',
 });
 
 const DOSE_BASIS = {
@@ -415,5 +436,8 @@ module.exports = {
     OWNER_INVENTORY_TRANSACTION_TYPES,
     PRODUCT_STOCK_STATUS,
     PRODUCT_ARCHIVE_STATUS,
+    PRODUCT_STATUS,
     INVENTORY_LIMITS,
+    PRODUCT_COMPLIANCE_STATUS,
+    PRODUCT_REGULATORY_TYPE,
 };

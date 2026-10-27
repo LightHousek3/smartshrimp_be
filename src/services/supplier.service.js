@@ -2,7 +2,7 @@ const { Prisma } = require('@prisma/client');
 const prisma = require('../config/prisma');
 const { ApiError } = require('../utils');
 const { httpStatus, messages } = require('../constants');
-const { inventoryLegacyReadService: legacyRead } = require('./index');
+const legacyRead = require('./inventoryLegacyRead.service');
 
 const SUPPLIER_SELECT = {
     id: true,

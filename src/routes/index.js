@@ -18,6 +18,7 @@ const shrimpHealthRoute = require('./shrimpHealth.route');
 const operationRoute = require('./operation.route');
 const protocolRoute = require('./protocol.route');
 const inventoryRoute = require('./inventory.route');
+const adminInventoryRoute = require('./adminInventory.route');
 const taskRoute = require('./task.route');
 const harvestRoute = require('./harvest.route');
 
@@ -29,6 +30,7 @@ const routes = [
     { path: '/me/rag', route: ragRoute },
     { path: '/auth', route: authRoute },
     { path: '/admin/accounts', route: adminAccountRoute },
+    { path: '/admin/inventory', route: adminInventoryRoute },
     { path: '/admin/rag/documents', route: adminRagDocumentRoute },
     { path: '/profile', route: profileRoute },
     { path: '/owner/farms', route: farmRoute },
