@@ -11,7 +11,7 @@ const HARVEST_ERROR_CODE = Object.freeze({
     VARIANCE_REASON_REQUIRED: 'HARVEST_VARIANCE_REASON_REQUIRED',
 });
 // Enable only after the v2 compliance/snapshot schema and legacy review are ready.
-const HARVEST_POLICY = Object.freeze({ withdrawalEnabled: process.env.HARVEST_WITHDRAWAL_ENABLED === 'true' });
+const HARVEST_POLICY = Object.freeze({ withdrawalEnabled: true });
 const HARVEST_LIMITS = Object.freeze({ noteMaxLength: 500, legacyNoteMaxLength: 5000 });
 
 // Advisory defaults, not harvest eligibility rules. Approximate months as 30 days.
@@ -131,7 +131,6 @@ const PRODUCT_UNIT = Object.freeze({
     ML: 'ML',
     PACK: 'PACK',
     BOTTLE: 'BOTTLE',
-    PCS: 'PCS',
 });
 
 const CONVERSION_UNIT = Object.freeze({
@@ -167,9 +166,30 @@ const PRODUCT_ARCHIVE_STATUS = Object.freeze({
     ALL: 'ALL',
 });
 
+const PRODUCT_STATUS = Object.freeze({
+    ACTIVE: 'ACTIVE',
+    INACTIVE: 'INACTIVE',
+});
+
 const INVENTORY_LIMITS = Object.freeze({
-    MAX_BALANCE_QUANTITY: '99999999999.999',
+    MAX_BALANCE_QUANTITY: '99999999999.999999999',
     MAX_TRANSACTION_AMOUNT: '9999999999999999.99',
+    SCHEMA_CACHE_MS: 30000,
+    REVIEW_NOTE_MAX_LENGTH: 5000,
+});
+
+const PRODUCT_COMPLIANCE_STATUS = Object.freeze({
+    DRAFT: 'draft',
+    REVIEWED: 'reviewed',
+    BLOCKED: 'blocked',
+});
+
+const PRODUCT_REGULATORY_TYPE = Object.freeze({
+    UNCLASSIFIED: 'unclassified',
+    FEED: 'feed',
+    ENVIRONMENT: 'environment',
+    DUAL_PURPOSE: 'dual_purpose',
+    MEDICINE: 'medicine',
 });
 
 const DOSE_BASIS = {
@@ -416,5 +436,8 @@ module.exports = {
     OWNER_INVENTORY_TRANSACTION_TYPES,
     PRODUCT_STOCK_STATUS,
     PRODUCT_ARCHIVE_STATUS,
+    PRODUCT_STATUS,
     INVENTORY_LIMITS,
+    PRODUCT_COMPLIANCE_STATUS,
+    PRODUCT_REGULATORY_TYPE,
 };

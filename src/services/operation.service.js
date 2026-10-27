@@ -1,7 +1,10 @@
 const crypto = require('crypto');
+const { Prisma } = require('@prisma/client');
 const prisma = require('../config/prisma');
-const { emitNotification } = require('../realtime/notification.socket');
-const { ApiError } = require('../utils');
+const { emitNotification } = require('../realtime');
+const {
+    ApiError, stockQuantity, vietnamDate, requireCompleteInventoryProduct,
+} = require('../utils');
 const withdrawal = require('./harvestWithdrawal.service');
 const {
     messages,
@@ -10,7 +13,6 @@ const {
     OPERATION_STATUS,
     OPERATION_TYPE,
     NOTIFICATION_TYPE,
-    HARVEST_POLICY,
 } = require('../constants');
 
 const toNumber = (val) => (val == null ? null : Number(val));
@@ -166,7 +168,6 @@ const listSchedules = async (technicianId, seasonId, query = {}) => {
                         mealNumber: true,
                         plannedTime: true,
                         instructions: true,
-                        recommendedProductName: true,
                         protocol: {
                             select: {
                                 id: true,
@@ -237,7 +238,23 @@ const getSchedule = async (technicianId, scheduleId) => {
                 },
             },
             protocolItem: {
-                include: {
+                select: {
+                    id: true,
+                    protocolId: true,
+                    operationType: true,
+                    productId: true,
+                    startDayOffset: true,
+                    endDayOffset: true,
+                    repeatIntervalDays: true,
+                    mealNumber: true,
+                    plannedTime: true,
+                    doseBasis: true,
+                    doseValue: true,
+                    doseUnit: true,
+                    instructions: true,
+                    sequenceOrder: true,
+                    createdAt: true,
+                    updatedAt: true,
                     protocol: {
                         select: {
                             id: true,
@@ -308,213 +325,143 @@ const getSchedule = async (technicianId, scheduleId) => {
  * UC-11: Ghi nhận thực hiện hoạt động
  */
 const executeSchedule = async (technicianId, scheduleId, payload) => {
-    // 1. Fetch schedule
-    const schedule = await prisma.operationSchedule.findUnique({
-        where: { id: scheduleId },
-        include: {
-            season: true,
-            protocolItem: { include: { protocol: true } },
-            product: true,
-        },
-    });
-
-    if (!schedule) {
-        throw ApiError.notFound(messages.OPERATION.NOT_FOUND);
+    const pointer = await prisma.operationSchedule.findUnique({ where: { id: scheduleId }, select: { seasonId: true } });
+    if (!pointer) throw ApiError.notFound(messages.OPERATION.NOT_FOUND);
+    const actual = new Prisma.Decimal(payload.actualQuantity);
+    if (!actual.isFinite() || actual.lte(0) || actual.decimalPlaces() > 9) {
+        throw ApiError.badRequest('Số lượng thực tế phải dương và tối đa 9 số thập phân');
     }
-
-    // 2. Verify technician assignment
-    const assignment = await prisma.seasonPersonnelAssignment.findFirst({
-        where: {
-            seasonId: schedule.seasonId,
-            accountId: technicianId,
-            role: PERSONNEL_ROLE.TECHNICIAN,
-            unassignedAt: null,
-        },
-    });
-    if (!assignment) {
-        throw ApiError.forbidden(messages.OPERATION.NOT_ASSIGNED_TECHNICIAN);
-    }
-
-    // 3. BR-OPS-01: Season must be ACTIVE
-    if (schedule.season.status !== SEASON_STATUS.ACTIVE) {
-        throw ApiError.badRequest(messages.OPERATION.SEASON_NOT_ACTIVE);
-    }
-
-    // 4. Idempotency check: if key already exists, return existing execution
-    if (payload.idempotencyKey) {
-        const existingExecution = await prisma.operationExecution.findUnique({
-            where: { idempotencyKey: payload.idempotencyKey },
-            include: {
-                actualProduct: { select: { id: true, name: true, unit: true } },
-            },
-        });
-        if (existingExecution) {
-            return existingExecution;
-        }
-    }
-
-    // 5. BR-OPS-03: Only PLANNED schedules can be executed
-    if (schedule.status !== OPERATION_STATUS.PLANNED) {
-        throw ApiError.conflict(messages.OPERATION.SCHEDULE_NOT_PLANNED);
-    }
-
-    // 6. BR-OPS-04: Variance check
-    const plannedQty = Number(schedule.plannedQuantity);
-    const actualQty = Number(payload.actualQuantity);
-    const allowedVariancePct = schedule.protocolItem?.protocol?.allowedVariancePct != null
-        ? Number(schedule.protocolItem.protocol.allowedVariancePct)
-        : 10;
-
-    const variancePct = plannedQty > 0 ? (Math.abs(actualQty - plannedQty) / plannedQty) * 100 : 0;
-    if (variancePct > allowedVariancePct && (!payload.varianceReason || payload.varianceReason.trim() === '')) {
-        throw ApiError.badRequest(messages.OPERATION.VARIANCE_REASON_REQUIRED);
-    }
-
-    // 7. Atomic transaction: FIFO inventory deduction + execution record + schedule completion
-    const targetProductId = payload.actualProductId || schedule.productId;
-
-    // Check inventory availability before transaction so notification is persistent if insufficient
-    if (targetProductId) {
-        const initialBalances = await prisma.inventoryBalance.findMany({
-            where: {
-                productId: targetProductId,
-                quantity: { gt: 0 },
-            },
-            select: { quantity: true },
-        });
-
-        const totalAvailable = initialBalances.reduce((sum, b) => sum + Number(b.quantity), 0);
-        if (totalAvailable < actualQty) {
-            const notif = await prisma.notification.create({
-                data: {
-                    accountId: technicianId,
-                    title: 'Tồn kho không đủ để thực hiện vận hành',
-                    content: `Không đủ tồn kho cho sản phẩm. Cần ${actualQty}, hiện có ${totalAvailable}.`,
-                    type: NOTIFICATION_TYPE.INVENTORY_INSUFFICIENT,
-                    referenceType: 'operation_schedule',
-                    referenceId: schedule.id,
-                },
-            });
-            emitNotification(technicianId, 'notification:new', {
-                id: notif?.id,
-                referenceId: schedule.id,
-            });
-            throw ApiError.badRequest(messages.OPERATION.INSUFFICIENT_INVENTORY);
-        }
-    }
-
-    return await prisma.$transaction(async (tx) => {
-        // Share the season lock with final harvest, then recheck status after any lock wait.
-        // This prevents execution and inventory writes after the season has completed.
-        await tx.$queryRaw`SELECT id FROM aquaculture_seasons WHERE id = ${schedule.seasonId}::uuid FOR UPDATE`;
-        const freshSeason = await tx.aquacultureSeason.findUnique({ where: { id: schedule.seasonId } });
-        if (!freshSeason || freshSeason.status !== SEASON_STATUS.ACTIVE) {
-            throw ApiError.badRequest(messages.OPERATION.SEASON_NOT_ACTIVE);
-        }
-        if (HARVEST_POLICY.withdrawalEnabled) {
-            await tx.$queryRaw`SELECT id FROM operation_schedules WHERE id = ${scheduleId}::uuid FOR UPDATE`;
-        }
-        // Re-check schedule status in transaction
-        const freshSchedule = await tx.operationSchedule.findUnique({
-            where: { id: scheduleId },
-        });
-        if (freshSchedule.status !== OPERATION_STATUS.PLANNED) {
-            throw ApiError.conflict(messages.OPERATION.SCHEDULE_NOT_PLANNED);
-        }
-        const executedAt = payload.executedAt ? new Date(payload.executedAt) : new Date();
-        const withdrawalDays = await withdrawal.prepareExecution(
-            tx, schedule.seasonId, targetProductId, schedule.operationType, executedAt,
-        );
-
-        // Deduct inventory if a product is linked
-        if (targetProductId) {
-            const balances = await tx.inventoryBalance.findMany({
-                where: {
-                    productId: targetProductId,
-                    quantity: { gt: 0 },
-                },
-                orderBy: [{ receivedAt: 'asc' }, { id: 'asc' }],
-            });
-
-            const totalAvailable = balances.reduce((sum, b) => sum + Number(b.quantity), 0);
-            if (totalAvailable < actualQty) {
-                throw ApiError.badRequest(messages.OPERATION.INSUFFICIENT_INVENTORY);
-            }
-
-            let remainingToDeduct = actualQty;
-            const txGroupId = crypto.randomUUID();
-
-            for (const balance of balances) {
-                if (remainingToDeduct <= 0) break;
-                const balQty = Number(balance.quantity);
-                const deduct = Math.min(balQty, remainingToDeduct);
-                const newBalQty = Number((balQty - deduct).toFixed(3));
-
-                await tx.inventoryBalance.update({
-                    where: { id: balance.id },
-                    data: { quantity: newBalQty },
-                });
-
-                await tx.inventoryTransaction.create({
-                    data: {
-                        transactionGroupId: txGroupId,
-                        productId: targetProductId,
-                        inventoryBalanceId: balance.id,
-                        seasonId: schedule.seasonId,
-                        transactionType: 'STOCK_OUT',
-                        quantity: deduct,
-                        unitSnapshot: schedule.unit,
-                        totalAmount: Number((deduct * Number(balance.unitPrice)).toFixed(2)),
-                        referenceType: 'operation_execution',
-                        referenceId: schedule.id,
-                        reason: payload.note || 'Xuất kho vận hành ao nuôi',
-                        performedBy: technicianId,
-                        idempotencyKey: crypto.randomUUID(),
+    for (let attempt = 0; attempt < 3; attempt++) {
+        try {
+            return await prisma.$transaction(async (tx) => {
+                // Shared order with harvest: season -> schedule -> actual product -> receipt layers.
+                await tx.$queryRaw`SELECT id FROM aquaculture_seasons WHERE id = ${pointer.seasonId}::uuid FOR UPDATE`;
+                await tx.$queryRaw`SELECT id FROM operation_schedules WHERE id = ${scheduleId}::uuid FOR UPDATE`;
+                const schedule = await tx.operationSchedule.findUnique({
+                    where: { id: scheduleId },
+                    include: {
+                        season: { include: { pond: { select: { farmId: true } } } },
+                        protocolItem: { select: { protocol: { select: { allowedVariancePct: true, protocolType: true, diseaseCaseId: true } } } },
                     },
                 });
-
-                remainingToDeduct -= deduct;
+                if (!schedule) throw ApiError.notFound(messages.OPERATION.NOT_FOUND);
+                const assignment = await tx.seasonPersonnelAssignment.findFirst({
+                    where: { seasonId: schedule.seasonId, accountId: technicianId, role: PERSONNEL_ROLE.TECHNICIAN, unassignedAt: null },
+                    select: { id: true },
+                });
+                if (!assignment) throw ApiError.forbidden(messages.OPERATION.NOT_ASSIGNED_TECHNICIAN);
+                const targetProductId = payload.actualProductId || schedule.productId;
+                if (!targetProductId) throw ApiError.badRequest(messages.HARVEST.WITHDRAWAL_PRODUCT_NOT_READY);
+                const existing = await tx.operationExecution.findUnique({
+                    where: { idempotencyKey: payload.idempotencyKey },
+                    include: { actualProduct: { select: { id: true, name: true, unit: true } } },
+                });
+                if (existing) {
+                    if (existing.scheduleId !== scheduleId || existing.executedBy !== technicianId
+                        || existing.actualProductId !== targetProductId || !actual.equals(existing.actualQuantity)
+                        || (payload.executedAt && existing.executedAt.getTime() !== new Date(payload.executedAt).getTime())
+                        || (existing.note || null) !== (payload.note || null)
+                        || (existing.varianceReason || null) !== (payload.varianceReason || null)) {
+                        throw ApiError.conflict(messages.OPERATION.EXECUTION_CONFLICT);
+                    }
+                    return { ...existing, actualQuantity: Number(existing.actualQuantity) };
+                }
+                if (schedule.season.status !== SEASON_STATUS.ACTIVE) throw ApiError.badRequest(messages.OPERATION.SEASON_NOT_ACTIVE);
+                if (schedule.status !== OPERATION_STATUS.PLANNED) throw ApiError.conflict(messages.OPERATION.SCHEDULE_NOT_PLANNED);
+                const protocol = schedule.protocolItem.protocol;
+                const planned = new Prisma.Decimal(schedule.plannedQuantity);
+                const variance = actual.minus(planned).abs().div(planned).mul(100);
+                if (variance.gt(protocol.allowedVariancePct ?? 10) && !payload.varianceReason?.trim()) {
+                    throw ApiError.badRequest(messages.OPERATION.VARIANCE_REASON_REQUIRED);
+                }
+                const executedAt = payload.executedAt ? new Date(payload.executedAt) : new Date();
+                const days = await withdrawal.prepareExecution(tx, schedule.seasonId, targetProductId, schedule.operationType, executedAt, protocol);
+                const executionId = crypto.randomUUID();
+                if (targetProductId) {
+                    await tx.$queryRaw`SELECT id FROM products WHERE id = ${targetProductId}::uuid FOR UPDATE`;
+                    const product = await tx.product.findFirst({
+                        where: { id: targetProductId, farmId: schedule.season.pond.farmId },
+                        include: { compliance: true },
+                    });
+                    if (!product) throw ApiError.badRequest(messages.HARVEST.WITHDRAWAL_PRODUCT_NOT_READY);
+                    if (product.status !== 'ACTIVE') throw ApiError.badRequest(messages.HARVEST.WITHDRAWAL_PRODUCT_NOT_READY);
+                    requireCompleteInventoryProduct(product);
+                    const requested = stockQuantity(actual, schedule.unit, product);
+                    const balances = await tx.inventoryBalance.findMany({
+                        where: { productId: targetProductId, quantity: { gt: 0 }, expiryDate: { gte: vietnamDate(executedAt) } },
+                        orderBy: [{ expiryDate: 'asc' }, { receivedAt: 'asc' }, { id: 'asc' }],
+                    });
+                    const available = balances.reduce((total, balance) => total.add(balance.quantity), new Prisma.Decimal(0));
+                    if (available.lt(requested)) throw ApiError.badRequest(messages.OPERATION.INSUFFICIENT_INVENTORY);
+                    let remaining = requested;
+                    const groupId = crypto.randomUUID();
+                    for (const balance of balances) {
+                        if (remaining.lte(0)) break;
+                        const deduction = Prisma.Decimal.min(remaining, balance.quantity);
+                        const changed = await tx.inventoryBalance.updateMany({
+                            where: { id: balance.id, productId: targetProductId, quantity: { gte: deduction } },
+                            data: { quantity: { decrement: deduction } },
+                        });
+                        if (changed.count !== 1) throw ApiError.conflict(messages.OPERATION.EXECUTION_CONFLICT);
+                        await tx.inventoryTransaction.create({
+                            data: {
+                                transactionGroupId: groupId,
+                                productId: targetProductId,
+                                inventoryBalanceId: balance.id,
+                                seasonId: schedule.seasonId,
+                                transactionType: 'STOCK_OUT',
+                                quantity: deduction,
+                                unitSnapshot: product.unit,
+                                totalAmount: deduction.mul(balance.unitPrice).toDecimalPlaces(2),
+                                referenceType: 'operation_execution',
+                                referenceId: executionId,
+                                reason: 'Xuất kho vận hành ao nuôi',
+                                performedBy: technicianId,
+                                idempotencyKey: crypto.randomUUID(),
+                            },
+                        });
+                        remaining = remaining.minus(deduction);
+                    }
+                }
+                const execution = await tx.operationExecution.create({
+                    data: {
+                        id: executionId,
+                        scheduleId,
+                        actualProductId: targetProductId,
+                        actualQuantity: actual,
+                        withdrawalDaysSnapshot: days,
+                        executedBy: technicianId,
+                        idempotencyKey: payload.idempotencyKey,
+                        executedAt,
+                        note: payload.note || null,
+                        varianceReason: payload.varianceReason || null,
+                    },
+                    include: { actualProduct: { select: { id: true, name: true, unit: true } } },
+                });
+                const completed = await tx.operationSchedule.updateMany({ where: { id: scheduleId, status: 'PLANNED' }, data: { status: 'COMPLETED' } });
+                if (completed.count !== 1) throw ApiError.conflict(messages.OPERATION.EXECUTION_CONFLICT);
+                return { ...execution, actualQuantity: Number(execution.actualQuantity) };
+            }, { isolationLevel: 'Serializable' });
+        } catch (error) {
+            const retryable = error.code === 'P2034'
+                || (error.code === 'P2010' && ['40001', '40P01'].includes(error.meta?.code));
+            if (retryable && attempt < 2) continue;
+            if (retryable || error.code === 'P2002') throw ApiError.conflict(messages.OPERATION.EXECUTION_CONFLICT);
+            if (error instanceof ApiError && error.message === messages.OPERATION.INSUFFICIENT_INVENTORY) {
+                const notice = await prisma.notification.create({ data: {
+                    accountId: technicianId,
+                    title: 'Tồn kho hợp lệ không đủ để thực hiện vận hành',
+                    content: 'Kiểm tra số lượng, hạn sử dụng và hồ sơ của vật tư trước khi thực hiện lại.',
+                    type: NOTIFICATION_TYPE.INVENTORY_INSUFFICIENT,
+                    referenceType: 'operation_schedule',
+                    referenceId: scheduleId,
+                } });
+                emitNotification(technicianId, 'notification:new', { id: notice.id, referenceId: scheduleId });
             }
+            throw error;
         }
-
-        // Create execution
-        const execution = await tx.operationExecution.create({
-            data: {
-                scheduleId: schedule.id,
-                actualProductId: targetProductId,
-                actualQuantity: actualQty,
-                executedBy: technicianId,
-                idempotencyKey: payload.idempotencyKey,
-                executedAt,
-                note: payload.note || null,
-                varianceReason: payload.varianceReason || null,
-            },
-            include: {
-                actualProduct: {
-                    select: { id: true, name: true, unit: true },
-                },
-            },
-        });
-
-        await withdrawal.saveSnapshot(tx, execution.id, withdrawalDays);
-
-        // Complete schedule
-        await tx.operationSchedule.update({
-            where: { id: schedule.id },
-            data: { status: OPERATION_STATUS.COMPLETED },
-        });
-
-        return {
-            ...execution,
-            actualQuantity: toNumber(execution.actualQuantity),
-        };
-    }, HARVEST_POLICY.withdrawalEnabled ? { isolationLevel: 'Serializable' } : undefined).catch((error) => {
-        if (HARVEST_POLICY.withdrawalEnabled && (['P2002', 'P2034'].includes(error.code)
-            || (error.code === 'P2010' && ['23505', '40001', '40P01'].includes(error.meta?.code)))) {
-            throw ApiError.conflict(messages.OPERATION.EXECUTION_CONFLICT);
-        }
-        throw error;
-    });
+    }
+    throw ApiError.conflict(messages.OPERATION.EXECUTION_CONFLICT);
 };
 
 /**

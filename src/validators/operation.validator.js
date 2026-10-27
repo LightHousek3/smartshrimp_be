@@ -32,8 +32,8 @@ const executeSchedule = {
         }),
         actualProductId: Joi.string().uuid({ version: 'uuidv4' }).allow(null),
         executedAt: Joi.date().iso(),
-        note: Joi.string().trim().max(1000).allow('', null),
-        varianceReason: Joi.string().trim().max(1000).allow('', null),
+        note: Joi.string().trim().max(500).allow('', null),
+        varianceReason: Joi.string().trim().max(500).allow('', null),
         idempotencyKey: Joi.string().uuid({ version: 'uuidv4' }).required().messages({
             'string.guid': 'Mã idempotency_key phải là UUID hợp lệ',
             'any.required': 'Mã idempotency_key là bắt buộc',

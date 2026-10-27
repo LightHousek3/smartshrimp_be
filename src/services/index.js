@@ -15,8 +15,6 @@ const expertProductionProtocolService = require('./expertProductionProtocol.serv
 const waterLogService = require('./waterLog.service');
 const shrimpHealthService = require('./shrimpHealth.service');
 const operationService = require('./operation.service');
-const inventoryService = require('./inventory.service');
-const supplierService = require('./supplier.service');
 const notificationNavigationService = require('./notificationNavigation.service');
 const taskService = require('./task.service');
 const harvestService = require('./harvest.service');
@@ -27,6 +25,10 @@ const ragClientService = require('./ragClient.service');
 const ragStorageService = require('./ragStorage.service');
 
 const protocolService = require('./protocol.service');
+const inventoryService = require('./inventory.service');
+const inventoryHistoryOptionsService = require('./inventoryHistoryOptions.service');
+const inventoryLegacyReadService = require('./inventoryLegacyRead.service');
+const supplierService = require('./supplier.service');
 
 module.exports = {
     protocolService,
@@ -52,6 +54,8 @@ module.exports = {
     shrimpHealthService,
     operationService,
     inventoryService,
+    inventoryHistoryOptionsService,
+    inventoryLegacyReadService,
     supplierService,
     notificationNavigationService,
     taskService,

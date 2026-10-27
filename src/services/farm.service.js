@@ -9,6 +9,8 @@ const {
 
 const OPEN_SEASON_STATUSES = ['PLANNING', 'ACTIVE'];
 
+// Farm screens do not consume the master status field. Keep this projection
+// compatible with both the existing PostgreSQL enum and V2 varchar schema.
 const FARM_SELECT = {
     id: true,
     ownerId: true,
@@ -141,8 +143,11 @@ const normalizeFarmSummary = (farm, { includePonds = false } = {}) => {
  * List only the authenticated owner’s farms with deterministic ordering and derived summaries.
  */
 const getListFarm = async (ownerId) => {
+    const visible = await prisma.$queryRaw`SELECT id FROM farms f WHERE owner_id=${ownerId}::uuid
+        AND COALESCE(to_jsonb(f)->>'is_deleted','false') <> 'true'`;
+    if (visible.length === 0) return [];
     const farms = await prisma.farm.findMany({
-        where: { ownerId },
+        where: { ownerId, id: { in: visible.map((farm) => farm.id) } },
         select: FARM_LIST_SELECT,
         orderBy: [{ createdAt: 'desc' }, { id: 'desc' }],
     });
