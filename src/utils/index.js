@@ -6,8 +6,22 @@ const { createDocumentError, getDocumentErrorCode } = require('./ragDocumentErro
 const { setRefreshTokenCookie, clearRefreshTokenCookie } = require('./refreshTokenCookie');
 const { requireCompleteInventoryProduct, isInventoryProductReviewable } = require('./inventoryProductReadiness');
 const { stockQuantity, vietnamDate } = require('./inventoryQuantity');
+const { assertTemplateDose } = require('./protocolTemplateRules');
+const { applicationRuns } = require('./templateApplicationDays');
+const {
+    getMaterialSafety,
+    assertMaterialSafety,
+    assessTemplateProposal,
+    productFromRecommendation,
+} = require('./materialCompliance');
 
 module.exports = {
+    assertTemplateDose,
+    applicationRuns,
+    getMaterialSafety,
+    assertMaterialSafety,
+    assessTemplateProposal,
+    productFromRecommendation,
     ApiError,
     asyncHandler,
     pick,

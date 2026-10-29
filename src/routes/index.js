@@ -17,15 +17,19 @@ const waterLogRoute = require('./waterLog.route');
 const shrimpHealthRoute = require('./shrimpHealth.route');
 const operationRoute = require('./operation.route');
 const protocolRoute = require('./protocol.route');
+const expertProtocolTemplateRoute = require('./expertProtocolTemplate.route');
 const inventoryRoute = require('./inventory.route');
 const adminInventoryRoute = require('./adminInventory.route');
 const taskRoute = require('./task.route');
+const assignedTaskRoute = require('./assignedTask.route');
 const harvestRoute = require('./harvest.route');
 
 const router = express.Router();
 
 const routes = [
+    { path: '/expert/protocol-templates', route: expertProtocolTemplateRoute },
     { path: '/owner/tasks', route: taskRoute },
+    { path: '/me/tasks', route: assignedTaskRoute },
     { path: '/owner/protocols', route: protocolRoute },
     { path: '/me/rag', route: ragRoute },
     { path: '/auth', route: authRoute },

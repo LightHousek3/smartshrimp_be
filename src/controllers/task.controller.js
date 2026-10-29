@@ -62,4 +62,23 @@ const cancel = asyncHandler(async (req, res) => {
     });
 });
 
-module.exports = { list, options, detail, create, update, cancel };
+/** GET /me/tasks: list only the authenticated technician's assignments. */
+const assignedList = asyncHandler(async (req, res) => {
+    const { tasks, meta } = await taskService.listAssignedTasks(req.account.id, req.query);
+    ResponseHandler.paginated(res, { data: tasks, meta, message: messages.TASK.LIST_FETCHED });
+});
+
+/** GET /me/tasks/:taskId: return assignment and execution facts. */
+const assignedDetail = asyncHandler(async (req, res) => {
+    ResponseHandler.success(res, { data: await taskService.getAssignedTask(req.account.id, req.params.taskId) });
+});
+
+/** PATCH /me/tasks/:taskId/status: server records the execution timestamp. */
+const progress = asyncHandler(async (req, res) => {
+    ResponseHandler.success(res, {
+        data: await taskService.updateAssignedTaskStatus(req.account.id, req.params.taskId, req.body),
+        message: req.body.status === 'IN_PROGRESS' ? messages.TASK.STARTED : messages.TASK.COMPLETED,
+    });
+});
+
+module.exports = { list, options, detail, create, update, cancel, assignedList, assignedDetail, progress };
