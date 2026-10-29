@@ -22,6 +22,14 @@ module.exports = {
         limit: Joi.number().integer().min(1).max(100).default(20),
     }) },
     detail: { params },
+    assignedList: { query: Joi.object({
+        group: Joi.string().valid('TODO', 'ENDED').default('TODO'),
+        page: Joi.number().integer().min(1).max(1000000).default(1),
+        limit: Joi.number().integer().min(1).max(100).default(20),
+    }) },
+    progress: { params, body: Joi.object({
+        status: Joi.string().valid('IN_PROGRESS', 'COMPLETED').required(),
+    }) },
     options: { query: Joi.object({ farmId: uuid }) },
     create: { body: Joi.object({ ...fields, title: fields.title.required(),
         priority: fields.priority.required(), farmId: uuid.required(), dueAt: fields.dueAt.required(),
