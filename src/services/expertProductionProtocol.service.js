@@ -1,3 +1,6 @@
+const {
+    ProductionProtocolTemplateStatus: TemplateStatus,
+} = require('@prisma/client');
 const { createHash } = require('crypto');
 const prisma = require('../config/prisma');
 const logger = require('../config/logger');
@@ -560,12 +563,12 @@ const persistGraph = async (tx, protocolId, stages, current) => {
 };
 const templateWhere = (season) => ({
     farmId: season.pond.farm.id,
-    archivedAt: null,
-    isDeleted: false,
+    // Only active templates are eligible for new selections; existing snapshots remain independent.
+    status: TemplateStatus.active,
     OR: [{ shrimpType: null }, { shrimpType: season.shrimpType }],
 });
 
-/** Newly selected templates must remain available, same-farm and compatible with the species. */
+/** Scope the selection first, then block every entry point until applied protocols support V2 snapshots. */
 const requireTemplate = async (tx, season, templateId) => {
     const template = await tx.productionProtocolTemplate.findFirst({
         where: {
@@ -576,7 +579,7 @@ const requireTemplate = async (tx, season, templateId) => {
     if (!template) {
         throw ApiError.notFound(messages.PRODUCTION_PROTOCOL.TEMPLATE_NOT_FOUND);
     }
-    return template;
+    throw ApiError.conflict(messages.PRODUCTION_PROTOCOL.TEMPLATE_V2_APPLICATION_UNAVAILABLE);
 };
 
 /** List eligible template headers without loading their item graphs. */
@@ -611,76 +614,26 @@ const templates = (accountId, seasonId, {
     return {
         data: rows.map((row) => ({
             ...row,
+            canApply: false,
             allowedVariancePct: String(row.allowedVariancePct),
         })),
         meta: {
             page,
             limit,
             totalResults,
+            applicationMessage: messages.PRODUCTION_PROTOCOL.TEMPLATE_V2_APPLICATION_UNAVAILABLE,
         },
     };
 });
 
 /**
- * Convert a scoped template to editor content without reusing persistent template identities.
- * Unavailable products become named suggestions; unsupported time precision rejects the load.
+ * The current applied-protocol editor still uses the pre-V2 material contract.
+ * Reject application until it can retain proposal evidence, manufacturer identity,
+ * linear feed doses and independent recurrence anchors through Owner approval.
  */
 const templateDetail = (accountId, seasonId, templateId) => transaction(async (tx) => {
     const season = await scope(tx, accountId, seasonId);
-    const template = await requireTemplate(tx, season, templateId);
-    // The existing template-item table has no baseline Prisma delegate. Read its
-    // scalar columns explicitly without adding a model or changing the database.
-    const rows = await tx.$queryRaw`SELECT id, operation_type::text AS "operationType", product_id AS "productId",
-        recommended_product_name AS "recommendedProductName", recommended_category::text AS "recommendedCategory",
-        start_day_of_culture AS "startDayOffset", end_day_of_culture AS "endDayOffset",
-        repeat_interval_days AS "repeatIntervalDays",
-        meal_number AS "mealNumber", planned_time::text AS "plannedTime", dose_basis::text AS "doseBasis",
-        dose_value::text AS "doseValue", dose_unit::text AS "doseUnit", instructions, sequence_order AS "sequenceOrder"
-        FROM production_protocol_template_items WHERE template_id = ${templateId}::uuid ORDER BY sequence_order, id`;
-    const products = await tx.product.findMany({
-        where: {
-            farmId: season.pond.farm.id,
-            id: { in: rows.map((row) => row.productId).filter(Boolean) },
-        },
-        select: PRODUCT_SELECT,
-    });
-    const byId = new Map(products.map((product) => [product.id, product]));
-    const items = rows.map((row) => {
-        if (row.plannedTime && !/^\d{2}:\d{2}:\d{2}(?:\.\d{1,3})?$/.test(row.plannedTime)) {
-            throw ApiError.conflict(messages.PRODUCTION_PROTOCOL.TEMPLATE_INVALID);
-        }
-        const product = byId.get(row.productId);
-        const name = row.recommendedProductName || product?.name;
-        if (!name) {
-            throw ApiError.conflict(messages.PRODUCTION_PROTOCOL.TEMPLATE_INVALID);
-        }
-        return {
-            ...row,
-            operationType: row.operationType.toUpperCase(),
-            doseBasis: row.doseBasis.toUpperCase(),
-            doseUnit: row.doseUnit.toUpperCase(),
-            recommendedCategory: row.recommendedCategory?.toUpperCase() || null,
-            productId: product?.status === 'ACTIVE' ? product.id : null,
-            recommendedProductName: name,
-            plannedTime: plannedTime(row.plannedTime),
-        };
-    });
-    return {
-        id: template.id,
-        title: template.title,
-        summary: template.description,
-        allowedVariancePct: String(template.allowedVariancePct),
-        rollingWindowDays: 7,
-        stages: groupItems(items).map((stage) => ({
-            startDayOffset: stage.startDayOffset,
-            endDayOffset: stage.endDayOffset,
-            meals: stage.meals.map((meal) => ({
-                mealNumber: meal.mealNumber,
-                plannedTime: meal.plannedTime,
-                items: meal.items.map(copyItem),
-            })),
-        })),
-    };
+    return requireTemplate(tx, season, templateId);
 });
 
 /**
@@ -726,7 +679,9 @@ const submitCurrent = async (tx, season, accountId, current, notifications) => {
             accountId: ownerId,
             type: NOTIFICATION_TYPE.PRODUCTION_PROTOCOL_PENDING,
             title: messages.PRODUCTION_PROTOCOL.PENDING_NOTIFICATION_TITLE,
-            content: `Phác đồ "${current.title}" (v${current.versionNo}) của vụ ${season.name}, ao ${season.pond.name}, trang trại ${season.pond.farm.name} đang chờ chủ trại duyệt.`,
+            content: messages.PRODUCTION_PROTOCOL.PENDING_NOTIFICATION_CONTENT(
+                current.title, current.versionNo, season.name, season.pond.name, season.pond.farm.name,
+            ),
             referenceType: 'protocol',
             referenceId: current.id,
         },
@@ -821,7 +776,7 @@ const mutate = (accountId, seasonId, protocolId, body, cancelling) => transactio
     } = body;
     delete header.revision;
     if (templateId !== undefined && !cancelling) {
-        // Existing source references belong to the saved snapshot, even after archival.
+        // Preserve snapshot references when the source template becomes inactive.
         if (templateId && templateId !== current.sourceTemplateId) {
             await tx.$queryRaw`SELECT id FROM production_protocol_templates WHERE id = ${templateId}::uuid FOR SHARE`;
             await requireTemplate(tx, season, templateId);

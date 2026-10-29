@@ -2,6 +2,81 @@
  * Centralized message constants
  */
 const messages = {
+    EXPERT_PROTOCOL_TEMPLATE: {
+        SPECIES_REQUIRED: 'Phác đồ mẫu phải chỉ định tôm thẻ chân trắng hoặc tôm sú.',
+        INVALID_APPLICATION_DAYS:
+            'Ngày áp dụng vật tư phải tăng dần, không trùng và nằm trong giai đoạn.',
+        MATERIAL_LIST_FETCHED: 'Lấy danh sách vật tư thành công.',
+        CREATED: 'Tạo phác đồ mẫu thành công.',
+        UPDATED: 'Cập nhật phác đồ mẫu thành công.',
+        MATERIAL_UNAVAILABLE: 'Vật tư không khả dụng',
+        FARM_NOT_FOUND: 'Không tìm thấy trang trại trong phạm vi quản lý.',
+        EXPERT_ASSIGNMENT_CHANGED: 'Phân công hoặc trạng thái tài khoản đã thay đổi.',
+        WRITE_CONFLICT: 'Dữ liệu vừa thay đổi hoặc đã có tham chiếu. Hãy tải lại trước khi lưu.',
+        EXPERT_UNASSIGNED: 'Chuyên gia chưa được phân công chủ trại.',
+        REFERENCE_POST_COUNT_REQUIRED: 'Phải nhập số PL tham chiếu khi cấu hình thức ăn tăng đều.',
+        STALE_SAVE: 'Mẫu đã thay đổi. Hãy tải lại trước khi lưu.',
+        REFERENCED_FARM_LOCKED: 'Không thể đổi trang trại của mẫu đã được tham chiếu.',
+        MATERIAL_UNAVAILABLE_OR_FOREIGN: 'Vật tư không khả dụng hoặc không thuộc trang trại.',
+        MANUFACTURER_UNAVAILABLE_OR_FOREIGN:
+            'Nhà sản xuất không khả dụng hoặc ngoài phạm vi Owner.',
+        STALE_DELETE: 'Mẫu đã thay đổi. Hãy tải lại trước khi xóa.',
+        REFERENCED_DELETE_BLOCKED: 'Mẫu đã được tham chiếu. Hãy chuyển trạng thái ngừng sử dụng.',
+        DELETE_CONFLICT: 'Mẫu vừa thay đổi hoặc đã được tham chiếu.',
+        OPERATION_REQUIRED: 'Phải chọn loại hoạt động của hạng mục.',
+        INVALID_DOSE: 'Liều mỗi lần phải lớn hơn 0 và không vượt giới hạn lưu trữ.',
+        INVALID_DAILY_INCREMENT: 'Tăng đều chỉ dùng cho thức ăn liều cố định trong DOC 1–29.',
+        FINAL_DOSE_EXCEEDED: 'Liều cuối giai đoạn vượt giới hạn.',
+        INCOMPATIBLE_OPERATION_ROUTE:
+            'Loại hoạt động không phù hợp với cữ ăn hoặc xử lý môi trường.',
+        DOC_DOSING_RULE:
+            'DOC 1–29 dùng liều cữ cố định; theo sinh khối từ DOC 30. Xử lý nước dùng cố định hoặc theo m³.',
+        INCOMPATIBLE_DOSE_UNIT:
+            'Đơn vị liều không tương thích quy cách vật tư hoặc tỷ lệ sinh khối không hợp lệ.',
+        INVALID_STAGE: 'Giai đoạn phải theo thứ tự, không chồng lấn và có ít nhất một hoạt động.',
+        INVALID_ENVIRONMENT_START_DOC: 'DOC bắt đầu xử lý môi trường phải nằm trong giai đoạn.',
+        INVALID_ENVIRONMENT_INTERVAL:
+            'Chu kỳ lặp không được vượt số ngày còn lại từ DOC bắt đầu xử lý đến cuối giai đoạn.',
+        INVALID_MEAL_START_DOC: 'DOC bắt đầu vật tư trong cữ phải nằm trong giai đoạn.',
+        DUPLICATE_MEAL_MATERIAL: 'Không được thêm cùng vật tư hai lần trong một cữ.',
+        ORDERED_MEAL_TIMES: 'Giờ các cữ phải theo thứ tự trong ngày.',
+        ITEM_LIMIT: 'Một mẫu có tối đa 500 hạng mục.',
+        LIST_FETCHED: 'Lấy danh sách phác đồ nuôi mẫu thành công',
+        FETCHED: 'Lấy chi tiết phác đồ nuôi mẫu thành công',
+        NOT_FOUND: 'Không tìm thấy phác đồ nuôi mẫu',
+    },
+
+    MATERIAL_COMPLIANCE: {
+        PROPOSAL_COMPLETENESS_NOTE:
+            'Hệ thống kiểm tra tính đầy đủ và nhất quán của hồ sơ do Expert cung cấp khi lưu phác đồ. Kết quả này không xác thực mã lưu hành với cơ quan nhà nước; phải đối chiếu điều kiện sử dụng trước khi áp dụng cho vụ nuôi.',
+        PROHIBITED_PRODUCT: (productName, ingredients, legalBasis) =>
+            `${productName}: phát hiện ${ingredients} thuộc danh mục cấm (${legalBasis}).`,
+        MATERIAL: 'Vật tư',
+        REGULATORY_TYPE_REQUIRED: 'phân loại pháp lý',
+        REGISTRATION_REQUIRED: 'mã tiếp nhận/số ĐKLH',
+        INGREDIENTS_REQUIRED: 'thành phần',
+        LABEL_USAGE_REQUIRED: 'hướng dẫn theo nhãn',
+        REVIEW_NOTE_REQUIRED: 'căn cứ đối chiếu',
+        EVIDENCE_REQUIRED: 'ảnh/nguồn hồ sơ',
+        ANTIBIOTIC_CLASSIFICATION_REQUIRED: 'xác định kháng sinh',
+        REGISTRATION_TYPE_MISMATCH: 'mã tiếp nhận không khớp phân loại pháp lý',
+        ANTIBIOTIC_REQUIRES_MEDICINE: 'kháng sinh chỉ thuộc hồ sơ thuốc',
+        WITHDRAWAL_REQUIRED: 'thời gian ngừng thuốc',
+        PROHIBITED_INGREDIENTS: (ingredients, legalBasis) =>
+            `Thành phần cấm: ${ingredients} (${legalBasis}).`,
+        PROFILE_BLOCKED: 'Hồ sơ đang bị chặn.',
+        ANTIBIOTIC_TREATMENT_ONLY:
+            'Vật tư chứa kháng sinh cần phác đồ điều trị gắn ca bệnh. Anh/chị chọn vật tư khác cho phác đồ mẫu.',
+        DRAFT_PLAN_ONLY:
+            'Anh/chị bổ sung nhãn và hồ sơ còn thiếu để đối chiếu trước khi áp dụng phác đồ cho vụ nuôi.',
+        PROFILE_INCOMPLETE: 'Hồ sơ chưa đủ điều kiện sử dụng.',
+        MANUFACTURER_UNVERIFIED: (productName) => `${productName}: chưa đối chiếu nhà sản xuất.`,
+        INCOMPATIBLE_LEGAL_USE: (productName) =>
+            `${productName}: mục đích sử dụng không phù hợp hồ sơ pháp lý.`,
+        MANUFACTURER_REVIEW_REQUIRED: 'Phải đối chiếu nhà sản xuất trước khi đánh dấu reviewed.',
+        MISSING_PROPOSAL_FIELDS: (missingFields) => `Hồ sơ đề xuất thiếu: ${missingFields}.`,
+    },
+
     ACCOUNT: {
         LIST_FETCHED: 'Account list fetched successfully',
         FETCHED: 'Account details fetched successfully',
@@ -86,7 +161,8 @@ const messages = {
         NOT_FOUND: 'Không tìm thấy trang trại',
         NAME_ALREADY_EXISTS: 'Tên trang trại đã tồn tại trong danh sách đang hoạt động',
         OWNER_NOT_ELIGIBLE: 'Chỉ chủ trang trại đang hoạt động mới có thể tạo trang trại',
-        HAS_OPEN_SEASON: 'Không thể xóa trang trại đang có vụ nuôi ở trạng thái lập kế hoạch hoặc đang hoạt động',
+        HAS_OPEN_SEASON:
+            'Không thể xóa trang trại đang có vụ nuôi ở trạng thái lập kế hoạch hoặc đang hoạt động',
         HAS_REFERENCES: 'Không thể xóa trang trại còn dữ liệu liên quan',
         CHANGE_CONFLICT: 'Trạng thái trang trại đã thay đổi. Vui lòng tải lại và thử lại',
     },
@@ -101,17 +177,20 @@ const messages = {
         NAME_ALREADY_EXISTS: 'Tên ao đã tồn tại trong danh sách đang hoạt động của trang trại',
         HAS_OPEN_SEASON: 'Không thể xóa ao đang có vụ nuôi lập kế hoạch hoặc hoạt động',
         HAS_REFERENCES: 'Không thể xóa ao còn dữ liệu liên quan hoặc lịch sử vụ nuôi',
-        OPEN_SEASON_RESTRICTS_UPDATE: 'Vụ nuôi đang mở không cho phép thay đổi loại ao, ngừng hoạt động hoặc thay đổi thể tích',
+        OPEN_SEASON_RESTRICTS_UPDATE:
+            'Vụ nuôi đang mở không cho phép thay đổi loại ao, ngừng hoạt động hoặc thay đổi thể tích',
         VOLUME_OUT_OF_RANGE: 'Thể tích tính từ diện tích và độ sâu vượt quá giới hạn cho phép',
         VOLUME_EXCEEDS_CAPACITY: 'Thể tích không được vượt quá diện tích nhân với độ sâu của ao',
         CHANGE_CONFLICT: 'Trạng thái ao đã thay đổi. Vui lòng tải lại và thử lại',
     },
 
     SUPPLIER: {
-        IDENTITY_LOCKED: 'Nhà cung cấp đã có đơn hoặc giao dịch. Không thể đổi tên hoặc vai trò cung ứng',
+        IDENTITY_LOCKED:
+            'Nhà cung cấp đã có đơn hoặc giao dịch. Không thể đổi tên hoặc vai trò cung ứng',
         NOT_SELECTABLE: 'Chọn đối tác đang hoạt động, đúng vai trò và thuộc danh bạ của bạn',
         HAS_REFERENCES: 'Nhà cung cấp đã có tham chiếu. Hãy chuyển sang tạm ngưng thay vì xóa',
-        MANUFACTURER_REFERENCED: 'Không thể bỏ vai trò nhà sản xuất khi đã được vật tư hoặc đề xuất tham chiếu',
+        MANUFACTURER_REFERENCED:
+            'Không thể bỏ vai trò nhà sản xuất khi đã được vật tư hoặc đề xuất tham chiếu',
         LIST_FETCHED: 'Lấy danh sách nhà cung cấp thành công',
         FETCHED: 'Lấy thông tin nhà cung cấp thành công',
         CREATED: 'Thêm nhà cung cấp thành công',
@@ -122,24 +201,28 @@ const messages = {
     },
 
     INVENTORY: {
-        AUTO_REVIEW_NOTE: 'Hồ sơ đủ thông tin do chủ trại khai báo; hệ thống tự xác nhận tính đầy đủ, không thay thế kiểm chứng chuyên môn',
+        AUTO_REVIEW_NOTE:
+            'Hồ sơ đủ thông tin do chủ trại khai báo; hệ thống tự xác nhận tính đầy đủ, không thay thế kiểm chứng chuyên môn',
         COMPLIANCE_REVIEWED: 'Cập nhật kết quả duyệt hồ sơ vật tư thành công',
         REVIEW_STATE_CONFLICT: 'Trạng thái hồ sơ không phù hợp để duyệt. Vui lòng tải lại',
         REVIEW_FACTS_REQUIRED: 'Vật tư có kháng sinh phải được phân loại thuốc',
-        INCOMPLETE_PRODUCT: 'Vui lòng nhập đầy đủ nhà sản xuất, loại sản phẩm, mã số tiếp nhận, thành phần, hướng dẫn sử dụng, kháng sinh và thời gian ngừng trước khi sử dụng vật tư',
+        INCOMPLETE_PRODUCT:
+            'Vui lòng nhập đầy đủ nhà sản xuất, loại sản phẩm, mã số tiếp nhận, thành phần, hướng dẫn sử dụng, kháng sinh và thời gian ngừng trước khi sử dụng vật tư',
         READ_ONLY: 'Kho hiện chỉ hỗ trợ xem dữ liệu. Cần đồng bộ dữ liệu kho trước khi cập nhật.',
         CONVERSION_REQUIRED: 'PACK và BOTTLE bắt buộc phải có số lượng và đơn vị quy đổi',
         CONVERSION_NOT_ALLOWED: 'Thông tin quy đổi chỉ áp dụng cho PACK và BOTTLE',
         EXPIRY_IN_PAST: 'Hạn sử dụng không được trong quá khứ',
         INVALID_EXECUTION_QUANTITY: 'Số lượng thực dùng không hợp lệ',
-        INCOMPATIBLE_EXECUTION_UNIT: 'Đơn vị thực dùng không quy đổi được sang đơn vị kho của vật tư',
+        INCOMPATIBLE_EXECUTION_UNIT:
+            'Đơn vị thực dùng không quy đổi được sang đơn vị kho của vật tư',
         INVALID_CONVERSION: 'Vật tư chưa có quy cách quy đổi hợp lệ',
         CONVERTED_QUANTITY_LIMIT: 'Lượng quy đổi vượt giới hạn độ chính xác của kho',
         DELETED: 'Xóa vật tư chưa có phát sinh thành công',
         HAS_REFERENCES: 'Vật tư đã có phát sinh hoặc tham chiếu nên không thể xóa',
         METADATA_LOCKED: 'Vật tư đã có đơn hoặc giao dịch. Chỉ được sửa ngưỡng cảnh báo và mô tả',
         LOT_EXPIRY_CONFLICT: 'Các lần nhập cùng vật tư và số lô phải có cùng hạn sử dụng',
-        LOT_EXPIRY_LOCKED: 'Lô đã được dùng. Cần đối chiếu chuyên môn, không tự thay đổi bằng chứng hạn dùng',
+        LOT_EXPIRY_LOCKED:
+            'Lô đã được dùng. Cần đối chiếu chuyên môn, không tự thay đổi bằng chứng hạn dùng',
         SUPPLIER_NAME_REQUIRED: 'Vui lòng chọn nhà cung cấp hoặc nhập tên bên bán thực tế',
         LIST_FETCHED: 'Lấy danh sách vật tư và tồn kho thành công',
         FETCHED: 'Lấy chi tiết vật tư thành công',
@@ -154,10 +237,13 @@ const messages = {
         BALANCE_NOT_FOUND: 'Không tìm thấy lô tồn kho',
         NAME_UNIT_ALREADY_EXISTS: 'Tên vật tư và đơn vị này đã tồn tại trong kho',
         LOT_ALREADY_EXISTS: 'Mã lô này đã tồn tại cho vật tư',
-        STOCK_REMAINS: 'Không thể tạm ngưng vật tư khi kho vẫn còn tồn',
-        PLANNED_USE_EXISTS: 'Không thể tạm ngưng vật tư đang được dùng trong lịch vận hành dự kiến',
-        PRODUCT_ARCHIVED: 'Vật tư đang tạm ngưng',
-        PRODUCT_NOT_ARCHIVED: 'Vật tư đang được sử dụng',
+        STOCK_REMAINS: 'Không thể lưu trữ vật tư khi kho vẫn còn tồn',
+        DELETE_STOCK_REMAINS: 'Không thể xóa vật tư khi kho vẫn còn tồn',
+        DELETE_PLANNED_USE_EXISTS:
+            'Không thể xóa vật tư đang được dùng trong lịch vận hành dự kiến',
+        PLANNED_USE_EXISTS: 'Không thể lưu trữ vật tư đang được dùng trong lịch vận hành dự kiến',
+        PRODUCT_ARCHIVED: 'Vật tư đã được lưu trữ',
+        PRODUCT_NOT_ARCHIVED: 'Vật tư chưa được lưu trữ',
         UNIT_LOCKED: 'Không thể thay đổi đơn vị hoặc quy đổi sau khi vật tư đã có giao dịch kho',
         INSUFFICIENT_STOCK: 'Số lượng xuất hoặc điều chỉnh vượt quá tồn kho hiện tại của lô',
         BALANCE_LIMIT_EXCEEDED: 'Số lượng tồn của lô vượt quá giới hạn cho phép',
@@ -201,16 +287,12 @@ const messages = {
             'Không tìm thấy nhân sự đang hoạt động, đúng vai trò và thuộc quyền quản lý của bạn',
         ASSIGNMENT_ROLE_OCCUPIED:
             'Vai trò này đã có nhân sự phụ trách. Vui lòng sử dụng chức năng thay nhân sự',
-        ASSIGNMENT_PERSONNEL_ALREADY_ASSIGNED:
-            'Nhân sự này đã được phân công vào vụ nuôi',
-        ASSIGNMENT_CONFLICT:
-            'Phân công nhân sự đã thay đổi. Vui lòng tải lại và thử lại',
+        ASSIGNMENT_PERSONNEL_ALREADY_ASSIGNED: 'Nhân sự này đã được phân công vào vụ nuôi',
+        ASSIGNMENT_CONFLICT: 'Phân công nhân sự đã thay đổi. Vui lòng tải lại và thử lại',
         REPLACEMENT_CURRENT_ASSIGNMENT_CHANGED:
             'Nhân sự phụ trách hiện tại đã thay đổi. Vui lòng tải lại và thử lại',
-        REPLACEMENT_SAME_PERSONNEL:
-            'Nhân sự thay thế phải khác nhân sự đang phụ trách',
-        REPLACEMENT_CONFLICT:
-            'Việc thay nhân sự bị xung đột. Vui lòng tải lại và thử lại',
+        REPLACEMENT_SAME_PERSONNEL: 'Nhân sự thay thế phải khác nhân sự đang phụ trách',
+        REPLACEMENT_CONFLICT: 'Việc thay nhân sự bị xung đột. Vui lòng tải lại và thử lại',
         CHANGE_CONFLICT: 'Vụ nuôi đã thay đổi. Vui lòng tải lại và thử lại',
     },
 
@@ -251,18 +333,24 @@ const messages = {
 
     HARVEST: {
         NOTE_TOO_LONG: (limit) => `Ghi chú thu hoạch tối đa ${limit} ký tự.`,
-        VARIANCE_REASON_REQUIRED: 'Số thu thực tế và số còn lại vượt ước tính hiện có. Vui lòng nhập lý do hiệu chỉnh ước tính.',
+        VARIANCE_REASON_REQUIRED:
+            'Số thu thực tế và số còn lại vượt ước tính hiện có. Vui lòng nhập lý do hiệu chỉnh ước tính.',
         SCHEDULE_COMPLETED_REASON: 'Vụ nuôi đã hoàn tất thu hoạch cuối.',
-        WITHDRAWAL_UNVERIFIED_WARNING: 'Chưa kiểm tra thời gian ngừng thuốc: dữ liệu snapshot S07/S08 chưa được kích hoạt. Bản ghi này không xác nhận đã đủ thời gian ngừng thuốc.',
-        WITHDRAWAL_UNKNOWN: 'Có lần dùng thuốc chưa xác định thời gian ngừng thuốc. Cần rà soát snapshot trước khi thu hoạch.',
+        WITHDRAWAL_UNVERIFIED_WARNING:
+            'Chưa kiểm tra thời gian ngừng thuốc: dữ liệu snapshot S07/S08 chưa được kích hoạt. Bản ghi này không xác nhận đã đủ thời gian ngừng thuốc.',
+        WITHDRAWAL_UNKNOWN:
+            'Có lần dùng thuốc chưa xác định thời gian ngừng thuốc. Cần rà soát snapshot trước khi thu hoạch.',
         WITHDRAWAL_ACTIVE: 'Chưa đủ thời gian ngừng thuốc tại thời điểm thu hoạch đã chọn.',
-        WITHDRAWAL_PRODUCT_NOT_READY: 'Vật tư thực dùng chưa có hồ sơ đã đối chiếu hoặc chưa xác định thời gian ngừng thuốc.',
-        WITHDRAWAL_EXECUTION_TIME: 'Thời điểm dùng vật tư không hợp lệ hoặc vi phạm thời gian ngừng thuốc của lần thu hoạch đã ghi.',
+        WITHDRAWAL_PRODUCT_NOT_READY:
+            'Vật tư thực dùng chưa có hồ sơ đã đối chiếu hoặc chưa xác định thời gian ngừng thuốc.',
+        WITHDRAWAL_EXECUTION_TIME:
+            'Thời điểm dùng vật tư không hợp lệ hoặc vi phạm thời gian ngừng thuốc của lần thu hoạch đã ghi.',
         NOT_FOUND: 'Không tìm thấy lần thu hoạch hoặc vụ nuôi.',
         CONFLICT: 'Dữ liệu thu hoạch đã thay đổi. Vui lòng tải lại và thử lại.',
         INACTIVE: 'Chỉ ghi nhận thu hoạch cho vụ nuôi đang hoạt động.',
         INVALID_QUANTITY: 'Sản lượng hoặc số lượng thu hoạch không hợp lệ.',
-        INVALID_TIME: 'Thời điểm thu hoạch phải từ ngày thả giống, muộn hơn lần thu gần nhất và không ở tương lai.',
+        INVALID_TIME:
+            'Thời điểm thu hoạch phải từ ngày thả giống, muộn hơn lần thu gần nhất và không ở tương lai.',
         INVALID_CURSOR: 'Con trỏ phân trang không hợp lệ.',
         KEY_CONFLICT: 'Khóa ghi nhận đã được sử dụng cho dữ liệu khác.',
         LIST: 'Đã tải danh sách thu hoạch.',
@@ -270,10 +358,12 @@ const messages = {
         CREATED: 'Đã ghi nhận thu hoạch.',
         INVALID_DATE_RANGE: 'from must not be after to',
         PARTIAL_COUNT_REQUIRED: 'Vui lòng nhập số con thu hoạch khi thu tỉa.',
-        POPULATION_UNKNOWN: 'Chưa xác định được số tôm hiện có. Vui lòng cập nhật số lượng trước khi thu tỉa.',
+        POPULATION_UNKNOWN:
+            'Chưa xác định được số tôm hiện có. Vui lòng cập nhật số lượng trước khi thu tỉa.',
         PARTIAL_MISMATCH: (available, quantity, expected) =>
             `Số lượng thu tỉa không khớp: hiện có ${available} con, thu ${quantity} con thì phải còn ${expected} con. Vui lòng kiểm tra lại; hao hụt cần được ghi nhận riêng.`,
-        PARTIAL_EXHAUSTED: 'Thu tỉa phải còn tôm trong ao. Nếu thu hết, vui lòng chọn thu hoạch cuối.',
+        PARTIAL_EXHAUSTED:
+            'Thu tỉa phải còn tôm trong ao. Nếu thu hết, vui lòng chọn thu hoạch cuối.',
         EARLY_WARNING: (days, typicalDays) =>
             `Lưu ý: thu hoạch sau ${days} ngày nuôi, sớm hơn chu kỳ tham khảo ${typicalDays} ngày của loài. Owner cân nhắc theo tình trạng thực tế; bản ghi vẫn hợp lệ.`,
         RECORDED_TITLE: 'Đã ghi nhận thu tỉa',
@@ -317,7 +407,8 @@ const messages = {
         VOIDED: 'Hủy hiệu lực bản ghi sức khỏe tôm thành công',
         VOID_REASON_REQUIRED: 'Lý do hủy bản ghi là bắt buộc',
         AT_LEAST_ONE_METRIC: 'Phải nhập ít nhất một chỉ số sức khỏe hoặc thể trạng tôm',
-        ESTIMATED_POPULATION_EXCEEDS_INITIAL: 'Số lượng tôm ước tính không được vượt quá số lượng giống thả ban đầu',
+        ESTIMATED_POPULATION_EXCEEDS_INITIAL:
+            'Số lượng tôm ước tính không được vượt quá số lượng giống thả ban đầu',
         DUPLICATE_LOG: 'Bản ghi sức khỏe tôm cho thời điểm này đã tồn tại',
         IDEMPOTENCY_KEY_REUSED: 'Khóa lưu bản ghi đã được dùng cho nội dung khác',
         RECORDED_AT_TOO_FAR_FUTURE: 'Thời điểm ghi nhận không được vượt quá hiện tại 5 phút',
@@ -347,17 +438,23 @@ const messages = {
     },
 
     PRODUCTION_PROTOCOL: {
+        PENDING_NOTIFICATION_CONTENT: (title, versionNo, seasonName, pondName, farmName) =>
+            `Phác đồ "${title}" (v${versionNo}) của vụ ${seasonName}, ao ${pondName}, trang trại ${farmName} đang chờ chủ trại duyệt.`,
         PENDING_NOTIFICATION_TITLE: 'Phác đồ nuôi đang chờ duyệt',
-        STAGE_OVERLAP: 'Các giai đoạn không được trùng ngày DOC. Ngày kết thúc cũng thuộc giai đoạn.',
+        STAGE_OVERLAP:
+            'Các giai đoạn không được trùng ngày DOC. Ngày kết thúc cũng thuộc giai đoạn.',
         SUBMITTED: 'Đã gửi phác đồ nuôi để chủ trại duyệt.',
-        SUBMIT_INCOMPLETE: 'Cần có ít nhất một hạng mục và giờ thực hiện cho mọi cữ trước khi gửi duyệt.',
+        SUBMIT_INCOMPLETE:
+            'Cần có ít nhất một hạng mục và giờ thực hiện cho mọi cữ trước khi gửi duyệt.',
         TEMPLATE_NOT_FOUND: 'Không tìm thấy phác đồ mẫu phù hợp trong trang trại.',
-        TEMPLATE_INVALID: 'Phác đồ mẫu có dữ liệu không được hỗ trợ; vui lòng kiểm tra lại mẫu.',
+        TEMPLATE_V2_APPLICATION_UNAVAILABLE:
+            'Chức năng áp dụng mẫu vào vụ nuôi hiện chưa khả dụng. Anh/chị vẫn có thể tạo, xem và chỉnh sửa mẫu; hồ sơ vật tư, liều và lịch chỉ được chuyển sang vụ khi luồng áp dụng hỗ trợ đầy đủ.',
         CREATED: 'Đã lưu bản nháp phác đồ nuôi.',
         UPDATED: 'Đã lưu phác đồ nuôi.',
         CANCELLED: 'Đã hủy bản nháp phác đồ nuôi.',
         EXPERT_INACTIVE: 'Tài khoản chuyên gia không còn hoạt động.',
-        TIME_PRECISION: 'Giờ thực hiện có độ chính xác cao hơn form hỗ trợ; không thể ghi lại các hạng mục này.',
+        TIME_PRECISION:
+            'Giờ thực hiện có độ chính xác cao hơn form hỗ trợ; không thể ghi lại các hạng mục này.',
         NOT_FOUND: 'Không tìm thấy vụ nuôi hoặc phác đồ trong phạm vi được phân công.',
         CONFLICT: 'Dữ liệu đã thay đổi. Vui lòng tải lại trước khi tiếp tục.',
         STATE: 'Trạng thái hiện tại không cho phép thao tác này.',
@@ -387,8 +484,10 @@ const messages = {
     },
 
     RAG_WARNINGS: {
-        NO_SOURCE: 'Chưa tìm thấy nguồn tham chiếu. Vui lòng kiểm chứng câu trả lời trước khi áp dụng.',
-        LOW_MATCH: 'Nguồn tham chiếu có độ liên quan thấp. Vui lòng kiểm chứng câu trả lời trước khi áp dụng.',
+        NO_SOURCE:
+            'Chưa tìm thấy nguồn tham chiếu. Vui lòng kiểm chứng câu trả lời trước khi áp dụng.',
+        LOW_MATCH:
+            'Nguồn tham chiếu có độ liên quan thấp. Vui lòng kiểm chứng câu trả lời trước khi áp dụng.',
     },
 
     RAG_DOCUMENT: {
@@ -406,14 +505,17 @@ const messages = {
     },
 
     RAG_DOCUMENT_ERRORS: {
-        RAG_SOURCE_MISSING: 'File gốc không còn trên Cloudinary. Vui lòng tải lại file gốc của tài liệu.',
+        RAG_SOURCE_MISSING:
+            'File gốc không còn trên Cloudinary. Vui lòng tải lại file gốc của tài liệu.',
         RAG_STORAGE_AUTH: 'Không có quyền đọc kho lưu trữ. Vui lòng kiểm tra cấu hình Cloudinary.',
         RAG_STORAGE_TIMEOUT: 'Quá thời gian đọc file từ Cloudinary. Vui lòng thử lại.',
         RAG_STORAGE_UNAVAILABLE: 'Chưa thể kết nối hoặc đọc file từ Cloudinary. Vui lòng thử lại.',
-        RAG_INVALID_CONTENT: 'Nội dung, dung lượng hoặc hash file không hợp lệ. Vui lòng kiểm tra file.',
+        RAG_INVALID_CONTENT:
+            'Nội dung, dung lượng hoặc hash file không hợp lệ. Vui lòng kiểm tra file.',
         RAG_INGESTION_TIMEOUT: 'Quá thời gian xử lý RAG. Bạn có thể thử lại xử lý.',
         RAG_INGESTION_FAILED: 'Xử lý RAG chưa hoàn tất. Vui lòng thử lại xử lý.',
-        RAG_REUPLOAD_FILE_MISMATCH: 'File được chọn không khớp bản gốc. Vui lòng chọn file có cùng nội dung và định dạng ban đầu.',
+        RAG_REUPLOAD_FILE_MISMATCH:
+            'File được chọn không khớp bản gốc. Vui lòng chọn file có cùng nội dung và định dạng ban đầu.',
     },
 
     // Generic CRUD
@@ -439,7 +541,8 @@ const messages = {
 
     // Operation
     OPERATION: {
-        EXECUTION_CONFLICT: 'Dữ liệu vận hành đã thay đổi. Vui lòng tải lại và thử lại với mã ghi nhận cũ.',
+        EXECUTION_CONFLICT:
+            'Dữ liệu vận hành đã thay đổi. Vui lòng tải lại và thử lại với mã ghi nhận cũ.',
         LIST_FETCHED: 'Lấy danh sách kế hoạch vận hành thành công',
         FETCHED: 'Lấy chi tiết kế hoạch vận hành thành công',
         EXECUTED: 'Ghi nhận thực hiện hoạt động thành công',
@@ -458,7 +561,8 @@ const messages = {
     OWNER_DASHBOARD: {
         FETCHED: 'Lấy tổng quan vận hành thành công',
         FINANCE_FETCHED: 'Lấy thống kê thu chi thành công',
-        INVALID_RANGE: 'Khoảng ngày phải từ trước đến sau, không ở tương lai và không quá 60 tháng.',
+        INVALID_RANGE:
+            'Khoảng ngày phải từ trước đến sau, không ở tương lai và không quá 60 tháng.',
     },
 
     // Server
