@@ -304,7 +304,7 @@ model Account {
   verificationChallenges EmailVerificationChallenge[]
   notifications          Notification[]
   assignedTasks          Task[]                       @relation("TaskAssignee")
-  cancelledTasks         Task[]                       @relation("TaskCanceller")
+  createdTasks           Task[]                       @relation("TaskAssigner")
   managedByOwner         Account?                     @relation("OwnerManagedAccounts", fields: [managedByOwnerId], references: [id], onDelete: Restrict)
   managedAccounts        Account[]                    @relation("OwnerManagedAccounts")
   seasonAssignments      SeasonPersonnelAssignment[]  @relation("SeasonAssignedAccount")
@@ -823,19 +823,17 @@ model Task {
   description        String?            @db.VarChar(500)
   priority           TaskPriority       @default(NORMAL)
   status             TaskStatus         @default(PENDING)
-  dueAt              DateTime           @map("due_at") @db.Timestamptz(6)
+  dueAt              DateTime?          @map("due_at") @db.Timestamptz(6)
   startedAt          DateTime?          @map("started_at") @db.Timestamptz(6)
   completedAt        DateTime?          @map("completed_at") @db.Timestamptz(6)
-  cancellationReason String?            @map("cancellation_reason") @db.VarChar(255)
-  cancelledBy        String?            @map("cancelled_by") @db.Uuid
   cancelledAt        DateTime?          @map("cancelled_at") @db.Timestamptz(6)
-  history            Json               @default("[]")
+  cancellationReason String?            @map("cancellation_reason") @db.VarChar(500)
   farm               Farm               @relation(fields: [farmId], references: [id], onDelete: Restrict)
   season             AquacultureSeason? @relation(fields: [seasonId], references: [id], onDelete: Restrict)
   assignee           Account            @relation("TaskAssignee", fields: [assignedTo], references: [id], onDelete: Restrict)
-  cancelledByAccount Account?           @relation("TaskCanceller", fields: [cancelledBy], references: [id], onDelete: Restrict)
+  assigner           Account            @relation("TaskAssigner", fields: [assignedBy], references: [id], onDelete: Restrict)
   createdAt          DateTime           @default(now()) @map("created_at") @db.Timestamptz(6)
-  updatedAt          DateTime           @default(now()) @map("updated_at") @db.Timestamptz(6)
+  updatedAt          DateTime           @default(dbgenerated("date_trunc('milliseconds'::text, clock_timestamp())")) @map("updated_at") @db.Timestamptz(6)
 
   @@index([farmId, status, dueAt], map: "idx_tasks_farm_status_due")
   @@index([assignedTo, status, dueAt], map: "idx_tasks_assignee_status_due")
