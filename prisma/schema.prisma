@@ -125,6 +125,13 @@ enum ProtocolStatus {
   @@map("protocol_status")
 }
 
+enum ProductionProtocolTemplateStatus {
+  active
+  inactive
+
+  @@map("production_protocol_template_status")
+}
+
 enum ProtocolType {
   PRODUCTION @map("production")
   TREATMENT  @map("treatment")
@@ -275,6 +282,7 @@ enum SupplierType {
 }
 
 model Account {
+  productionProtocolTemplates ProductionProtocolTemplate[]
   id                     String                       @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
   email                  String                       @unique @db.VarChar(320)
   phone                  String?                      @db.VarChar(20)
@@ -364,9 +372,10 @@ model RefreshToken {
 }
 
 model Farm {
-  id                String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
-  ownerId           String   @map("owner_id") @db.Uuid
-  name              String   @db.VarChar(255)
+  productionProtocolTemplates ProductionProtocolTemplate[]
+  id                String    @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  ownerId           String    @map("owner_id") @db.Uuid
+  name              String    @db.VarChar(255)
   address           String?
   latitude          Decimal? @db.Decimal(10, 8)
   longitude         Decimal? @db.Decimal(11, 8)
@@ -497,6 +506,7 @@ model DiseaseCase {
 }
 
 model Protocol {
+  sourceTemplate ProductionProtocolTemplate? @relation(fields: [sourceTemplateId], references: [id], onDelete: Restrict)
   id                   String         @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
   protocolType         ProtocolType   @map("protocol_type")
   seasonId             String         @map("season_id") @db.Uuid
@@ -686,7 +696,6 @@ model Product {
   farmId                String                 @map("farm_id") @db.Uuid
   name                  String                 @db.VarChar(255)
   category              ProductCategory
-  /// Existing rows may lack a verified manufacturer during the additive upgrade.
   manufacturerId        String?                @map("manufacturer_id") @db.Uuid
   unit                  ProductUnit
   conversionQuantity    Decimal?               @map("conversion_quantity") @db.Decimal(14, 4)
@@ -706,6 +715,7 @@ model Product {
   executions            OperationExecution[]   @relation("ExecutionActualProduct")
   inventoryBalances     InventoryBalance[]
   inventoryTransactions InventoryTransaction[]
+  templateItems         ProductionProtocolTemplateItem[]
 
   @@index([farmId, status, category], map: "idx_products_farm_status_category")
   @@index([manufacturerId], map: "idx_products_manufacturer")
@@ -736,7 +746,6 @@ model Supplier {
   id                   String             @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
   ownerId              String             @map("owner_id") @db.Uuid
   name                 String             @db.VarChar(255)
-  /// NULL preserves an unconfirmed legacy role; all new API writes select a role.
   supplierType         SupplierType?      @default(MANUFACTURER) @map("supplier_type")
   contactName          String?            @map("contact_name") @db.VarChar(255)
   phone                String?            @db.VarChar(20)
@@ -749,26 +758,59 @@ model Supplier {
   owner                Account            @relation(fields: [ownerId], references: [id], onDelete: Restrict)
   manufacturedProducts Product[]
   inventoryBalances    InventoryBalance[]
+  recommendedTemplateItems ProductionProtocolTemplateItem[] @relation("TemplateManufacturer")
 
   @@index([ownerId, status, supplierType], map: "idx_suppliers_owner_status_type")
   @@map("suppliers")
 }
 
 model ProductionProtocolTemplate {
-  id                 String      @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
-  farmId             String      @map("farm_id") @db.Uuid
-  title              String      @db.VarChar(500)
+  id                 String                           @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  farmId             String                           @map("farm_id") @db.Uuid
+  title              String                           @db.VarChar(500)
   description        String?
-  shrimpType         ShrimpType? @map("shrimp_type")
-  allowedVariancePct Decimal     @default(10) @map("allowed_variance_pct") @db.Decimal(5, 2)
-  createdBy          String      @map("created_by") @db.Uuid
-  archivedAt         DateTime?   @map("archived_at") @db.Timestamptz(6)
-  isDeleted          Boolean     @default(false) @map("is_deleted")
-  deletedAt          DateTime?   @map("deleted_at") @db.Timestamptz(6)
-  createdAt          DateTime    @default(now()) @map("created_at") @db.Timestamptz(6)
-  updatedAt          DateTime    @default(now()) @map("updated_at") @db.Timestamptz(6)
+  shrimpType         ShrimpType?                      @map("shrimp_type")
+  allowedVariancePct Decimal                          @default(10) @map("allowed_variance_pct") @db.Decimal(5, 2)
+  status             ProductionProtocolTemplateStatus @default(active)
+  versionNo          Int                              @map("version_no")
+  referencePostCount Int?                             @map("reference_post_count")
+  createdBy          String                           @map("created_by") @db.Uuid
+  createdAt          DateTime                         @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt          DateTime                         @default(now()) @map("updated_at") @db.Timestamptz(6)
+  farm               Farm                             @relation(fields: [farmId], references: [id], onDelete: Restrict)
+  creator            Account                          @relation(fields: [createdBy], references: [id], onDelete: Restrict)
+  items              ProductionProtocolTemplateItem[]
+  sourcedProtocols   Protocol[]
 
   @@map("production_protocol_templates")
+}
+
+model ProductionProtocolTemplateItem {
+  recommendedManufacturerId String?                    @map("recommended_manufacturer_id") @db.Uuid
+  recommendedManufacturer   Supplier?                  @relation("TemplateManufacturer", fields: [recommendedManufacturerId], references: [id], onDelete: Restrict)
+  id                        String                     @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  templateId                String                     @map("template_id") @db.Uuid
+  operationType             OperationType              @map("operation_type")
+  productId                 String?                    @map("product_id") @db.Uuid
+  recommendedProductDetails Json?                      @map("recommended_product_details") @db.JsonB
+  startDayOfCulture         Int                        @map("start_day_of_culture")
+  endDayOfCulture           Int                        @map("end_day_of_culture")
+  repeatIntervalDays        Int                        @default(1) @map("repeat_interval_days") @db.SmallInt
+  mealNumber                Int?                       @map("meal_number")
+  plannedTime               DateTime?                  @map("planned_time") @db.Time(6)
+  doseBasis                 DoseBasis                  @map("dose_basis")
+  doseValue                 Decimal                    @map("dose_value") @db.Decimal(14, 4)
+  dailyDoseIncrement        Decimal                    @default(0) @map("daily_dose_increment") @db.Decimal(14, 4)
+  doseUnit                  ProductUnit                @map("dose_unit")
+  instructions              String?
+  sequenceOrder             Int                        @default(1) @map("sequence_order")
+  createdAt                 DateTime                   @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt                 DateTime                   @default(now()) @map("updated_at") @db.Timestamptz(6)
+  template                  ProductionProtocolTemplate @relation(fields: [templateId], references: [id], onDelete: Cascade)
+  product                   Product?                   @relation(fields: [productId], references: [id], onDelete: Restrict)
+
+  @@unique([templateId, sequenceOrder], map: "uq_template_item_sequence")
+  @@map("production_protocol_template_items")
 }
 
 model Task {
@@ -818,7 +860,6 @@ model SeasonPersonnelAssignment {
   @@map("season_personnel_assignments")
 }
 
-/// Read-only KPI projection already created by smartshrimp.sql.
 view TechnicianKpi {
   technicianId            String   @unique @map("technician_id") @db.Uuid
   seasonsParticipated     BigInt?  @map("seasons_participated")
@@ -829,7 +870,6 @@ view TechnicianKpi {
   @@map("v_technician_kpi")
 }
 
-/// Read-only Expert KPI projection created by smartshrimp.sql.
 view ExpertKpi {
   expertId             String   @unique @map("expert_id") @db.Uuid
   seasonsParticipated  BigInt?  @map("seasons_participated")
@@ -849,7 +889,6 @@ enum RagQueryStatus {
   @@map("rag_query_status")
 }
 
-/// Maps existing SQL tables; season-less legacy conversations are rejected by the service.
 model RagConversation {
   id            String             @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
   accountId     String             @map("account_id") @db.Uuid
