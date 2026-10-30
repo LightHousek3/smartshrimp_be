@@ -135,6 +135,7 @@ const dayOfCulture = (stockingDate) => {
 const normalizePondSummary = (pond) => ({
     ...pond,
     areaM2: pond.areaM2 == null ? null : Number(pond.areaM2),
+    farm: { ...pond.farm, status: pond.farm.status?.toLowerCase() ?? null },
 });
 
 const normalizeSeasonBase = (season) => ({

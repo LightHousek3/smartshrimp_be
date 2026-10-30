@@ -1,15 +1,30 @@
 const Joi = require('joi');
-const { hasOverlappingStages } = require('../utils/productionProtocol');
+const { hasOverlappingStages, isProductionProtocolDoseValid } = require('../utils/productionProtocol');
 const {
     messages,
     OPERATION_TYPE,
     DOSE_BASIS,
     PRODUCTION_PROTOCOL_UNITS,
     PRODUCTION_PROTOCOL_CATEGORIES,
-    allowedProductionProtocolDoseBases,
+    PRODUCTION_PROTOCOL_LIMITS,
 } = require('../constants');
 
 const uuid = () => Joi.string().uuid();
+const { productCompliance, manufacturer } = require('./materialCompliance.validator');
+const proposal = Joi.object({
+    name: Joi.string().trim().min(1).max(255).required(),
+    description: Joi.string().max(500).allow('', null),
+    category: Joi.string().uppercase().valid('FEED', 'MEDICINE', 'MINERAL', 'CHEMICAL', 'OTHER').required(),
+    unit: Joi.string().uppercase().valid('KG', 'G', 'L', 'ML', 'PACK', 'BOTTLE', 'PCS').required(),
+    conversionUnit: Joi.string().uppercase().valid('KG', 'G', 'MG', 'L', 'ML', 'PCS').allow(null),
+    conversionQuantity: Joi.alternatives().try(Joi.number().greater(0), Joi.string().pattern(/^(?:0|[1-9]\d{0,9})(?:\.\d{1,4})?$/)).allow(null),
+    manufacturerId: uuid().allow(null),
+    manufacturer: manufacturer.keys({ supplierType: Joi.string().lowercase().valid('manufacturer', 'both') }).unknown(true).allow(null),
+    productCompliance: productCompliance.keys({ complianceStatus: Joi.any().strip(), reviewNote: Joi.any().strip(),
+        checkedBy: Joi.any().strip(), checkedAt: Joi.any().strip() }).unknown(true).allow(null),
+    recommendationReason: Joi.string().max(500).allow('', null),
+    imageUrls: Joi.array().max(3).items(Joi.string().uri({ scheme: ['https'] }).max(2000)),
+}).unknown(true);
 // Strings avoid silently rounding PostgreSQL NUMERIC input at the JSON boundary.
 const decimal = (integerDigits, scale, zero = false) => Joi.string().pattern(
     new RegExp(`^(?:0|[1-9][0-9]{0,${integerDigits - 1}})(?:\\.[0-9]{1,${scale}})?$`),
@@ -22,13 +37,24 @@ const item = Joi.object({
     productId: uuid().allow(null).default(null),
     recommendedProductName: Joi.string().trim().max(255).allow(null).default(null),
     recommendedCategory: Joi.string().valid(...PRODUCTION_PROTOCOL_CATEGORIES).allow(null).default(null),
+    recommendedManufacturerId: uuid().allow(null),
+    recommendedProductDetails: Joi.object({
+        proposed: proposal.required(),
+        ownerOverrides: Joi.any().strip(),
+        review: Joi.any().strip(),
+    }).allow(null).custom((value, helpers) => JSON.stringify(value).length <= 100000 ? value : helpers.error('any.invalid')),
+    dailyDoseIncrement: decimal(10, 4, true),
+    firstDayOffset: Joi.number().integer().min(0).max(2147483646),
+    lastDayOffset: Joi.number().integer().min(0).max(2147483646),
+    recurrenceAnchorOffset: Joi.number().integer().min(0).max(2147483646),
+    doseAnchorOffset: Joi.number().integer().min(0).max(2147483646),
     repeatIntervalDays: Joi.number().integer().min(1).max(30).default(1),
     doseBasis: Joi.string().valid(...Object.values(DOSE_BASIS)).required(),
     doseValue: decimal(10, 4).required(),
     doseUnit: Joi.string().valid(...PRODUCTION_PROTOCOL_UNITS).required(),
     instructions: Joi.string().trim().max(4000).allow('', null).default(null),
 }).custom((value, helpers) => (
-    value.productId || value.recommendedProductName ? value : helpers.error('any.invalid')
+    value.productId || value.recommendedProductName || value.recommendedProductDetails?.proposed?.name ? value : helpers.error('any.invalid')
 )).unknown(false);
 /** Farm wall-clock time supports optional seconds and milliseconds, without a date or timezone. */
 const time = () => Joi.string().pattern(/^([01]\d|2[0-3]):[0-5]\d(?::[0-5]\d(?:\.\d{1,3})?)?$/).allow(null);
@@ -38,7 +64,7 @@ const meal = Joi.object({
     id: uuid(),
     mealNumber: Joi.number().integer().min(1).max(32767).allow(null).default(null),
     plannedTime: time().default(null),
-    items: Joi.array().items(item).min(1).max(100).required(),
+    items: Joi.array().items(item).max(PRODUCTION_PROTOCOL_LIMITS.items).required(),
 }).unknown(false);
 
 /**
@@ -49,16 +75,11 @@ const stage = Joi.object({
     id: uuid(),
     startDayOffset: Joi.number().integer().min(0).max(2147483646).required(),
     endDayOffset: Joi.number().integer().min(Joi.ref('startDayOffset')).max(2147483646).required(),
-    meals: Joi.array().items(meal).min(1).max(50).required(),
-}).custom((value, helpers) => {
-    const invalid = value.meals.some((group) => group.items.some((entry) => (
-        !allowedProductionProtocolDoseBases(entry.operationType, value.startDayOffset).includes(entry.doseBasis)
-    )));
-    return invalid ? helpers.error('any.invalid') : value;
+    meals: Joi.array().items(meal).max(PRODUCTION_PROTOCOL_LIMITS.items).required(),
 }).unknown(false);
 
 /** Reject overlapping day ranges, duplicate identities and graphs exceeding 1000 total items. */
-const stages = Joi.array().items(stage).max(50).custom((value, helpers) => {
+const stages = Joi.array().items(stage).max(PRODUCTION_PROTOCOL_LIMITS.stages).custom((value, helpers) => {
     if (hasOverlappingStages(value)) {
         return helpers.error('stages.overlap');
     }
@@ -66,11 +87,12 @@ const stages = Joi.array().items(stage).max(50).custom((value, helpers) => {
         [group.id, ...group.items.map((entry) => entry.id)]
     ))]).filter(Boolean);
     const count = value.reduce((sum, phase) => sum + phase.meals.reduce((n, group) => n + group.items.length, 0), 0);
-    return ids.length !== new Set(ids).size || count > 1000 ? helpers.error('any.invalid') : value;
+    return ids.length !== new Set(ids).size || count > PRODUCTION_PROTOCOL_LIMITS.items ? helpers.error('any.invalid') : value;
 }).messages({ 'stages.overlap': messages.PRODUCTION_PROTOCOL.STAGE_OVERLAP });
 
 /** Shared editable fields; status, version and audit fields remain owned by the service. */
 const header = {
+    contentVersion: Joi.number().integer().valid(1, 2),
     title: Joi.string().trim().max(500),
     summary: Joi.string().trim().max(4000).allow('', null),
     allowedVariancePct: decimal(3, 2, true).custom((value, helpers) => (
@@ -81,6 +103,18 @@ const header = {
 };
 const seasonParams = Joi.object({ seasonId: uuid().required() });
 const protocolParams = seasonParams.keys({ protocolId: uuid().required() });
+
+// Legacy clients cannot send empty groups or new dose routes without opting into V2.
+const validateContentVersion = (value, helpers) => {
+    if (value.contentVersion === 2) return value;
+    const invalid = value.stages?.some((phase) => !phase.meals.length || phase.meals.length > 50 || phase.meals.some((group) =>
+        !group.items.length || group.items.length > 100 || group.items.some((entry) =>
+            !isProductionProtocolDoseValid(entry, phase.startDayOffset)
+            || ['recommendedProductDetails', 'recommendedManufacturerId', 'dailyDoseIncrement',
+                'firstDayOffset', 'lastDayOffset', 'recurrenceAnchorOffset', 'doseAnchorOffset']
+                .some((field) => entry[field] != null))));
+    return invalid ? helpers.error('any.invalid') : value;
+};
 
 /** GET season context accepts only the scoped season identity and no query options. */
 const getSeason = {
@@ -122,12 +156,13 @@ const create = {
     body: Joi.object({
         ...header,
         templateId: uuid().allow(null),
+        templateVersionNo: Joi.number().integer().min(1),
         submitForApproval: Joi.boolean().default(false),
         title: header.title.required(),
         allowedVariancePct: header.allowedVariancePct.required(),
         rollingWindowDays: header.rollingWindowDays.default(7),
         stages: stages.default([]),
-    }).unknown(false),
+    }).custom(validateContentVersion).unknown(false),
 };
 
 /** PATCH requires a current content token and at least one editable field; omitted fields stay intact. */
@@ -136,9 +171,10 @@ const update = {
     body: Joi.object({
         ...header,
         templateId: uuid().allow(null),
+        templateVersionNo: Joi.number().integer().min(1),
         submitForApproval: Joi.boolean().default(false),
         revision: Joi.string().pattern(/^[a-f0-9]{64}$/).required(),
-    }).or(...Object.keys(header)).unknown(false),
+    }).or(...Object.keys(header)).custom(validateContentVersion).unknown(false),
 };
 
 /** Cancellation requires the current content token and a nonblank reason for the status history. */

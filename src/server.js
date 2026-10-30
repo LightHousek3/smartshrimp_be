@@ -5,6 +5,7 @@ const logger = require('./config/logger');
 const connectDB = require('./config/db');
 const prisma = require('./config/prisma');
 const ragDocumentWorker = require('./services/ragDocumentWorker');
+const { productionScheduleWorker } = require('./services');
 const { attachNotificationSocket } = require('./realtime/notification.socket');
 
 let server;
@@ -14,6 +15,7 @@ const startServer = async () => {
     // Connect to Postgre
     await connectDB();
     ragDocumentWorker.start();
+    productionScheduleWorker.start();
 
     server = createServer(app);
     socketServer = attachNotificationSocket(server);
@@ -50,6 +52,7 @@ process.on('uncaughtException', (error) => {
 // ─── Handle SIGTERM ──────────────────────────────────────
 process.on('SIGTERM', () => {
     ragDocumentWorker.stop();
+    productionScheduleWorker.stop();
     logger.info('SIGTERM received. Shutting down gracefully...');
     if (server) {
         socketServer.close(async () => {

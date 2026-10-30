@@ -12,6 +12,7 @@ const expertDashboardService = require('./expertDashboard.service');
 const ownerDashboardService = require('./ownerDashboard.service');
 const expertSeasonService = require('./expertSeason.service');
 const expertProductionProtocolService = require('./expertProductionProtocol.service');
+const productionScheduleWorker = require('./productionScheduleWorker');
 const expertProtocolTemplateService = require('./expertProtocolTemplate.service');
 const waterLogService = require('./waterLog.service');
 const shrimpHealthService = require('./shrimpHealth.service');
@@ -51,6 +52,7 @@ module.exports = {
     ownerDashboardService,
     expertSeasonService,
     expertProductionProtocolService,
+    productionScheduleWorker,
     expertProtocolTemplateService,
     waterLogService,
     shrimpHealthService,

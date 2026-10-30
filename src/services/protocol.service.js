@@ -1,5 +1,8 @@
 const prisma = require('../config/prisma');
-const { ApiError } = require('../utils');
+const logger = require('../config/logger');
+const config = require('../config');
+const { ApiError, productionProtocolV2: v2 } = require('../utils');
+const productionReview = require('./productionProtocolReview.service');
 const {
     PROTOCOL_TYPE: T,
     PROTOCOL_STATUS: S,
@@ -74,6 +77,7 @@ const ITEM_SELECT = {
     startDayOffset: true,
     endDayOffset: true,
     repeatIntervalDays: true,
+    productionMealId: true, dailyDoseIncrement: true, recurrenceAnchorDay: true, doseAnchorDay: true, materialSnapshot: true,
     product: { select: { name: true } },
 };
 const SCHEDULE_SELECT = {
@@ -85,6 +89,7 @@ const SCHEDULE_SELECT = {
     unit: true,
     basisQuantity: true,
     basisUnit: true,
+    doseValueSnapshot: true,
     cancellationReason: true,
     cancelledAt: true,
     execution: {
@@ -230,7 +235,7 @@ const list = async (ownerId, { seasonId, protocolType, status, page = 1, limit =
 const findOwned = async (client, ownerId, id, select = DETAIL_SELECT) => {
     const protocol = await client.protocol.findFirst({
         where: { id, ...ownedWhere(ownerId) },
-        select,
+        select: { ...select, contentVersion: true, sourceTemplateVersionNo: true },
     });
     if (!protocol) throw ApiError.notFound(messages.PROTOCOL.NOT_FOUND);
     return protocol;
@@ -300,6 +305,11 @@ const detail = async (ownerId, id) =>
                 anchorDate: anchor,
                 durationDays: duration._max.endDayOffset ?? 0,
                 reviewedAt: p.reviewedAt,
+                contentVersion: p.contentVersion ?? 1,
+                sourceTemplateVersionNo: p.sourceTemplateVersionNo ?? null,
+                materialReviews: productionReview.isV2(p) ? await productionReview.reviews(client, p, ownerId) : [],
+                scheduleMessage: productionReview.isV2(p) && p.status === S.APPROVED
+                    ? messages.PRODUCTION_PROTOCOL.SCHEDULE_WAITING : null,
                 reviewerName: refs.accounts.get(p.reviewedBy) ?? null,
                 rejectionReason: p.rejectionReason,
                 supersededAt: p.supersededAt,
@@ -327,6 +337,7 @@ const day = async (ownerId, id, selectedDay) =>
                 id: true,
                 protocolType: true,
                 status: true,
+                contentVersion: true,
                 reviewedAt: true,
                 season: { select: { stockingDate: true } },
             });
@@ -365,20 +376,22 @@ const day = async (ownerId, id, selectedDay) =>
                     : [],
             ]);
             const rows = items
-                .filter((i) => (selectedDay - i.startDayOffset) % i.repeatIntervalDays === 0)
+                .map((item) => { if (v2.isV2(p)) v2.assertItemMetadata(item); return item; })
+                .filter((i) => v2.occursOn(i, selectedDay))
                 .flatMap((i) => {
                     const matches = schedules.filter((s) => s.protocolItemId === i.id);
                     return (matches.length ? matches : [null]).map((s) => ({
                         itemId: i.id,
                         operationType: i.operationType,
-                        productName: i.product?.name ?? i.recommendedProductName ?? 'Vật tư',
+                        productName: i.materialSnapshot?.name ?? i.product?.name ?? i.recommendedProductName ?? 'Vật tư',
                         time: s
                             ? new Date(s.scheduledAt.getTime() + VIETNAM_OFFSET_MS)
                                   .toISOString()
                                   .slice(11, 16)
                             : (i.plannedTime?.toISOString().slice(11, 16) ?? null),
                         doseBasis: i.doseBasis,
-                        doseValue: Number(i.doseValue),
+                        doseValue: Number(s?.doseValueSnapshot ?? v2.doseAtDay(i, selectedDay)),
+                        ...v2.v2WireItem(i),
                         doseUnit: i.doseUnit,
                         instructions: i.instructions,
                         scheduleId: s?.id ?? null,
@@ -393,7 +406,9 @@ const day = async (ownerId, id, selectedDay) =>
                         basisUnit: s?.basisUnit ?? null,
                         actualQuantity: s?.execution ? Number(s.execution.actualQuantity) : null,
                         actualProductName: s?.execution?.actualProduct?.name ?? null,
-                        actualUnit: s?.execution?.actualProduct?.unit ?? s?.unit ?? null,
+                        actualUnit: s?.execution && v2.isV2(p)
+                            ? s.unit
+                            : s?.execution?.actualProduct?.unit ?? s?.unit ?? null,
                         varianceReason: s?.execution?.varianceReason ?? null,
                         executorName: s?.execution?.executor.fullName ?? null,
                         executedAt: s?.execution?.executedAt ?? null,
@@ -497,21 +512,39 @@ const supersede = async (client, p, ownerId, now) => {
         if (current) throw ApiError.conflict(messages.PROTOCOL.PREDECESSOR);
         return;
     }
-    const previous = await client.protocol.findFirst({
+    let previous = await client.protocol.findFirst({
         where: { id: p.supersedesProtocolId, ...context },
-        select: { id: true, versionNo: true, status: true },
+        select: { id: true, versionNo: true, status: true, supersedesProtocolId: true },
     });
     if (
         !previous ||
-        previous.versionNo + 1 !== p.versionNo ||
-        (current && current.id !== previous.id)
+        previous.versionNo + 1 !== p.versionNo
     )
         throw ApiError.conflict(messages.PROTOCOL.PREDECESSOR);
-    if (previous.status !== S.APPROVED) {
+    if (p.protocolType !== T.PRODUCTION && previous.status !== S.APPROVED) {
         if (![S.REJECTED, S.CANCELLED, S.ABORTED].includes(previous.status) || current)
             throw ApiError.conflict(messages.PROTOCOL.PREDECESSOR);
         return;
     }
+    // Cancelled/rejected attempts remain in the version chain but own no active plan.
+    // Follow contiguous scoped links to the actual approved ancestor, never skip a broken link.
+    while (previous.status !== S.APPROVED) {
+        if (![S.REJECTED, S.CANCELLED, S.ABORTED].includes(previous.status))
+            throw ApiError.conflict(messages.PROTOCOL.PREDECESSOR);
+        if (!previous.supersedesProtocolId) {
+            if (previous.versionNo !== 1 || current) throw ApiError.conflict(messages.PROTOCOL.PREDECESSOR);
+            return;
+        }
+        const ancestor = await client.protocol.findFirst({
+            where: { id: previous.supersedesProtocolId, ...context },
+            select: { id: true, versionNo: true, status: true, supersedesProtocolId: true },
+        });
+        if (!ancestor || ancestor.versionNo + 1 !== previous.versionNo)
+            throw ApiError.conflict(messages.PROTOCOL.PREDECESSOR);
+        previous = ancestor;
+    }
+    if ((p.protocolType === T.PRODUCTION && !current) || (current && current.id !== previous.id))
+        throw ApiError.conflict(messages.PROTOCOL.PREDECESSOR);
     const changed = await client.protocol.updateMany({
         where: { id: previous.id, status: S.APPROVED },
         data: { status: S.SUPERSEDED, supersededAt: now, updatedAt: now },
@@ -588,7 +621,7 @@ const notifyReview = async (client, p, approved) => {
  * Version replacement, decision history, case state and persisted notices roll back together.
  * Approval clears any rejection reason; socket delivery happens only after commit.
  */
-const review = async (ownerId, id, { updatedAt, reason }, approved) => {
+const review = async (ownerId, id, { updatedAt, reason, materialSelections = [], contentVersion }, approved) => {
     let result;
     try {
         result = await prisma.$transaction(
@@ -616,6 +649,11 @@ const review = async (ownerId, id, { updatedAt, reason }, approved) => {
                 });
                 if (season.count !== 1) throw ApiError.conflict(messages.PROTOCOL.CONFLICT);
                 if (approved) {
+                    // Old Owner clients must see the evidence and acknowledge V2 before approving it.
+                    if (productionReview.isV2(p)) {
+                        if (contentVersion !== 2) throw ApiError.conflict(messages.PRODUCTION_PROTOCOL.V2_REQUIRED);
+                        await productionReview.resolveForApproval(client, p, ownerId, materialSelections);
+                    } else if (materialSelections.length) throw ApiError.badRequest(messages.PRODUCTION_PROTOCOL.MATERIAL_RESOLUTION);
                     await validateApproval(client, p);
                     await supersede(client, p, ownerId, now);
                 }
@@ -662,16 +700,27 @@ const review = async (ownerId, id, { updatedAt, reason }, approved) => {
                 );
                 return { data: { id, status, updatedAt: now }, notices };
             },
-            { isolationLevel: 'Serializable' },
+            { isolationLevel: 'Serializable', timeout: config.productionProtocol.transactionTimeoutMs },
         );
     } catch (error) {
         if (['P2002', 'P2003', 'P2034'].includes(error.code)) throw ApiError.conflict(messages.PROTOCOL.CONFLICT);
         throw error;
     }
-    result.notices.forEach(({ accountId, id: notificationId }) =>
-        emitNotification(accountId, 'notification:new', { id: notificationId, referenceId: id }),
-    );
+    for (const { accountId, id: notificationId } of result.notices) {
+        // Review is already committed; a realtime outage must not report a failed decision.
+        try {
+            emitNotification(accountId, 'notification:new', { id: notificationId, referenceId: id });
+        } catch (_) {
+            logger.warn('Protocol review notification realtime delivery failed after commit.');
+        }
+    }
     return result.data;
 };
 
-module.exports = { list, detail, day, inventory, review };
+const materialOptions = async (ownerId, id, { itemId, search }) => prisma.$transaction(async client => {
+    const protocol = await findOwned(client, ownerId, id);
+    if (!productionReview.isV2(protocol)) throw ApiError.conflict(messages.PRODUCTION_PROTOCOL.V2_REQUIRED);
+    return productionReview.options(client, ownerId, protocol, itemId, search);
+}, { isolationLevel: 'RepeatableRead', timeout: config.productionProtocol.transactionTimeoutMs });
+
+module.exports = { list, detail, day, inventory, review, materialOptions };

@@ -8,6 +8,9 @@ const { requireCompleteInventoryProduct, isInventoryProductReviewable } = requir
 const { stockQuantity, vietnamDate } = require('./inventoryQuantity');
 const { assertTemplateDose } = require('./protocolTemplateRules');
 const { applicationRuns } = require('./templateApplicationDays');
+const productionProtocolV2 = require('./productionProtocolV2');
+const productionSchedule = require('./productionSchedule');
+const { assertProtocolHarvestCoverage } = require('./productionProtocol');
 const {
     getMaterialSafety,
     assertMaterialSafety,
@@ -16,6 +19,9 @@ const {
 } = require('./materialCompliance');
 
 module.exports = {
+    assertProtocolHarvestCoverage,
+    productionSchedule,
+    productionProtocolV2,
     assertTemplateDose,
     applicationRuns,
     getMaterialSafety,
