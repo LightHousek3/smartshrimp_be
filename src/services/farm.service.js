@@ -9,8 +9,7 @@ const {
 
 const OPEN_SEASON_STATUSES = ['PLANNING', 'ACTIVE'];
 
-// Farm screens do not consume the master status field. Keep this projection
-// compatible with both the existing PostgreSQL enum and V2 varchar schema.
+// Farm screens only consume these identity, location and timestamp fields.
 const FARM_SELECT = {
     id: true,
     ownerId: true,

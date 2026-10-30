@@ -380,7 +380,7 @@ model Farm {
   latitude          Decimal? @db.Decimal(10, 8)
   longitude         Decimal? @db.Decimal(11, 8)
   totalAreaHectares Decimal? @map("total_area_hectares") @db.Decimal(10, 2)
-  status            String   @default("active") @db.VarChar(8)
+  status            FarmStatus @default(ACTIVE)
   createdAt         DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
   updatedAt         DateTime @default(now()) @map("updated_at") @db.Timestamptz(6)
   owner             Account  @relation(fields: [ownerId], references: [id], onDelete: Restrict)

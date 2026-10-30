@@ -4,6 +4,7 @@ const {
     PROTOCOL_TYPE: T,
     PROTOCOL_STATUS: S,
     NOTIFICATION_TYPE,
+    FARM_STATUS,
     messages,
 } = require('../constants');
 const { emitNotification } = require('../realtime/notification.socket');
@@ -310,7 +311,7 @@ const detail = async (ownerId, id) =>
                 canReview:
                     p.status === S.PENDING_APPROVAL &&
                     ['PLANNING', 'ACTIVE'].includes(p.season.status) &&
-                    p.season.pond.farm.status.toUpperCase() === 'ACTIVE',
+                    p.season.pond.farm.status === FARM_STATUS.ACTIVE,
             };
         },
         { isolationLevel: 'RepeatableRead' },
@@ -600,7 +601,7 @@ const review = async (ownerId, id, { updatedAt, reason }, approved) => {
                 if (p.status !== S.PENDING_APPROVAL) throw ApiError.conflict(messages.PROTOCOL.CONFLICT);
                 if (
                     !['PLANNING', 'ACTIVE'].includes(p.season.status) ||
-                    p.season.pond.farm.status.toUpperCase() !== 'ACTIVE'
+                    p.season.pond.farm.status !== FARM_STATUS.ACTIVE
                 )
                     throw ApiError.forbidden(messages.PROTOCOL.CLOSED);
                 const now = new Date();
