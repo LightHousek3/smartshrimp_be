@@ -5,6 +5,7 @@ const {
     PERSONNEL_ROLE,
     SEASON_STATUS,
     HEALTH_STATUS,
+    OPERATION_STATUS,
     WATER_RECORDED_AT_FUTURE_TOLERANCE_SECONDS,
 } = require('../constants');
 
@@ -451,19 +452,6 @@ const voidShrimpHealthLog = async (accountId, seasonId, logId, { voidReason }) =
 
     const season = await resolveKtvScope(accountId, seasonId);
 
-    const log = await prisma.shrimpHealthLog.findFirst({
-        where: { id: logId, seasonId },
-    });
-    if (!log) {
-        throw ApiError.notFound(messages.SHRIMP_HEALTH_LOG.NOT_FOUND);
-    }
-    if (log.isVoided) {
-        throw ApiError.conflict(messages.SHRIMP_HEALTH_LOG.ALREADY_VOIDED);
-    }
-    if (season.status !== SEASON_STATUS.ACTIVE) {
-        throw ApiError.conflict(messages.SHRIMP_HEALTH_LOG.VOID_FORBIDDEN_STATE);
-    }
-
     // BR-HEALTH: Chỉ được hủy hiệu lực bản ghi trong ngày hôm nay (farm timezone UTC+7)
     const nowFarm = new Date(Date.now() + FARM_TZ_OFFSET_MS);
     const startOfTodayFarm = new Date(Date.UTC(
@@ -472,28 +460,40 @@ const voidShrimpHealthLog = async (accountId, seasonId, logId, { voidReason }) =
         nowFarm.getUTCDate(),
     ) - FARM_TZ_OFFSET_MS);
 
-    const recordedAt = new Date(log.recordedAt);
-    if (recordedAt.getTime() < startOfTodayFarm.getTime()) {
-        throw ApiError.badRequest(messages.SHRIMP_HEALTH_LOG.VOID_ONLY_TODAY);
-    }
-
-    let updated;
-    try {
-        updated = await prisma.shrimpHealthLog.update({
-            where: { id: logId },
+    const updated = await prisma.$transaction(async (tx) => {
+        // Shared order with generation/execution: season first, then dependent schedules.
+        await tx.$queryRaw`SELECT id FROM aquaculture_seasons WHERE id = ${seasonId}::uuid FOR UPDATE`;
+        const currentSeason = await tx.aquacultureSeason.findUnique({ where: { id: seasonId }, select: { status: true } });
+        if (currentSeason?.status !== SEASON_STATUS.ACTIVE) {
+            throw ApiError.conflict(messages.SHRIMP_HEALTH_LOG.VOID_FORBIDDEN_STATE);
+        }
+        const log = await tx.shrimpHealthLog.findFirst({ where: { id: logId, seasonId } });
+        if (!log) throw ApiError.notFound(messages.SHRIMP_HEALTH_LOG.NOT_FOUND);
+        if (log.isVoided) throw ApiError.conflict(messages.SHRIMP_HEALTH_LOG.ALREADY_VOIDED);
+        if (new Date(log.recordedAt).getTime() < startOfTodayFarm.getTime()) {
+            throw ApiError.badRequest(messages.SHRIMP_HEALTH_LOG.VOID_ONLY_TODAY);
+        }
+        const voidedAt = new Date();
+        const changed = await tx.shrimpHealthLog.updateMany({
+            where: { id: logId, seasonId, isVoided: false },
             data: {
                 isVoided: true,
                 voidedBy: accountId,
-                voidedAt: new Date(),
+                voidedAt,
                 voidReason: voidReason.trim(),
             },
         });
-    } catch (error) {
-        if (error?.code === 'P2025') {
+        if (changed.count !== 1) {
             throw ApiError.conflict(messages.SHRIMP_HEALTH_LOG.ALREADY_VOIDED);
         }
-        throw error;
-    }
+        // Cancel only pending facts. Completed executions and their inventory history stay immutable.
+        await tx.operationSchedule.updateMany({
+            where: { seasonId, sourceHealthLogId: logId, status: OPERATION_STATUS.PLANNED, execution: null },
+            data: { status: OPERATION_STATUS.CANCELLED, cancelledAt: voidedAt, cancelledBy: accountId,
+                cancellationReason: messages.PRODUCTION_PROTOCOL.BIOMASS_SOURCE_VOIDED },
+        });
+        return tx.shrimpHealthLog.findFirst({ where: { id: logId, seasonId } });
+    });
 
     const accountMap = await fetchAccountMap([updated.recordedBy, updated.voidedBy]);
     return normalizeLog(updated, season.stockingDate, accountMap);

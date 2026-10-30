@@ -44,9 +44,13 @@ const review = {
     body: Joi.object({
         updatedAt: version,
         decision: Joi.string().valid('APPROVE', 'REJECT').required(),
+        contentVersion: Joi.number().integer().valid(1, 2),
+        materialSelections: Joi.when('decision', { is: 'APPROVE', then: Joi.array().max(1000).unique('itemId').items(
+            Joi.object({ itemId: uuid.required(), productId: uuid.required() }).unknown(false)), otherwise: Joi.forbidden() }),
         reason: Joi.when('decision', {
             is: 'REJECT', then: Joi.string().trim().min(1).max(2000).required(), otherwise: Joi.forbidden(),
         }),
     }).unknown(false),
 };
-module.exports = { list, detail, day, inventory, review };
+const materialOptions = { params, query: Joi.object({ itemId: uuid.required(), search: Joi.string().trim().max(255).allow('').default('') }).unknown(false) };
+module.exports = { list, detail, day, inventory, review, materialOptions };

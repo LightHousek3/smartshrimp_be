@@ -1,11 +1,13 @@
 const crypto = require('crypto');
 const { Prisma } = require('@prisma/client');
 const prisma = require('../config/prisma');
+const config = require('../config');
 const { emitNotification } = require('../realtime');
 const {
-    ApiError, stockQuantity, vietnamDate, requireCompleteInventoryProduct,
+    ApiError, stockQuantity, vietnamDate, requireCompleteInventoryProduct, productionProtocolV2: v2, productionSchedule: scheduleRules,
 } = require('../utils');
 const withdrawal = require('./harvestWithdrawal.service');
+const { materialSelect, assertOperationalMaterial, assertApprovedMaterial } = require('./productionProtocolReview.service');
 const {
     messages,
     PERSONNEL_ROLE,
@@ -13,19 +15,29 @@ const {
     OPERATION_STATUS,
     OPERATION_TYPE,
     NOTIFICATION_TYPE,
+    PRODUCTION_PROTOCOL_LIMITS,
+    FARM_STATUS,
+    PROTOCOL_STATUS,
 } = require('../constants');
 
 const toNumber = (val) => (val == null ? null : Number(val));
+const ITEM_STORAGE_SELECT = { productionMealId: true, dailyDoseIncrement: true,
+    recurrenceAnchorDay: true, doseAnchorDay: true, materialSnapshot: true };
 
 const formatSchedule = (s) => {
     if (!s) return s;
+    const material = s.protocolItem?.materialSnapshot;
+    const publicItem = s.protocolItem && Object.fromEntries(Object.entries(s.protocolItem).filter(([key]) =>
+        !Object.hasOwn(ITEM_STORAGE_SELECT, key)));
     return {
         ...s,
+        ...(material && s.product && material.id === s.product.id && { product: { ...s.product,
+            name: material.name, category: material.category, unit: material.unit } }),
         plannedQuantity: toNumber(s.plannedQuantity),
         doseValueSnapshot: toNumber(s.doseValueSnapshot),
         basisQuantity: toNumber(s.basisQuantity),
         protocolItem: s.protocolItem ? {
-            ...s.protocolItem,
+            ...publicItem,
             protocol: s.protocolItem.protocol ? {
                 ...s.protocolItem.protocol,
                 allowedVariancePct: toNumber(s.protocolItem.protocol.allowedVariancePct),
@@ -80,22 +92,22 @@ const listSchedules = async (technicianId, seasonId, query = {}) => {
         throw ApiError.notFound('Không tìm thấy vụ nuôi');
     }
 
-    // 3. Biomass health check for warning banner (within 3 days)
-    const threeDaysAgo = new Date();
-    threeDaysAgo.setDate(threeDaysAgo.getDate() - 3);
+    // Match the generator's freshness policy; future/voided measurements cannot authorize a dose.
+    const now = new Date();
+    const freshSince = new Date(now.getTime() - PRODUCTION_PROTOCOL_LIMITS.biomassMaxAgeHours * 3600000);
     const recentBiomassLog = await prisma.shrimpHealthLog.findFirst({
         where: {
             seasonId,
             isVoided: false,
-            estimatedBiomassKg: { not: null },
-            recordedAt: { gte: threeDaysAgo },
+            estimatedBiomassKg: { gt: 0 },
+            recordedAt: { gte: freshSince, lte: now },
         },
         select: { id: true, estimatedBiomassKg: true, recordedAt: true },
         orderBy: { recordedAt: 'desc' },
     });
     const hasBiomassWarning = !recentBiomassLog;
     const biomassWarningMessage = hasBiomassWarning
-        ? 'Chưa có bản ghi sinh khối hợp lệ trong 3 ngày — không thể tính liều theo % sinh khối.'
+        ? messages.PRODUCTION_PROTOCOL.BIOMASS_WARNING
         : null;
 
     // 4. Overall stats summary for top tabs / header
@@ -168,6 +180,7 @@ const listSchedules = async (technicianId, seasonId, query = {}) => {
                         mealNumber: true,
                         plannedTime: true,
                         instructions: true,
+                        ...ITEM_STORAGE_SELECT,
                         protocol: {
                             select: {
                                 id: true,
@@ -253,6 +266,9 @@ const getSchedule = async (technicianId, scheduleId) => {
                     doseUnit: true,
                     instructions: true,
                     sequenceOrder: true,
+                    recommendedProductDetails: true,
+                    recommendedManufacturerId: true,
+                    ...ITEM_STORAGE_SELECT,
                     createdAt: true,
                     updatedAt: true,
                     protocol: {
@@ -340,8 +356,10 @@ const executeSchedule = async (technicianId, scheduleId, payload) => {
                 const schedule = await tx.operationSchedule.findUnique({
                     where: { id: scheduleId },
                     include: {
-                        season: { include: { pond: { select: { farmId: true } } } },
-                        protocolItem: { select: { protocol: { select: { allowedVariancePct: true, protocolType: true, diseaseCaseId: true } } } },
+                        season: { include: { pond: { select: { farmId: true, farm: { select: { ownerId: true, status: true } } } } } },
+                        protocolItem: { select: { ...ITEM_STORAGE_SELECT, operationType: true, doseBasis: true, doseValue: true,
+                            doseUnit: true, startDayOffset: true, endDayOffset: true, repeatIntervalDays: true, mealNumber: true, instructions: true,
+                            protocol: { select: { contentVersion: true, allowedVariancePct: true, protocolType: true, diseaseCaseId: true, status: true } } } },
                     },
                 });
                 if (!schedule) throw ApiError.notFound(messages.OPERATION.NOT_FOUND);
@@ -369,6 +387,28 @@ const executeSchedule = async (technicianId, scheduleId, payload) => {
                 if (schedule.season.status !== SEASON_STATUS.ACTIVE) throw ApiError.badRequest(messages.OPERATION.SEASON_NOT_ACTIVE);
                 if (schedule.status !== OPERATION_STATUS.PLANNED) throw ApiError.conflict(messages.OPERATION.SCHEDULE_NOT_PLANNED);
                 const protocol = schedule.protocolItem.protocol;
+                const approvedMaterial = schedule.protocolItem.materialSnapshot;
+                if (v2.isV2(schedule.protocolItem.protocol)) {
+                    v2.assertItemMetadata(schedule.protocolItem);
+                    if (!approvedMaterial || targetProductId !== schedule.productId) throw ApiError.conflict(messages.PRODUCTION_PROTOCOL.MATERIAL_LOCKED);
+                    if (protocol.status !== PROTOCOL_STATUS.APPROVED || schedule.season.pond.farm.status !== FARM_STATUS.ACTIVE) {
+                        throw ApiError.conflict(messages.PRODUCTION_PROTOCOL.STATE);
+                    }
+                    if (['PER_KG_BIOMASS', 'PERCENT_BIOMASS'].includes(schedule.doseBasisSnapshot ?? schedule.protocolItem.doseBasis)) {
+                        // A row lock also detects a void committed after this Serializable snapshot began.
+                        if (schedule.sourceHealthLogId) {
+                            await tx.$queryRaw`SELECT id FROM shrimp_health_logs WHERE id = ${schedule.sourceHealthLogId}::uuid AND season_id = ${schedule.seasonId}::uuid FOR SHARE`;
+                        }
+                        const source = schedule.sourceHealthLogId && await tx.shrimpHealthLog.findFirst({
+                            where: { id: schedule.sourceHealthLogId, seasonId: schedule.seasonId, isVoided: false },
+                        });
+                        // The season lock serializes this check with source voiding and schedule generation.
+                        // Freshness is measured at the saved occurrence, preserving retrospective execution.
+                        if (!source || !scheduleRules.biomassAt([source], schedule.scheduledAt, new Date(), config.productionProtocol.biomassMaxAgeHours)) {
+                            throw ApiError.conflict(messages.PRODUCTION_PROTOCOL.BIOMASS_SOURCE_INVALID);
+                        }
+                    }
+                }
                 const planned = new Prisma.Decimal(schedule.plannedQuantity);
                 const variance = actual.minus(planned).abs().div(planned).mul(100);
                 if (variance.gt(protocol.allowedVariancePct ?? 10) && !payload.varianceReason?.trim()) {
@@ -381,11 +421,15 @@ const executeSchedule = async (technicianId, scheduleId, payload) => {
                     await tx.$queryRaw`SELECT id FROM products WHERE id = ${targetProductId}::uuid FOR UPDATE`;
                     const product = await tx.product.findFirst({
                         where: { id: targetProductId, farmId: schedule.season.pond.farmId },
-                        include: { compliance: true },
+                        ...(approvedMaterial ? { select: materialSelect } : { include: { compliance: true } }),
                     });
                     if (!product) throw ApiError.badRequest(messages.HARVEST.WITHDRAWAL_PRODUCT_NOT_READY);
                     if (product.status !== 'ACTIVE') throw ApiError.badRequest(messages.HARVEST.WITHDRAWAL_PRODUCT_NOT_READY);
                     requireCompleteInventoryProduct(product);
+                    if (approvedMaterial) {
+                        assertOperationalMaterial(product, schedule.protocolItem, schedule.season.pond.farmId, schedule.season.pond.farm.ownerId);
+                        assertApprovedMaterial(product, approvedMaterial);
+                    }
                     const requested = stockQuantity(actual, schedule.unit, product);
                     const balances = await tx.inventoryBalance.findMany({
                         where: { productId: targetProductId, quantity: { gt: 0 }, expiryDate: { gte: vietnamDate(executedAt) } },

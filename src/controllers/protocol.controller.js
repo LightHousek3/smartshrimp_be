@@ -56,4 +56,9 @@ const inventory = asyncHandler(async (req, res) => {
         data: await protocolService.inventory(req.account.id, req.params.protocolId, req.params.scheduleId),
     });
 });
-module.exports = { list, detail, day, inventory, review };
+/** GET /owner/protocols/:protocolId/material-options */
+const materialOptions = asyncHandler(async (req, res) => {
+    ResponseHandler.success(res, { message: messages.PROTOCOL.FETCHED,
+        data: await protocolService.materialOptions(req.account.id, req.params.protocolId, req.query) });
+});
+module.exports = { list, detail, day, inventory, review, materialOptions };

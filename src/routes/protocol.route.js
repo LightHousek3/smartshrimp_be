@@ -24,6 +24,13 @@ router.get('/', validate(protocolValidator.list), protocolController.list);
 router.get('/:protocolId', validate(protocolValidator.detail), protocolController.detail);
 
 /**
+ * @route   GET /api/v1/owner/protocols/:protocolId/material-options
+ * @desc    Find reviewed catalog materials compatible with an owned V2 prescription
+ * @access  Farm Owner
+ */
+router.get('/:protocolId/material-options', validate(protocolValidator.materialOptions), protocolController.materialOptions);
+
+/**
  * @route   GET /api/v1/owner/protocols/:protocolId/days/:day
  * @desc    Get planned and actual items for a protocol day
  * @access  Farm Owner
