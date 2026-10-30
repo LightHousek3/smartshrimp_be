@@ -1,6 +1,7 @@
 const httpStatus = require('./httpStatus');
 const messages = require('./messages');
 const NOTIFICATION_TYPE = require('./notificationType');
+const { FarmStatus: FARM_STATUS } = require('@prisma/client');
 const HARVEST_ERROR_CODE = Object.freeze({
     TIME_NOT_AFTER_LATEST: 'HARVEST_TIME_NOT_AFTER_LATEST',
     PARTIAL_COUNT_REQUIRED: 'HARVEST_PARTIAL_COUNT_REQUIRED',
@@ -382,6 +383,7 @@ const checkWaterThresholds = (shrimpType, values = {}) => {
 };
 
 module.exports = {
+    FARM_STATUS,
     HARVEST_POLICY,
     HARVEST_LIMITS,
     HARVEST_ERROR_CODE,

@@ -8,6 +8,7 @@ const {
     messages,
     ACCOUNT_ROLE,
     ACCOUNT_STATUS,
+    FARM_STATUS,
     SEASON_STATUS,
     ALERT_KIND,
     DASHBOARD_PERIOD,
@@ -34,7 +35,7 @@ const seasonContextSelect = {
  */
 const visibleSeason = (ownerId) => ({
     status: { in: [SEASON_STATUS.PLANNING, SEASON_STATUS.ACTIVE] },
-    pond: { farm: { ownerId, status: 'active' } },
+    pond: { farm: { ownerId, status: FARM_STATUS.ACTIVE } },
 });
 
 /** Build a stable Vietnam calendar date, independent of the server's local timezone. */
@@ -67,6 +68,35 @@ const alertPreview = async (delegate, where, select, kind, normalize, dateField 
         }),
     ]);
     return count === 0 ? null : { kind, count, preview: normalize(items[0]) };
+};
+
+/** Group all actionable urgent titles by farm/pond/season; retain the newest task as the detail target. */
+const urgentTaskAlerts = (tasks, farmById, seasonById) => {
+    const groups = new Map();
+    for (const task of tasks) {
+        const key = JSON.stringify([task.farmId, task.seasonId]);
+        const group = groups.get(key);
+        if (group) {
+            group.count += 1;
+            group.titles.push(task.title);
+        } else {
+            groups.set(key, {
+                count: 1,
+                titles: [task.title],
+                preview: {
+                    id: task.id,
+                    farmId: task.farmId,
+                    farmName: farmById.get(task.farmId).name,
+                    ...(task.seasonId && contextForSeason(seasonById.get(task.seasonId))),
+                },
+            });
+        }
+    }
+    return [...groups.values()].map(({ count, titles, preview }) => ({
+        kind: ALERT_KIND.URGENT_TASK,
+        count,
+        preview: { ...preview, title: titles.join(', ') },
+    }));
 };
 
 /** Compute lot-valued inventory using Decimal so lots and alert thresholds do not drift. */
@@ -149,7 +179,7 @@ const getOverview = async (ownerId, now = new Date()) =>
         async (tx) => {
             const [farms, financeFarms, seasons, personnel] = await Promise.all([
                 tx.farm.findMany({
-                    where: { ownerId, status: 'active' },
+                    where: { ownerId, status: FARM_STATUS.ACTIVE },
                     select: {
                         id: true,
                         name: true,
@@ -202,7 +232,7 @@ const getOverview = async (ownerId, now = new Date()) =>
                 // Protocol/case captions use farm and season; pondId still supports navigation.
                 ...contextForSeason(item.season, { includePondName: false }),
             });
-            const [products, ...alerts] = await Promise.all([
+            const [products, tasks, ...alerts] = await Promise.all([
                 tx.product.findMany({
                     where: { farmId: { in: farmIds }, status: 'ACTIVE' },
                     select: {
@@ -221,24 +251,16 @@ const getOverview = async (ownerId, now = new Date()) =>
                     orderBy: [{ name: 'asc' }, { id: 'asc' }],
                 }),
                 // Existing task statuses determine actionable work, without soft-delete columns.
-                alertPreview(
-                    tx.task,
-                    {
+                tx.task.findMany({
+                    where: {
                         farmId: { in: farmIds },
                         priority: 'URGENT',
                         status: { in: ['PENDING', 'IN_PROGRESS'] },
                         OR: [{ seasonId: null }, { seasonId: { in: seasonIds } }],
                     },
-                    { id: true, title: true, farmId: true, seasonId: true },
-                    ALERT_KIND.URGENT_TASK,
-                    (item) => ({
-                        id: item.id,
-                        title: item.title,
-                        farmId: item.farmId,
-                        farmName: farmById.get(item.farmId).name,
-                        ...(item.seasonId && contextForSeason(seasonById.get(item.seasonId))),
-                    }),
-                ),
+                    select: { id: true, title: true, farmId: true, seasonId: true },
+                    orderBy: [{ createdAt: 'desc' }, { id: 'desc' }],
+                }),
                 alertPreview(
                     tx.protocol,
                     { ...protocolWhere, protocolType: 'TREATMENT' },
@@ -287,7 +309,7 @@ const getOverview = async (ownerId, now = new Date()) =>
                 ),
             ]);
             const { inventories, lowStockAlerts } = inventorySummary(farms, products);
-            alerts.splice(3, 0, ...lowStockAlerts);
+            const urgentAlerts = urgentTaskAlerts(tasks, farmById, seasonById);
             const activeSeasons = seasons.filter(({ status }) => status === SEASON_STATUS.ACTIVE);
             const today = new Date(`${todayInVietnam(now)}T00:00:00Z`);
             return {
@@ -298,7 +320,7 @@ const getOverview = async (ownerId, now = new Date()) =>
                     ponds: farms.reduce((sum, farm) => sum + farm._count.ponds, 0),
                     activeSeasons: activeSeasons.length,
                 },
-                alerts: alerts.filter(Boolean),
+                alerts: [...urgentAlerts, ...alerts.slice(0, 2), ...lowStockAlerts, ...alerts.slice(2)].filter(Boolean),
                 seasons: activeSeasons.map((season) => ({
                     ...contextForSeason(season),
                     shrimpType: season.shrimpType,

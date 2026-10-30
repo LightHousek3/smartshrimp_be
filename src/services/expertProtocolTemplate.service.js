@@ -12,11 +12,11 @@ const {
     assessTemplateProposal,
     productFromRecommendation,
 } = require('../utils');
-const { messages } = require('../constants');
+const { messages, FARM_STATUS } = require('../constants');
 
 const notFound = () =>
     ApiError.notFound(messages.EXPERT_PROTOCOL_TEMPLATE.NOT_FOUND);
-const scope = (ownerId) => ({ farm: { ownerId, status: 'active' } });
+const scope = (ownerId) => ({ farm: { ownerId, status: FARM_STATUS.ACTIVE } });
 const headerSelect = {
     id: true,
     title: true,
@@ -120,7 +120,7 @@ const getTemplates = async ({ managedByOwnerId }, query = {}) => {
             take: limit,
         }),
         prisma.farm.findMany({
-            where: { ownerId: managedByOwnerId, status: 'active' },
+            where: { ownerId: managedByOwnerId, status: FARM_STATUS.ACTIVE },
             select: { id: true, name: true },
             orderBy: [{ name: 'asc' }, { id: 'asc' }],
         }),
@@ -214,7 +214,7 @@ const getCreationOptions = async ({ managedByOwnerId }) => {
     if (!managedByOwnerId) return { farms: [], manufacturers: [] };
     const [farms, manufacturers] = await Promise.all([
         prisma.farm.findMany({
-            where: { ownerId: managedByOwnerId, status: 'active' },
+            where: { ownerId: managedByOwnerId, status: FARM_STATUS.ACTIVE },
             select: { id: true, name: true },
             orderBy: [{ name: 'asc' }, { id: 'asc' }],
         }),
@@ -251,7 +251,7 @@ const getMaterials = async (
     const farm =
         managedByOwnerId &&
         (await prisma.farm.findFirst({
-            where: { id: farmId, ownerId: managedByOwnerId, status: 'active' },
+            where: { id: farmId, ownerId: managedByOwnerId, status: FARM_STATUS.ACTIVE },
             select: { id: true },
         }));
     if (!farm)
@@ -464,7 +464,7 @@ const saveTemplate = async (account, body, templateId = null) => {
                     where: {
                         id: body.farmId,
                         ownerId: account.managedByOwnerId,
-                        status: 'active',
+                        status: FARM_STATUS.ACTIVE,
                     },
                     select: { id: true },
                 });
