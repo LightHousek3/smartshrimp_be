@@ -496,6 +496,9 @@ const messages = {
 
     RAG_DOCUMENT: {
         CREATED: 'Đã thêm tài liệu vào kho kiến thức chatbot.',
+        NOT_FOUND: 'Không tìm thấy tài liệu.',
+        RETRY_FAILED_ONLY: 'Chỉ thử lại tài liệu xử lý thất bại.',
+        RETRY_CONFLICT: 'Tài liệu vừa thay đổi. Vui lòng làm mới.',
         FILE_REQUIRED: 'Vui lòng tải lên một tài liệu trong trường file.',
         INVALID_UPLOAD: 'Chỉ được tải lên một tài liệu cùng tên, danh mục và mô tả.',
         INVALID_NAME: 'Tên tài liệu không hợp lệ hoặc vượt quá 500 ký tự.',

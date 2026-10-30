@@ -45,6 +45,16 @@ const sniff = (file) => {
     throw ApiError.badRequest(messages.RAG_DOCUMENT.INVALID_CONTENT);
 };
 
+/** Recovery and ingestion must verify the same immutable source before accepting its bytes. */
+const validateSource = (row, buffer) => {
+    if (buffer.length !== row.fileSize || buffer.length > RAG_DOCUMENT_MAX_FILE_BYTES
+        || createHash('sha256').update(buffer).digest('hex') !== row.fileHash) {
+        throw createDocumentError('RAG_INVALID_CONTENT');
+    }
+    try { return sniff({ originalname: row.originalFilename, buffer }); }
+    catch { throw createDocumentError('RAG_INVALID_CONTENT'); }
+};
+
 /**
  * Reserve a document and sign a direct browser upload to Cloudinary.
  * Keep its storage locator and cleanup deadline so abandoned uploads can
@@ -188,13 +198,22 @@ const updateDocument = async (id, input) => {
 
 /**
  * Queue a failed document for ingestion again without creating a new document.
- * A missing source file must be restored before ingestion can be retried.
+ * A stored missing-source error may be stale: recheck the protected source and its
+ * original hash before queueing. Fence the write against concurrent uploads/jobs.
  */
 const retryDocument = async (id) => {
-    const row = await getDocument(id);
-    if (row.errorCode === 'RAG_SOURCE_MISSING') throw createDocumentError('RAG_SOURCE_MISSING');
-    const changed = await prisma.ragDocument.updateMany({ where: { id, status: RAG_DOCUMENT_STATUS.FAILED }, data: { status: RAG_DOCUMENT_STATUS.PENDING, errorMessage: null, nextAttemptAt: new Date() } });
-    if (!changed.count) throw ApiError.conflict('Chỉ thử lại tài liệu xử lý thất bại.');
+    const row = await prisma.ragDocument.findUnique({ where: { id } });
+    if (!row) throw ApiError.notFound(messages.RAG_DOCUMENT.NOT_FOUND);
+    if (row.status !== RAG_DOCUMENT_STATUS.FAILED) throw ApiError.conflict(messages.RAG_DOCUMENT.RETRY_FAILED_ONLY);
+    if (getDocumentErrorCode(row.errorMessage) === 'RAG_SOURCE_MISSING') {
+        validateSource(row, await storage.download(row.storageKey));
+    }
+    const changed = await prisma.ragDocument.updateMany({
+        where: { id, status: RAG_DOCUMENT_STATUS.FAILED, updatedAt: row.updatedAt,
+            jobAttempts: row.jobAttempts, errorMessage: row.errorMessage },
+        data: { status: RAG_DOCUMENT_STATUS.PENDING, errorMessage: null, nextAttemptAt: new Date() },
+    });
+    if (!changed.count) throw ApiError.conflict(messages.RAG_DOCUMENT.RETRY_CONFLICT);
     return getDocument(id);
 };
 
@@ -257,12 +276,7 @@ const processNext = async () => {
             return;
         }
         const buffer = await storage.download(row.storageKey);
-        if (buffer.length !== row.fileSize || buffer.length > RAG_DOCUMENT_MAX_FILE_BYTES || createHash('sha256').update(buffer).digest('hex') !== row.fileHash) {
-            throw createDocumentError('RAG_INVALID_CONTENT');
-        }
-        let mimeType;
-        try { mimeType = sniff({ originalname: row.originalFilename, buffer }); }
-        catch { throw createDocumentError('RAG_INVALID_CONTENT'); }
+        const mimeType = validateSource(row, buffer);
         const { data } = await axios.post(`${config.rag.serviceUrl}/v1/documents/${row.id}/ingest`, buffer, {
             ...options, params: { filename: row.originalFilename, title: row.title, attempt },
             headers: { ...options.headers, 'Content-Type': 'application/octet-stream' }, maxBodyLength: RAG_DOCUMENT_MAX_FILE_BYTES,
