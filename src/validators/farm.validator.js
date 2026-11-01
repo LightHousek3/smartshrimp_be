@@ -1,4 +1,5 @@
 const Joi = require('joi');
+const { FARM_STATUS } = require('../constants');
 
 const farmId = Joi.string().uuid({ version: 'uuidv4' });
 
@@ -15,7 +16,7 @@ const normalizedString = ({ max, allowNull = false }) => {
 
 const farmFields = {
     name: normalizedString({ max: 255 }),
-    address: normalizedString({ max: 1000, allowNull: true }),
+    address: normalizedString({ max: 500, allowNull: true }),
     latitude: Joi.number().min(-90).max(90).precision(8).strict().allow(null),
     longitude: Joi.number().min(-180).max(180).precision(8).strict().allow(null),
     totalAreaHectares: Joi.number()
@@ -24,6 +25,7 @@ const farmFields = {
         .precision(2)
         .strict()
         .allow(null),
+    status: Joi.string().valid(...Object.values(FARM_STATUS)),
 };
 
 /**
@@ -42,6 +44,7 @@ const createFarm = {
     body: Joi.object().keys({
         ...farmFields,
         name: farmFields.name.required(),
+        status: farmFields.status.default(FARM_STATUS.ACTIVE),
     }).and('latitude', 'longitude'),
 };
 

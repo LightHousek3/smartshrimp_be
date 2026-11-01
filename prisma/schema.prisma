@@ -766,7 +766,7 @@ model Supplier {
 
 model ProductionProtocolTemplate {
   id                 String                           @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
-  farmId             String                           @map("farm_id") @db.Uuid
+  farmId             String?                          @map("farm_id") @db.Uuid
   title              String                           @db.VarChar(500)
   description        String?
   shrimpType         ShrimpType?                      @map("shrimp_type")
@@ -777,7 +777,7 @@ model ProductionProtocolTemplate {
   createdBy          String                           @map("created_by") @db.Uuid
   createdAt          DateTime                         @default(now()) @map("created_at") @db.Timestamptz(6)
   updatedAt          DateTime                         @default(now()) @map("updated_at") @db.Timestamptz(6)
-  farm               Farm                             @relation(fields: [farmId], references: [id], onDelete: Restrict)
+  farm               Farm?                            @relation(fields: [farmId], references: [id], onDelete: Restrict)
   creator            Account                          @relation(fields: [createdBy], references: [id], onDelete: Restrict)
   items              ProductionProtocolTemplateItem[]
   sourcedProtocols   Protocol[]

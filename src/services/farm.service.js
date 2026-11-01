@@ -1,15 +1,19 @@
 const prisma = require('../config/prisma');
+const { ProductionProtocolTemplateStatus: TEMPLATE_STATUS } = require('@prisma/client');
+const { emitNotification } = require('../realtime/notification.socket');
 const { ApiError } = require('../utils');
 const {
     httpStatus,
     messages,
     ACCOUNT_ROLE,
     ACCOUNT_STATUS,
+    FARM_STATUS,
+    NOTIFICATION_TYPE,
 } = require('../constants');
 
 const OPEN_SEASON_STATUSES = ['PLANNING', 'ACTIVE'];
 
-// Farm screens only consume these identity, location and timestamp fields.
+// Farm detail and mutation screens consume these fields.
 const FARM_SELECT = {
     id: true,
     ownerId: true,
@@ -18,8 +22,7 @@ const FARM_SELECT = {
     latitude: true,
     longitude: true,
     totalAreaHectares: true,
-    createdAt: true,
-    updatedAt: true,
+    status: true,
 };
 
 const OPEN_SEASON_SELECT = {
@@ -29,7 +32,11 @@ const OPEN_SEASON_SELECT = {
 };
 
 const FARM_LIST_SELECT = {
-    ...FARM_SELECT,
+    id: true,
+    ownerId: true,
+    name: true,
+    address: true,
+    status: true,
     ponds: {
         select: {
             id: true,
@@ -43,6 +50,14 @@ const FARM_LIST_SELECT = {
 
 const FARM_DETAIL_SELECT = {
     ...FARM_SELECT,
+    _count: {
+        select: {
+            ponds: true,
+            products: true,
+            tasks: true,
+            productionProtocolTemplates: true,
+        },
+    },
     ponds: {
         orderBy: [{ createdAt: 'asc' }, { id: 'asc' }],
         select: {
@@ -62,13 +77,15 @@ const FARM_DETAIL_SELECT = {
     },
 };
 
-const normalizeFarm = (farm) => ({
-    ...farm,
-    latitude: farm.latitude == null ? null : Number(farm.latitude),
-    longitude: farm.longitude == null ? null : Number(farm.longitude),
-    totalAreaHectares:
-        farm.totalAreaHectares == null ? null : Number(farm.totalAreaHectares),
-});
+const normalizeFarm = (farm) => {
+    const normalized = { ...farm };
+    for (const field of ['latitude', 'longitude', 'totalAreaHectares']) {
+        if (Object.hasOwn(farm, field) && farm[field] != null) {
+            normalized[field] = Number(farm[field]);
+        }
+    }
+    return normalized;
+};
 
 const vietnamDateFormatter = new Intl.DateTimeFormat('en-US', {
     timeZone: 'Asia/Ho_Chi_Minh',
@@ -100,22 +117,24 @@ const dayOfCulture = (stockingDate) => {
 };
 
 /**
- * Convert Prisma numeric values for JSON and derive deletion eligibility from open seasons.
- * canDelete is a UI hint; writes recheck state and database references transactionally.
+ * Derive only the fields each App screen needs from open seasons and direct relations.
+ * canDelete ignores detachable templates; deletion rechecks every FK transactionally.
  */
 const normalizeFarmSummary = (farm, { includePonds = false } = {}) => {
-    const { ponds = [], ...baseFarm } = farm;
+    const { ponds = [], _count, ...baseFarm } = farm;
     const openSeasons = ponds.flatMap((pond) => pond.seasons || []);
     const normalized = {
         ...normalizeFarm(baseFarm),
         pondCount: ponds.length,
         activeSeasonCount: openSeasons.filter((season) => season.status === 'ACTIVE').length,
-        canDelete: openSeasons.length === 0,
     };
 
     if (!includePonds) return normalized;
     return {
         ...normalized,
+        canDelete: _count != null &&
+            ['ponds', 'products', 'tasks'].every((relation) => _count[relation] === 0),
+        templateCount: _count?.productionProtocolTemplates ?? 0,
         ponds: ponds.map(({ seasons = [], ...pond }) => {
             const currentSeason = seasons[0] || null;
             return {
@@ -139,14 +158,11 @@ const normalizeFarmSummary = (farm, { includePonds = false } = {}) => {
 };
 
 /**
- * List only the authenticated owner’s farms with deterministic ordering and derived summaries.
+ * List all farms owned by the authenticated Owner for client-side search and status filtering.
  */
 const getListFarm = async (ownerId) => {
-    const visible = await prisma.$queryRaw`SELECT id FROM farms f WHERE owner_id=${ownerId}::uuid
-        AND COALESCE(to_jsonb(f)->>'is_deleted','false') <> 'true'`;
-    if (visible.length === 0) return [];
     const farms = await prisma.farm.findMany({
-        where: { ownerId, id: { in: visible.map((farm) => farm.id) } },
+        where: { ownerId },
         select: FARM_LIST_SELECT,
         orderBy: [{ createdAt: 'desc' }, { id: 'desc' }],
     });
@@ -155,7 +171,7 @@ const getListFarm = async (ownerId) => {
 };
 
 /**
- * Read a farm and its pond context through an ownership predicate.
+ * Read an owned farm, its persisted status and pond context for the detail screen.
  * Foreign IDs are indistinguishable from missing farms.
  */
 const getFarmById = async (farmId, ownerId) => {
@@ -185,6 +201,9 @@ const mapWriteError = (error) => {
     }
     if (error.code === 'P2003') {
         throw new ApiError(httpStatus.CONFLICT, messages.FARM.HAS_REFERENCES);
+    }
+    if (error.code === 'P2022') {
+        throw new ApiError(httpStatus.SERVICE_UNAVAILABLE, messages.FARM.TEMPORARILY_UNAVAILABLE);
     }
     throw error;
 };
@@ -225,7 +244,7 @@ const createFarm = async (farmData, ownerId) => {
 };
 
 /**
- * Keep ownership checks and metadata writes in a serializable transaction.
+ * Keep ownership checks and status transitions in a serializable transaction.
  * Repeat ownership in updateMany and inspect count so a racing change cannot silently succeed.
  */
 const updateFarm = async (farmId, farmData, ownerId) => {
@@ -240,6 +259,23 @@ const updateFarm = async (farmId, farmData, ownerId) => {
                 if (!currentFarm) {
                     throw new ApiError(httpStatus.NOT_FOUND, messages.FARM.NOT_FOUND);
                 }
+
+                if (farmData.status === FARM_STATUS.INACTIVE) {
+                    const openSeasonCount = await transaction.aquacultureSeason.count({
+                        where: {
+                            status: { in: OPEN_SEASON_STATUSES },
+                            pond: { farmId },
+                        },
+                    });
+
+                    if (openSeasonCount > 0) {
+                        throw new ApiError(
+                            httpStatus.CONFLICT,
+                            messages.FARM.CANNOT_DEACTIVATE_WITH_OPEN_SEASONS,
+                        );
+                    }
+                }
+
                 const result = await transaction.farm.updateMany({
                     where: { id: farmId, ownerId },
                     data: farmData,
@@ -264,49 +300,94 @@ const updateFarm = async (farmId, farmData, ownerId) => {
 };
 
 /**
- * Delete only an owned farm without PLANNING/ACTIVE seasons.
- * Serializable isolation protects the season check; RESTRICT foreign keys preserve dependent history.
- * This follows the existing physical-delete implementation, not a new lifecycle policy.
+ * Preserve templates as inactive Owner history, then physically delete an empty Farm.
+ * Notification writes and detachment commit together; realtime emits only after commit.
  */
 const deleteFarm = async (farmId, ownerId) => {
     try {
-        const farm = await prisma.$transaction(
+        const result = await prisma.$transaction(
             async (transaction) => {
                 const currentFarm = await transaction.farm.findFirst({
                     where: { id: farmId, ownerId },
-                    select: FARM_SELECT,
+                    select: {
+                        ...FARM_SELECT,
+                        _count: FARM_DETAIL_SELECT._count,
+                    },
                 });
 
                 if (!currentFarm) {
                     throw new ApiError(httpStatus.NOT_FOUND, messages.FARM.NOT_FOUND);
                 }
 
-                const openSeasonCount = await transaction.aquacultureSeason.count({
+                if (['ponds', 'products', 'tasks'].some(
+                    (relation) => currentFarm._count[relation] > 0
+                )) {
+                    throw new ApiError(httpStatus.CONFLICT, messages.FARM.HAS_REFERENCES);
+                }
+
+                const templates = await transaction.productionProtocolTemplate.findMany({
+                    where: { farmId },
+                    select: { id: true, title: true, createdBy: true },
+                });
+                if (templates.length !== currentFarm._count.productionProtocolTemplates) {
+                    throw new ApiError(httpStatus.CONFLICT, messages.FARM.CHANGE_CONFLICT);
+                }
+                if (templates.length > 0) {
+                    const detached = await transaction.productionProtocolTemplate.updateMany({
+                        where: { farmId },
+                        data: {
+                            farmId: null,
+                            status: TEMPLATE_STATUS.inactive,
+                            versionNo: { increment: 1 },
+                        },
+                    });
+                    if (detached.count !== templates.length) {
+                        throw new ApiError(httpStatus.CONFLICT, messages.FARM.CHANGE_CONFLICT);
+                    }
+                    // The creator is the Expert responsible for each affected template.
+                    await transaction.notification.createMany({
+                        data: templates.map((template) => ({
+                            accountId: template.createdBy,
+                            type: NOTIFICATION_TYPE.SYSTEM,
+                            referenceType: 'production_protocol_template',
+                            referenceId: template.id,
+                            title: messages.FARM.TEMPLATE_INACTIVATED_TITLE,
+                            content: messages.FARM.templateInactivatedContent(
+                                currentFarm.name, template.title
+                            ).slice(0, 500),
+                        })),
+                    });
+                }
+
+                const deleted = await transaction.farm.deleteMany({
                     where: {
-                        status: { in: OPEN_SEASON_STATUSES },
-                        pond: { farmId },
+                        id: farmId,
+                        ownerId,
+                        ponds: { none: {} },
+                        products: { none: {} },
+                        tasks: { none: {} },
+                        productionProtocolTemplates: { none: {} },
                     },
                 });
 
-                if (openSeasonCount > 0) {
-                    throw new ApiError(httpStatus.CONFLICT, messages.FARM.HAS_OPEN_SEASON);
-                }
-
-                // Existing RESTRICT FKs preserve child rows and historical records.
-                const result = await transaction.farm.deleteMany({
-                    where: { id: farmId, ownerId },
-                });
-
-                if (result.count !== 1) {
+                if (deleted.count !== 1) {
                     throw new ApiError(httpStatus.CONFLICT, messages.FARM.CHANGE_CONFLICT);
                 }
 
-                return currentFarm;
+                const deletedFarm = { ...currentFarm };
+                delete deletedFarm._count;
+                return {
+                    farm: deletedFarm,
+                    notifiedExpertIds: [...new Set(templates.map((template) => template.createdBy))],
+                };
             },
             { isolationLevel: 'Serializable' },
         );
 
-        return normalizeFarm(farm);
+        result.notifiedExpertIds.forEach((expertId) => {
+            emitNotification(expertId, 'notification:new', {});
+        });
+        return normalizeFarm(result.farm);
     } catch (error) {
         return mapWriteError(error);
     }

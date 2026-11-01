@@ -18,7 +18,8 @@ const isV2 = () => {
             AND EXISTS (SELECT 1 FROM information_schema.columns WHERE table_schema=current_schema() AND table_name='suppliers' AND column_name='owner_id')
             AND EXISTS (SELECT 1 FROM information_schema.columns WHERE table_schema=current_schema() AND table_name='inventory_balances' AND column_name='expiry_date')
             AND to_regclass('product_compliance') IS NOT NULL AS ready`
-            .then(([row]) => row.ready).catch((error) => {
+            .then(([row]) => row.ready)
+            .catch((error) => {
                 modePromise = null;
                 throw error;
             });
@@ -30,7 +31,7 @@ const isV2 = () => {
  * Reject writes while the connected schema lacks required V2 inventory fields.
  */
 const requireV2 = async () => {
-    if (!await isV2()) {
+    if (!(await isV2())) {
         throw new ApiError(httpStatus.CONFLICT, messages.INVENTORY.READ_ONLY);
     }
 };
@@ -38,12 +39,20 @@ const requireV2 = async () => {
 /**
  * Check schema capability before forwarding the original write arguments.
  */
-const guardWrite = (work) => async (...args) => {
-    await requireV2();
-    return work(...args);
-};
+const guardWrite =
+    (work) =>
+    async (...args) => {
+        await requireV2();
+        return work(...args);
+    };
 
-const camel = (row) => Object.fromEntries(Object.entries(row).map(([key, value]) => [key.replace(/_([a-z])/gu, (_, c) => c.toUpperCase()), value]));
+const camel = (row) =>
+    Object.fromEntries(
+        Object.entries(row).map(([key, value]) => [
+            key.replace(/_([a-z])/gu, (_, c) => c.toUpperCase()),
+            value,
+        ]),
+    );
 const amount = (value) => new Prisma.Decimal(value ?? 0);
 const flags = {
     schemaVersion: 1,
@@ -51,10 +60,11 @@ const flags = {
 };
 
 /**
- * Apply ownership and legacy deletion checks without selecting V2-only columns.
+ * Apply ownership checks.
  */
 const requireFarm = async (farmId, ownerId) => {
-    const [farm] = await prisma.$queryRaw`SELECT id, name FROM farms f WHERE id=${farmId}::uuid AND owner_id=${ownerId}::uuid AND COALESCE(to_jsonb(f)->>'is_deleted','false') <> 'true'`;
+    const [farm] =
+        await prisma.$queryRaw`SELECT id, name FROM farms f WHERE id=${farmId}::uuid AND owner_id=${ownerId}::uuid`;
     if (!farm) {
         throw new ApiError(httpStatus.NOT_FOUND, messages.INVENTORY.FARM_NOT_FOUND);
     }
@@ -79,9 +89,16 @@ const balanceDto = (row) => {
 const productDto = (row, balances, includeLots = false) => {
     const p = camel(row);
     const stock = balances.reduce((sum, b) => sum.add(b.quantityExact), amount(0));
-    const value = balances.reduce((sum, b) => sum.add(amount(b.quantityExact).mul(b.unitPrice)), amount(0));
-    const alertStock = ['pack', 'bottle'].includes(p.unit) && p.conversionUnit && amount(p.conversionQuantity).gt(0)
-        ? stock.mul(p.conversionQuantity) : stock;
+    const value = balances.reduce(
+        (sum, b) => sum.add(amount(b.quantityExact).mul(b.unitPrice)),
+        amount(0),
+    );
+    const alertStock =
+        ['pack', 'bottle'].includes(p.unit) &&
+        p.conversionUnit &&
+        amount(p.conversionQuantity).gt(0)
+            ? stock.mul(p.conversionQuantity)
+            : stock;
     return {
         ...p,
         ...flags,
@@ -109,7 +126,8 @@ const productDto = (row, balances, includeLots = false) => {
 /**
  * Read legacy columns through JSON so missing V2 columns are never selected.
  */
-const productRows = (farmId, ownerId, productId) => prisma.$queryRaw(Prisma.sql`
+const productRows = (farmId, ownerId, productId) =>
+    prisma.$queryRaw(Prisma.sql`
     SELECT to_jsonb(p) AS product,
         COALESCE((SELECT jsonb_agg(to_jsonb(b) || jsonb_build_object('quantity_exact',b.quantity::text,
             'received_quantity',(SELECT sum(inbound.quantity) FROM inventory_transactions inbound
@@ -117,7 +135,6 @@ const productRows = (farmId, ownerId, productId) => prisma.$queryRaw(Prisma.sql`
             ORDER BY b.received_at,b.id) FROM inventory_balances b WHERE b.product_id=p.id), '[]'::jsonb) AS balances
     FROM products p JOIN farms f ON f.id=p.farm_id
     WHERE p.farm_id=${farmId}::uuid AND f.owner_id=${ownerId}::uuid
-        AND COALESCE(to_jsonb(p)->>'is_deleted','false') <> 'true'
         ${productId ? Prisma.sql`AND p.id=${productId}::uuid` : Prisma.empty}
     ORDER BY p.created_at DESC,p.id DESC`);
 /**
@@ -125,13 +142,25 @@ const productRows = (farmId, ownerId, productId) => prisma.$queryRaw(Prisma.sql`
  */
 const getProducts = async (farmId, ownerId, query) => {
     await requireFarm(farmId, ownerId);
-    const all = (await productRows(farmId, ownerId)).map((row) => productDto(row.product, row.balances.map(balanceDto)));
+    const all = (await productRows(farmId, ownerId)).map((row) =>
+        productDto(row.product, row.balances.map(balanceDto)),
+    );
     const {
-        page = 1, limit = 20, search = '', category, stockStatus = 'ALL', archiveStatus = 'ACTIVE',
+        page = 1,
+        limit = 20,
+        search = '',
+        category,
+        stockStatus = 'ALL',
+        archiveStatus = 'ACTIVE',
     } = query;
-    const candidates = all.filter((p) => (archiveStatus === 'ALL' || p.status === (archiveStatus === 'ARCHIVED' ? 'INACTIVE' : 'ACTIVE'))
-        && (!search || p.name.toLocaleLowerCase('vi').includes(search.toLocaleLowerCase('vi')))
-        && (!category || p.category === category) && (stockStatus !== 'LOW' || p.isLowStock));
+    const candidates = all.filter(
+        (p) =>
+            (archiveStatus === 'ALL' ||
+                p.status === (archiveStatus === 'ARCHIVED' ? 'INACTIVE' : 'ACTIVE')) &&
+            (!search || p.name.toLocaleLowerCase('vi').includes(search.toLocaleLowerCase('vi'))) &&
+            (!category || p.category === category) &&
+            (stockStatus !== 'LOW' || p.isLowStock),
+    );
     const active = all.filter((p) => p.status === 'ACTIVE');
     return {
         products: candidates.slice((page - 1) * limit, page * limit),
@@ -180,12 +209,13 @@ const supplierDto = (row) => {
     };
 };
 
-const supplierRows = (ownerId, supplierId) => prisma.$queryRaw(Prisma.sql`
+const supplierRows = (ownerId, supplierId) =>
+    prisma.$queryRaw(Prisma.sql`
     SELECT to_jsonb(s) || jsonb_build_object('owner_id',f.owner_id,'receipt_count',
         (SELECT count(*) FROM inventory_balances b JOIN products p ON p.id=b.product_id JOIN farms pf ON pf.id=p.farm_id
          WHERE b.supplier_id=s.id AND pf.owner_id=${ownerId}::uuid)) AS supplier
     FROM suppliers s JOIN farms f ON f.id=s.farm_id
-    WHERE f.owner_id=${ownerId}::uuid AND COALESCE(to_jsonb(s)->>'is_deleted','false') <> 'true'
+    WHERE f.owner_id=${ownerId}::uuid
         ${supplierId ? Prisma.sql`AND s.id=${supplierId}::uuid` : Prisma.empty}
     ORDER BY s.name,s.id`);
 /**
@@ -193,12 +223,18 @@ const supplierRows = (ownerId, supplierId) => prisma.$queryRaw(Prisma.sql`
  */
 const getSuppliers = async (farmId, ownerId, query = {}) => {
     await requireFarm(farmId, ownerId);
-    const {
-        page = 1, limit = 100, search = '', status, supplierType,
-    } = query;
-    const all = (await supplierRows(ownerId)).map((row) => supplierDto(row.supplier)).filter((s) => (!status || s.status === status)
-        && (!supplierType || s.supplierType === supplierType)
-        && (!search || [s.name, s.phone, s.contactName, s.email].some((v) => v?.toLocaleLowerCase('vi').includes(search.toLocaleLowerCase('vi')))));
+    const { page = 1, limit = 100, search = '', status, supplierType } = query;
+    const all = (await supplierRows(ownerId))
+        .map((row) => supplierDto(row.supplier))
+        .filter(
+            (s) =>
+                (!status || s.status === status) &&
+                (!supplierType || s.supplierType === supplierType) &&
+                (!search ||
+                    [s.name, s.phone, s.contactName, s.email].some((v) =>
+                        v?.toLocaleLowerCase('vi').includes(search.toLocaleLowerCase('vi')),
+                    )),
+        );
     return {
         suppliers: all.slice((page - 1) * limit, page * limit),
         meta: {
@@ -221,7 +257,8 @@ const getSupplier = async (farmId, supplierId, ownerId) => {
     if (!row) {
         throw new ApiError(httpStatus.NOT_FOUND, messages.SUPPLIER.NOT_FOUND);
     }
-    const receipts = await prisma.$queryRaw`SELECT b.id,b.product_id AS "productId",p.name AS "productName",p.farm_id AS "farmId",f.name AS "farmName",
+    const receipts =
+        await prisma.$queryRaw`SELECT b.id,b.product_id AS "productId",p.name AS "productName",p.farm_id AS "farmId",f.name AS "farmName",
         b.lot_number AS "lotNumber",b.received_at AS "receivedAt",b.quantity::text AS "quantityExact",p.unit::text AS unit
         FROM inventory_balances b JOIN products p ON p.id=b.product_id JOIN farms f ON f.id=p.farm_id
         WHERE b.supplier_id=${supplierId}::uuid AND f.owner_id=${ownerId}::uuid ORDER BY b.received_at DESC,b.id LIMIT 20`;
@@ -242,7 +279,16 @@ const getSupplier = async (farmId, supplierId, ownerId) => {
 const getInventoryHistory = async (farmId, ownerId, query) => {
     await requireFarm(farmId, ownerId);
     const {
-        cursor, limit = 10, productId, transactionType, seasonId, referenceType, referenceId, createdFrom, createdTo, search,
+        cursor,
+        limit = 10,
+        productId,
+        transactionType,
+        seasonId,
+        referenceType,
+        referenceId,
+        createdFrom,
+        createdTo,
+        search,
     } = query;
     const where = Prisma.sql`p.farm_id=${farmId}::uuid AND f.owner_id=${ownerId}::uuid
         ${productId ? Prisma.sql`AND t.product_id=${productId}::uuid` : Prisma.empty}
@@ -251,14 +297,18 @@ const getInventoryHistory = async (farmId, ownerId, query) => {
         ${referenceType ? Prisma.sql`AND t.reference_type=${referenceType} AND t.reference_id=${referenceId}::uuid` : Prisma.empty}
         ${createdFrom ? Prisma.sql`AND t.created_at>=${createdFrom}` : Prisma.empty}
         ${createdTo ? Prisma.sql`AND t.created_at<=${createdTo}` : Prisma.empty}`;
-    const searchWhere = search ? Prisma.sql`AND (strpos(lower(p.name),lower(${search}))>0
+    const searchWhere = search
+        ? Prisma.sql`AND (strpos(lower(p.name),lower(${search}))>0
         OR EXISTS (SELECT 1 FROM inventory_balances sb WHERE sb.id=t.inventory_balance_id
             AND (strpos(lower(sb.lot_number),lower(${search}))>0 OR strpos(lower(sb.supplier_name),lower(${search}))>0))
-        OR strpos(lower(coalesce(t.reason,'')),lower(${search}))>0)` : Prisma.empty;
+        OR strpos(lower(coalesce(t.reason,'')),lower(${search}))>0)`
+        : Prisma.empty;
     const filteredWhere = Prisma.sql`${where} ${searchWhere}`;
     let after = Prisma.empty;
     if (cursor) {
-        const [row] = await prisma.$queryRaw(Prisma.sql`SELECT t.created_at FROM inventory_transactions t JOIN products p ON p.id=t.product_id JOIN farms f ON f.id=p.farm_id WHERE ${filteredWhere} AND t.id=${cursor}::uuid`);
+        const [row] = await prisma.$queryRaw(
+            Prisma.sql`SELECT t.created_at FROM inventory_transactions t JOIN products p ON p.id=t.product_id JOIN farms f ON f.id=p.farm_id WHERE ${filteredWhere} AND t.id=${cursor}::uuid`,
+        );
         if (!row) {
             throw new ApiError(httpStatus.BAD_REQUEST, messages.INVENTORY.INVALID_CURSOR);
         }

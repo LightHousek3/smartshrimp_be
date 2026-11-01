@@ -16,7 +16,14 @@ const { messages, FARM_STATUS } = require('../constants');
 
 const notFound = () =>
     ApiError.notFound(messages.EXPERT_PROTOCOL_TEMPLATE.NOT_FOUND);
-const scope = (ownerId) => ({ farm: { ownerId, status: FARM_STATUS.ACTIVE } });
+const activeScope = (ownerId) => ({ farm: { ownerId, status: FARM_STATUS.ACTIVE } });
+// Detached templates remain readable as history but cannot enter any write path.
+const readScope = (account) => ({
+    OR: [
+        activeScope(account.managedByOwnerId),
+        { farmId: null, status: TemplateStatus.inactive, createdBy: account.id },
+    ],
+});
 const headerSelect = {
     id: true,
     title: true,
@@ -85,6 +92,7 @@ const normalizeHeader = (row, appliedSeasons) => {
     const { _count, ...header } = row;
     return {
         ...header,
+        farm: row.farm ?? { id: null, name: messages.EXPERT_PROTOCOL_TEMPLATE.DELETED_FARM },
         allowedVariancePct: Number(row.allowedVariancePct),
         usedSeasonCount: appliedSeasons.filter(
             (entry) => entry.sourceTemplateId === row.id
@@ -92,7 +100,8 @@ const normalizeHeader = (row, appliedSeasons) => {
         canDelete: _count.sourcedProtocols === 0,
     };
 };
-const getTemplates = async ({ managedByOwnerId }, query = {}) => {
+const getTemplates = async (account, query = {}) => {
+    const { managedByOwnerId } = account;
     const { page = 1, limit = 10 } = query;
     if (!managedByOwnerId)
         return {
@@ -100,14 +109,16 @@ const getTemplates = async ({ managedByOwnerId }, query = {}) => {
             meta: { page, limit, totalResults: 0, farms: [] },
         };
     const where = {
-        ...scope(managedByOwnerId),
+        ...readScope(account),
         ...(query.farmId && { farmId: query.farmId }),
         ...(query.shrimpType && { shrimpType: query.shrimpType }),
         ...(query.status && { status: query.status }),
         ...(query.search && {
-            OR: ['title', 'description'].map((field) => ({
-                [field]: { contains: query.search, mode: 'insensitive' },
-            })),
+            AND: [{
+                OR: ['title', 'description'].map((field) => ({
+                    [field]: { contains: query.search, mode: 'insensitive' },
+                })),
+            }],
         }),
     };
     const [totalResults, rows, farms] = await Promise.all([
@@ -138,7 +149,7 @@ const getTemplates = async ({ managedByOwnerId }, query = {}) => {
 };
 
 const normalizeItem = (item, farmId) => {
-    const owned = item.product?.farmId === farmId;
+    const owned = farmId != null && item.product?.farmId === farmId;
     const product = owned
         ? item.product
         : productFromRecommendation(item.recommendedProductDetails);
@@ -174,10 +185,11 @@ const normalizeItem = (item, farmId) => {
         },
     };
 };
-const readTemplate = async ({ managedByOwnerId }, templateId) => {
+const readTemplate = async (account, templateId) => {
+    const { managedByOwnerId } = account;
     if (!managedByOwnerId) throw notFound();
     const row = await prisma.productionProtocolTemplate.findFirst({
-        where: { id: templateId, ...scope(managedByOwnerId) },
+        where: { id: templateId, ...readScope(account) },
         select: {
             ...headerSelect,
             referencePostCount: true,
@@ -206,8 +218,8 @@ const readTemplate = async ({ managedByOwnerId }, templateId) => {
                   ),
               }
             : null,
-        farmLocked: row._count.sourcedProtocols > 0,
-        items: items.map((item) => normalizeItem(item, row.farm.id)),
+        farmLocked: row.farm != null && row._count.sourcedProtocols > 0,
+        items: items.map((item) => normalizeItem(item, row.farm?.id)),
     };
 };
 const getCreationOptions = async ({ managedByOwnerId }) => {
@@ -433,12 +445,13 @@ const saveTemplate = async (account, body, templateId = null) => {
         return await prisma.$transaction(
             async (tx) => {
                 await requireExpert(tx, account);
+                let existing;
                 if (templateId) {
-                    const existing =
+                    existing =
                         await tx.productionProtocolTemplate.findFirst({
                             where: {
                                 id: templateId,
-                                ...scope(account.managedByOwnerId),
+                                ...readScope(account),
                             },
                             select: {
                                 versionNo: true,
@@ -452,6 +465,7 @@ const saveTemplate = async (account, body, templateId = null) => {
                             messages.EXPERT_PROTOCOL_TEMPLATE.STALE_SAVE
                         );
                     if (
+                        existing.farmId != null &&
                         existing.farmId !== body.farmId &&
                         existing._count.sourcedProtocols > 0
                     )
@@ -601,7 +615,8 @@ const saveTemplate = async (account, body, templateId = null) => {
                             where: {
                                 id: templateId,
                                 versionNo: body.expectedVersionNo,
-                                ...scope(account.managedByOwnerId),
+                                farmId: existing.farmId,
+                                ...readScope(account),
                             },
                             data: { ...data, versionNo: { increment: 1 } },
                         });
@@ -648,7 +663,7 @@ const deleteTemplate = async (account, templateId, expectedVersionNo) => {
                 await requireExpert(tx, account);
                 const where = {
                     id: templateId,
-                    ...scope(account.managedByOwnerId),
+                    ...readScope(account),
                 };
                 const row = await tx.productionProtocolTemplate.findFirst({
                     where,
@@ -697,7 +712,7 @@ const updateStatus = async (account, templateId, body) => {
                 await requireExpert(tx, account);
                 const where = {
                     id: templateId,
-                    ...scope(account.managedByOwnerId),
+                    ...activeScope(account.managedByOwnerId),
                 };
                 const row = await tx.productionProtocolTemplate.findFirst({
                     where,
