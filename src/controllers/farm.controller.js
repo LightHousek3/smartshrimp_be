@@ -4,7 +4,7 @@ const { messages } = require('../constants');
 
 /**
  * GET /owner/farms
- * Scope the list to the authenticated owner, including pond and open-season summaries.
+ * Scope the complete list to the authenticated Owner for local App filtering.
  */
 const getListFarm = asyncHandler(async (req, res) => {
     const farms = await farmService.getListFarm(req.account.id);
@@ -56,7 +56,7 @@ const updateFarm = asyncHandler(async (req, res) => {
 
 /**
  * DELETE /owner/farms/:farmId
- * Return the deleted farm only after open-season and reference checks succeed.
+ * Return the deleted farm only after all related-record checks succeed.
  */
 const deleteFarm = asyncHandler(async (req, res) => {
     const farm = await farmService.deleteFarm(req.params.farmId, req.account.id);

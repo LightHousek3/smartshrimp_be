@@ -11,6 +11,7 @@ const messages = {
         UPDATED: 'Cập nhật phác đồ mẫu thành công.',
         MATERIAL_UNAVAILABLE: 'Vật tư không khả dụng',
         FARM_NOT_FOUND: 'Không tìm thấy trang trại trong phạm vi quản lý.',
+        DELETED_FARM: 'Trang trại đã xóa',
         EXPERT_ASSIGNMENT_CHANGED: 'Phân công hoặc trạng thái tài khoản đã thay đổi.',
         WRITE_CONFLICT: 'Dữ liệu vừa thay đổi hoặc đã có tham chiếu. Hãy tải lại trước khi lưu.',
         EXPERT_UNASSIGNED: 'Chuyên gia chưa được phân công chủ trại.',
@@ -159,11 +160,15 @@ const messages = {
         UPDATED: 'Cập nhật trang trại thành công',
         DELETED: 'Xóa trang trại thành công',
         NOT_FOUND: 'Không tìm thấy trang trại',
-        NAME_ALREADY_EXISTS: 'Tên trang trại đã tồn tại trong danh sách đang hoạt động',
+        NAME_ALREADY_EXISTS: 'Tên trang trại đã tồn tại trong danh sách của bạn',
         OWNER_NOT_ELIGIBLE: 'Chỉ chủ trang trại đang hoạt động mới có thể tạo trang trại',
-        HAS_OPEN_SEASON:
-            'Không thể xóa trang trại đang có vụ nuôi ở trạng thái lập kế hoạch hoặc đang hoạt động',
-        HAS_REFERENCES: 'Không thể xóa trang trại còn dữ liệu liên quan',
+        CANNOT_DEACTIVATE_WITH_OPEN_SEASONS:
+            'Không thể ngừng hoạt động trang trại khi còn vụ nuôi đang lập kế hoạch hoặc hoạt động',
+        HAS_REFERENCES: 'Chỉ có thể xóa trang trại khi không còn ao, vật tư hoặc nhiệm vụ',
+        TEMPORARILY_UNAVAILABLE: 'Chức năng trang trại đang được cập nhật. Vui lòng thử lại sau.',
+        TEMPLATE_INACTIVATED_TITLE: 'Phác đồ mẫu ngừng sử dụng',
+        templateInactivatedContent: (farmName, templateTitle) =>
+            `Phác đồ mẫu đã ngừng sử dụng vì trang trại “${farmName}” bị xóa: “${templateTitle}”.`,
         CHANGE_CONFLICT: 'Trạng thái trang trại đã thay đổi. Vui lòng tải lại và thử lại',
     },
 
