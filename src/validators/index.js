@@ -25,7 +25,10 @@ const ragValidator = require('./rag.validator');
 
 const protocolValidator = require('./protocol.validator');
 
+const aiDiagnosisValidator = require('./aiDiagnosis.validator');
+
 module.exports = {
+    aiDiagnosisValidator,
     protocolValidator,
     ragDocumentValidator,
     ragValidator,

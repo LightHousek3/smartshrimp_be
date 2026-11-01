@@ -111,6 +111,11 @@ const config = {
         transactionTimeoutMs: 60000,
         biomassMaxAgeHours: PRODUCTION_PROTOCOL_LIMITS.biomassMaxAgeHours,
     },
+    ai: {
+        serviceUrl: (process.env.AI_SERVICE_URL || '').replace(/\/+$/, ''),
+        apiKey: process.env.AI_API_KEY,
+        timeoutMs: parseInt(process.env.AI_REQUEST_TIMEOUT_MS, 10) || 120000,
+    },
     rag: {
         serviceUrl: (process.env.RAG_SERVICE_URL || '').replace(/\/+$/, ''),
         internalApiKey: process.env.RAG_INTERNAL_API_KEY,

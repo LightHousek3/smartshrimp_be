@@ -483,7 +483,9 @@ function buildOperation({
 }
 
 function parseRouteFile(routeSource, routeFile, basePath, apiPrefix, schemaRegistry) {
-    const tag = toTag(basePath);
+    // A route may declare a readable group without exposing nested path parameters in its tag.
+    const tagOverride = routeSource.match(/@tag\s+([^\r\n*]+)/);
+    const tag = tagOverride ? tagOverride[1].trim() : toTag(basePath);
     const operations = [];
     const imports = parseRouteImports(routeSource, routeFile);
 

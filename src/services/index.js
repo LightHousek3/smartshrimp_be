@@ -32,7 +32,10 @@ const inventoryHistoryOptionsService = require('./inventoryHistoryOptions.servic
 const inventoryLegacyReadService = require('./inventoryLegacyRead.service');
 const supplierService = require('./supplier.service');
 
+const aiDiagnosisService = require('./aiDiagnosis.service');
+
 module.exports = {
+    aiDiagnosisService,
     protocolService,
     ragDocumentService,
     ragService,

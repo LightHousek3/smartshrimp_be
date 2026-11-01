@@ -25,7 +25,10 @@ const ragController = require('./rag.controller');
 
 const protocolController = require('./protocol.controller');
 
+const aiDiagnosisController = require('./aiDiagnosis.controller');
+
 module.exports = {
+    aiDiagnosisController,
     protocolController,
     ragDocumentController,
     ragController,

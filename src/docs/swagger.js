@@ -15,6 +15,37 @@ const {
 const notificationDetailPath = `${config.apiPrefix}/notifications/{notificationId}`;
 const { RAG_DOCUMENT_CATEGORIES } = require('../constants');
 const documentUpload = autoPaths[`${config.apiPrefix}/admin/rag/documents`]?.post;
+const aiBasePath = `${config.apiPrefix}/technician/seasons/{seasonId}/ai-diagnoses`;
+const aiUpload = autoPaths[aiBasePath]?.post;
+if (aiUpload) {
+    aiUpload.requestBody = {
+        required: true,
+        content: { 'multipart/form-data': { schema: {
+            type: 'object', required: ['images'], additionalProperties: false,
+            properties: { images: { type: 'array', minItems: 1, maxItems: 5,
+                items: { type: 'string', format: 'binary' }, description: 'JPEG, PNG or WEBP; at most 10 MiB per image.' } },
+        } } },
+    };
+    aiUpload.description = 'Requires the current technician assignment and an ACTIVE season. Stores private originals and a final success/error log. Failed AI calls use the error envelope; find the stored error in history. Requests are not automatically retried.';
+    aiUpload.responses = {
+        201: { description: 'Saved result; same data as the detail endpoint' },
+        400: { description: 'Invalid upload or image rejected by AI' },
+        401: { description: 'Authentication required' },
+        403: { description: 'Technician assignment, active account or ACTIVE season required' },
+        404: { description: 'Season not found' },
+        409: { description: 'Concurrent state change' },
+        429: { description: 'Technician or AI rate limit exceeded' },
+        502: { description: 'Invalid AI result; error stored in history' },
+        503: { description: 'Storage or AI unavailable; AI busy' },
+        504: { description: 'AI timed out; error stored in history' },
+    };
+}
+if (autoPaths[aiBasePath]?.get) {
+    autoPaths[aiBasePath].get.description = 'Own requests only, with a current assignment. Completed/cancelled seasons remain readable. Newest first, stable cursor pagination. data: [{id, createdAt, runStatus, imageCount, predictedLabel?, confidence?}]; meta: {totalResults, hasNextPage, nextCursor}.';
+}
+if (autoPaths[`${aiBasePath}/{diagnosisId}`]?.get) {
+    autoPaths[`${aiBasePath}/{diagnosisId}`].get.description = 'Own result only, with a current assignment. data: {id, seasonId, createdAt, runStatus, imageUrls, imageUrlsExpireAt?, modelVersion, processingTimeMs, predictedLabel?, confidence?, predictions?, recommendation?, error?: {code, message}}. New image URLs expire after five minutes; reload detail to refresh. Internal input snapshots are never returned.';
+}
 if (documentUpload) {
     documentUpload.requestBody = {
         required: true,

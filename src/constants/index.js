@@ -387,6 +387,7 @@ const checkWaterThresholds = (shrimpType, values = {}) => {
 };
 
 module.exports = {
+    ...require('./aiDiagnosis'),
     FARM_STATUS,
     HARVEST_POLICY,
     HARVEST_LIMITS,
