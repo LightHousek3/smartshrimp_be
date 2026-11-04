@@ -1,3 +1,4 @@
+const expertDiseaseCaseService = require('./expertDiseaseCase.service');
 const authService = require('./auth.service');
 const adminAccountService = require('./adminAccount.service');
 const verificationService = require('./verification.service');
@@ -62,4 +63,5 @@ module.exports = {
     notificationNavigationService,
     taskService,
     harvestService,
+    expertDiseaseCaseService,
 };

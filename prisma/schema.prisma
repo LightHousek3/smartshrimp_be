@@ -103,6 +103,19 @@ enum CaseSeverity {
   @@map("case_severity")
 }
 
+enum CaseResponseType {
+  REQUEST_INFO       @map("request_info")
+  PROVIDE_INFO       @map("provide_info")
+  MONITORING_RESULT  @map("monitoring_result")
+  TREATMENT_RESULT   @map("treatment_result")
+  EMERGENCY_ALERT    @map("emergency_alert")
+  EXPERT_ASSESSMENT  @map("expert_assessment")
+  EXPERT_INSTRUCTION @map("expert_instruction")
+  RESOLUTION         @map("resolution")
+
+  @@map("case_response_type")
+}
+
 enum DiseaseCaseStatus {
   OPEN             @map("open")
   WAITING_FOR_INFO @map("waiting_for_info")
@@ -312,6 +325,11 @@ model Account {
   complianceChecks       ProductCompliance[]
   ownedFarms             Farm[]
   reportedDiseaseCases   DiseaseCase[]                @relation("DiseaseCaseReporter")
+  assignedDiseaseCases   DiseaseCase[]                @relation("DiseaseCaseExpert")
+  resolvedDiseaseCases   DiseaseCase[]                @relation("DiseaseCaseResolver")
+  diseaseCaseAttachments DiseaseCaseAttachment[]
+  diseaseCaseResponses   DiseaseCaseResponse[]
+  diseaseStatusChanges   DiseaseCaseStatusHistory[]
   ragConversations       RagConversation[]
   ragQueries             RagQuery[]
   ragFeedback            RagFeedback[]
@@ -491,18 +509,80 @@ model WaterQualityLog {
 }
 
 model DiseaseCase {
-  id         String            @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
-  seasonId   String            @map("season_id") @db.Uuid
-  reportedBy String            @map("reported_by") @db.Uuid
-  expertId   String            @map("expert_id") @db.Uuid
-  title      String            @db.VarChar(500)
-  severity   CaseSeverity      @default(MEDIUM)
-  status     DiseaseCaseStatus @default(OPEN)
-  updatedAt  DateTime          @default(now()) @map("updated_at") @db.Timestamptz(6)
-  season     AquacultureSeason @relation(fields: [seasonId], references: [id], onDelete: Restrict)
-  reporter   Account           @relation("DiseaseCaseReporter", fields: [reportedBy], references: [id], onDelete: Restrict)
+  id                String                      @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  seasonId          String                      @map("season_id") @db.Uuid
+  relatedCaseId     String?                     @map("related_case_id") @db.Uuid
+  reportedBy        String                      @map("reported_by") @db.Uuid
+  expertId          String                      @map("expert_id") @db.Uuid
+  aiDiagnosisId     String?                     @map("ai_diagnosis_id") @db.Uuid
+  title             String                      @db.VarChar(500)
+  description       String                      @db.VarChar(500)
+  severity          CaseSeverity                @default(MEDIUM)
+  status            DiseaseCaseStatus           @default(OPEN)
+  caseSnapshot      Json                        @map("case_snapshot")
+  resolutionSummary String?                     @map("resolution_summary") @db.VarChar(500)
+  resolvedBy        String?                     @map("resolved_by") @db.Uuid
+  resolvedAt        DateTime?                   @map("resolved_at") @db.Timestamptz(6)
+  createdAt         DateTime                    @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt         DateTime                    @default(now()) @map("updated_at") @db.Timestamptz(6)
+
+  season            AquacultureSeason           @relation(fields: [seasonId], references: [id], onDelete: Restrict)
+  reporter          Account                     @relation("DiseaseCaseReporter", fields: [reportedBy], references: [id], onDelete: Restrict)
+  expert            Account                     @relation("DiseaseCaseExpert", fields: [expertId], references: [id], onDelete: Restrict)
+  resolver          Account?                    @relation("DiseaseCaseResolver", fields: [resolvedBy], references: [id], onDelete: Restrict)
+  relatedCase       DiseaseCase?                @relation("RelatedDiseaseCase", fields: [relatedCaseId], references: [id], onDelete: Restrict)
+  recurrences       DiseaseCase[]               @relation("RelatedDiseaseCase")
+  attachments       DiseaseCaseAttachment[]
+  responses         DiseaseCaseResponse[]
+  statusHistory     DiseaseCaseStatusHistory[]
+  protocols         Protocol[]
 
   @@map("disease_cases")
+}
+
+model DiseaseCaseAttachment {
+  id          String      @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  caseId      String      @map("case_id") @db.Uuid
+  uploadedBy  String      @map("uploaded_by") @db.Uuid
+  fileUrl     String      @map("file_url")
+  mediaType   String?     @map("media_type") @db.VarChar(100)
+  caption     String?     @db.VarChar(255)
+  createdAt   DateTime    @default(now()) @map("created_at") @db.Timestamptz(6)
+
+  case        DiseaseCase @relation(fields: [caseId], references: [id], onDelete: Restrict)
+  uploader    Account     @relation(fields: [uploadedBy], references: [id], onDelete: Restrict)
+
+  @@map("disease_case_attachments")
+}
+
+model DiseaseCaseResponse {
+  id           String           @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  caseId       String           @map("case_id") @db.Uuid
+  authorId     String           @map("author_id") @db.Uuid
+  responseType CaseResponseType @map("response_type")
+  message      String           @db.VarChar(500)
+  attachments  Json             @default("[]")
+  createdAt    DateTime         @default(now()) @map("created_at") @db.Timestamptz(6)
+
+  case         DiseaseCase      @relation(fields: [caseId], references: [id], onDelete: Restrict)
+  author       Account          @relation(fields: [authorId], references: [id], onDelete: Restrict)
+
+  @@map("disease_case_responses")
+}
+
+model DiseaseCaseStatusHistory {
+  id         String             @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  caseId     String             @map("case_id") @db.Uuid
+  fromStatus DiseaseCaseStatus? @map("from_status")
+  toStatus   DiseaseCaseStatus  @map("to_status")
+  changedBy  String             @map("changed_by") @db.Uuid
+  reason     String?            @db.VarChar(500)
+  changedAt  DateTime           @default(now()) @map("changed_at") @db.Timestamptz(6)
+
+  case       DiseaseCase        @relation(fields: [caseId], references: [id], onDelete: Restrict)
+  changer    Account            @relation(fields: [changedBy], references: [id], onDelete: Restrict)
+
+  @@map("disease_case_status_history")
 }
 
 model Protocol {
@@ -531,9 +611,10 @@ model Protocol {
   createdAt            DateTime       @default(now()) @map("created_at") @db.Timestamptz(6)
   updatedAt            DateTime       @default(now()) @map("updated_at") @db.Timestamptz(6)
 
-  season        AquacultureSeason       @relation(fields: [seasonId], references: [id], onDelete: Restrict)
-  items         ProtocolItem[]
-  statusHistory ProtocolStatusHistory[]
+  season               AquacultureSeason @relation(fields: [seasonId], references: [id], onDelete: Restrict)
+  diseaseCase          DiseaseCase?          @relation(fields: [diseaseCaseId], references: [id], onDelete: Restrict)
+  items                ProtocolItem[]
+  statusHistory        ProtocolStatusHistory[]
 
   @@map("protocols")
 }

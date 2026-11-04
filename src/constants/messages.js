@@ -577,6 +577,19 @@ const messages = {
             'Khoảng ngày phải từ trước đến sau, không ở tương lai và không quá 60 tháng.',
     },
 
+    // Disease case
+    DISEASE_CASE: {
+        LIST_FETCHED: 'Lấy danh sách ca bệnh thành công',
+        FETCHED: 'Lấy chi tiết ca bệnh thành công',
+        NOT_FOUND: 'Không tìm thấy ca bệnh',
+        NOT_ASSIGNED: 'Bạn không có quyền truy cập ca bệnh này',
+        RESPONSE_SENT: 'Gửi phản hồi thành công',
+        RESOLVED: 'Đánh dấu ca bệnh đã giải quyết thành công',
+        ALREADY_RESOLVED: 'Ca bệnh đã được giải quyết, không thể thực hiện thêm thao tác',
+        RESOLUTION_SUMMARY_REQUIRED: 'Bắt buộc nhập nội dung tóm tắt giải quyết',
+        PROTOCOL_ABORTED: 'Dừng khẩn cấp phác đồ điều trị thành công',
+    },
+
     // Server
     SERVER: {
         INTERNAL_ERROR: 'Lỗi máy chủ nội bộ',

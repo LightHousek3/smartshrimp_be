@@ -1,4 +1,11 @@
 const express = require('express');
+
+// Global BigInt serialization for Prisma BigInt columns
+if (!BigInt.prototype.toJSON) {
+    BigInt.prototype.toJSON = function () {
+        return this.toString();
+    };
+}
 const helmet = require('helmet');
 const cors = require('cors');
 const morgan = require('morgan');

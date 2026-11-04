@@ -1,3 +1,4 @@
+const expertDiseaseCaseValidator = require('./expertDiseaseCase.validator');
 const authValidator = require('./auth.validator');
 const adminAccountValidator = require('./adminAccount.validator');
 const profileValidator = require('./profile.validator');
@@ -50,4 +51,5 @@ module.exports = {
     supplierValidator,
     taskValidator,
     harvestValidator,
+    expertDiseaseCaseValidator,
 };

@@ -12,6 +12,7 @@ const assignedSeasonRoute = require('./assignedSeason.route');
 const expertDashboardRoute = require('./expertDashboard.route');
 const ownerDashboardRoute = require('./ownerDashboard.route');
 const expertSeasonRoute = require('./expertSeason.route');
+const expertDiseaseCaseRoute = require('./expertDiseaseCase.route');
 const ragRoute = require('./rag.route');
 const waterLogRoute = require('./waterLog.route');
 const shrimpHealthRoute = require('./shrimpHealth.route');
@@ -50,6 +51,7 @@ const routes = [
     { path: '/operations', route: operationRoute },
     { path: '/expert/dashboard', route: expertDashboardRoute },
     { path: '/expert/seasons', route: expertSeasonRoute },
+    { path: '/expert/disease-cases', route: expertDiseaseCaseRoute },
     { path: '/notifications', route: notificationRoute },
 ];
 
