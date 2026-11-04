@@ -1,9 +1,10 @@
 const nodemailer = require('nodemailer');
 const config = require('../config');
-const { VERIFICATION_PURPOSE } = require('../constants');
+const { VERIFICATION_PURPOSE, ACCOUNT_ROLE } = require('../constants');
 
 const BRAND_NAME = 'SmartShrimp';
 const LOGO_URL = 'https://res.cloudinary.com/dmv1uhpq/image/upload/v1789054756/logo.png';
+const EMAIL_FONT_FAMILY = 'Arial, Helvetica, sans-serif';
 
 const EMAIL_CONTENT_BY_PURPOSE = {
     [VERIFICATION_PURPOSE.ACCOUNT_ACTIVATION]: {
@@ -11,7 +12,7 @@ const EMAIL_CONTENT_BY_PURPOSE = {
         badge: 'Kích hoạt tài khoản',
         title: 'Hoàn tất kích hoạt tài khoản',
         greeting: 'Chào mừng bạn đến với SmartShrimp,',
-        intro: 'Vui lòng dùng mã OTP bên dưới để xác minh email, sau đó hoàn tất thông tin hồ sơ và mật khẩu đăng nhập.',
+        intro: 'Quay lại màn hình kích hoạt tài khoản trên App hoặc Web đang thao tác và nhập mã OTP bên dưới. Sau khi xác minh email, bạn có thể hoàn tất hồ sơ và thiết lập mật khẩu đăng nhập.',
         note: 'Nếu bạn không yêu cầu kích hoạt tài khoản SmartShrimp, vui lòng bỏ qua email này.',
         actionName: 'kích hoạt tài khoản',
     },
@@ -20,10 +21,19 @@ const EMAIL_CONTENT_BY_PURPOSE = {
         badge: 'Quên mật khẩu',
         title: 'Đặt lại mật khẩu SmartShrimp',
         greeting: 'SmartShrimp đã nhận yêu cầu đặt lại mật khẩu,',
-        intro: 'Vui lòng dùng mã OTP bên dưới để xác minh yêu cầu, sau đó tạo mật khẩu mới cho tài khoản của bạn.',
+        intro: 'Quay lại màn hình quên mật khẩu trên App hoặc Web đang thao tác và nhập mã OTP bên dưới để tiếp tục đặt lại mật khẩu.',
         note: 'Nếu bạn không yêu cầu đặt lại mật khẩu, hãy bỏ qua email này và giữ bí mật thông tin đăng nhập.',
         actionName: 'đặt lại mật khẩu',
     },
+};
+
+const ACTIVATION_INVITE_CONTENT = {
+    subject: 'Lời mời kích hoạt tài khoản SmartShrimp',
+    title: 'Bạn được mời kích hoạt tài khoản',
+    greeting: 'Chào mừng bạn đến với SmartShrimp,',
+    intro: 'Quản trị viên đã khởi tạo tài khoản cho bạn. Vui lòng mở SmartShrimp, nhập mã OTP bên dưới để xác minh email, sau đó hoàn tất hồ sơ và thiết lập mật khẩu đăng nhập.',
+    note: 'Nếu bạn không rõ về lời mời này, vui lòng liên hệ với quản trị viên đã cấp tài khoản.',
+    actionName: 'kích hoạt tài khoản',
 };
 
 let transporter;
@@ -64,18 +74,21 @@ const getEmailContent = (purpose) =>
         actionName: 'xác minh email',
     };
 
-const buildTextEmail = ({ code, content, expiresMinutes }) =>
+const buildTextEmail = ({ code, content, expiresMinutes, instructions = '' }) =>
     [
         content.greeting,
         content.intro,
+        instructions,
         `Mã OTP để ${content.actionName} của bạn là ${code}.`,
         `Mã có hiệu lực trong ${expiresMinutes} phút.`,
         'Vui lòng không chia sẻ mã này với bất kỳ ai.',
         content.note,
         `${BRAND_NAME} Team`,
-    ].join('\n\n');
+    ]
+        .filter(Boolean)
+        .join('\n\n');
 
-const buildHtmlEmail = ({ code, content, expiresMinutes }) => {
+const buildHtmlEmail = ({ code, content, expiresMinutes, instructions = '' }) => {
     const safeCode = escapeHtml(code);
 
     return `<!doctype html>
@@ -86,11 +99,11 @@ const buildHtmlEmail = ({ code, content, expiresMinutes }) => {
   <meta name="color-scheme" content="light">
   <title>${escapeHtml(content.subject)}</title>
 </head>
-<body style="margin:0;padding:0;background:#f2f7f5;color:#18352c;">
-  <table role="presentation" width="100%" cellspacing="0" cellpadding="0" style="width:100%;background:#f2f7f5;margin:0;padding:28px 12px;">
+<body style="margin:0;padding:0;background:#f2f7f5;color:#18352c;font-family:${EMAIL_FONT_FAMILY};font-size:16px;line-height:1.625;">
+  <table role="presentation" width="100%" cellspacing="0" cellpadding="0" style="width:100%;background:#f2f7f5;margin:0;padding:28px 12px;font-family:${EMAIL_FONT_FAMILY};font-size:16px;line-height:1.625;">
     <tr>
       <td align="center">
-        <table role="presentation" width="100%" cellspacing="0" cellpadding="0" style="max-width:600px;width:100%;background:#ffffff;border-radius:18px;overflow:hidden;border:1px solid #dceae5;box-shadow:0 16px 42px rgba(24,53,44,0.10);">
+        <table role="presentation" width="100%" cellspacing="0" cellpadding="0" style="max-width:600px;width:100%;background:#ffffff;border-radius:18px;overflow:hidden;border:1px solid #dceae5;box-shadow:0 16px 42px rgba(24,53,44,0.10);font-family:${EMAIL_FONT_FAMILY};font-size:16px;line-height:1.625;">
           <tr>
             <td style="background-image:linear-gradient(to top, #fff1eb 0%, #ace0f9 100%);">
               <img src="${LOGO_URL}" width="220" alt="${BRAND_NAME}" draggable="false" style="display:block;margin:0 auto 14px auto;width:220px;max-width:220px;height:auto;border:0;outline:none;text-decoration:none;user-select:none;-webkit-user-drag:none;">
@@ -98,18 +111,19 @@ const buildHtmlEmail = ({ code, content, expiresMinutes }) => {
           </tr>
           <tr>
             <td style="padding:34px 32px 12px 32px;">
-              <h2 style="margin:0 0 14px 0;font-size:26px;line-height:34px;color:#123b31;font-weight:800;">${escapeHtml(content.title)}</h2>
+              <h2 style="margin:0 0 14px 0;font-family:${EMAIL_FONT_FAMILY};font-size:26px;line-height:34px;color:#123b31;font-weight:700;">${escapeHtml(content.title)}</h2>
               <p style="margin:0 0 10px 0;font-size:16px;line-height:26px;color:#36574f;">${escapeHtml(content.greeting)}</p>
               <p style="margin:0;font-size:16px;line-height:26px;color:#36574f;">${escapeHtml(content.intro)}</p>
+              ${instructions}
             </td>
           </tr>
           <tr>
             <td style="padding:22px 32px 18px 32px;">
-              <table role="presentation" width="100%" cellspacing="0" cellpadding="0" style="width:100%;background:#eefaf6;border:1px solid #bfe7db;border-radius:14px;">
+              <table role="presentation" width="100%" cellspacing="0" cellpadding="0" style="width:100%;background:#eefaf6;border:1px solid #bfe7db;border-radius:14px;font-family:${EMAIL_FONT_FAMILY};font-size:16px;line-height:1.625;">
                 <tr>
                   <td align="center" style="padding:24px 16px;">
                     <div style="font-size:13px;line-height:18px;color:#4b6f66;font-weight:700;text-transform:uppercase;letter-spacing:0.08em;margin-bottom:10px;">Mã OTP của bạn</div>
-                    <div style="font-size:34px;line-height:42px;color:#0b6e5b;font-weight:800;letter-spacing:8px;font-family:'Courier New',Courier,monospace;">${safeCode}</div>
+                    <div style="font-size:34px;line-height:42px;color:#0b6e5b;font-weight:700;letter-spacing:8px;font-family:${EMAIL_FONT_FAMILY};font-variant-numeric:tabular-nums;">${safeCode}</div>
                     <div style="font-size:14px;line-height:22px;color:#4b6f66;margin-top:12px;">Có hiệu lực trong <strong>${escapeHtml(expiresMinutes)} phút</strong></div>
                   </td>
                 </tr>
@@ -135,99 +149,61 @@ const buildHtmlEmail = ({ code, content, expiresMinutes }) => {
 </html>`;
 };
 
-const buildOtpEmail = ({ code, purpose }) => {
-    const content = getEmailContent(purpose);
+const buildEmail = ({ code, content, instructions }) => {
     const expiresMinutes = config.email.verificationExpiresMinutes;
-
     return {
         subject: content.subject,
-        text: buildTextEmail({ code, content, expiresMinutes }),
-        html: buildHtmlEmail({ code, content, expiresMinutes }),
+        text: buildTextEmail({ code, content, expiresMinutes, instructions: instructions?.text }),
+        html: buildHtmlEmail({ code, content, expiresMinutes, instructions: instructions?.html }),
     };
 };
 
-/**
- * Send a verification OTP for account activation or password reset.
- */
+const buildOtpEmail = ({ code, purpose }) =>
+    buildEmail({ code, content: getEmailContent(purpose) });
+
+const buildInvitationInstructions = ({ email, role }) => {
+    const path = '/activate-account?email=' + encodeURIComponent(email);
+    const web = config.app.webBaseUrl + path;
+    const mobile = 'smartshrimp://' + path;
+    const useApp = [ACCOUNT_ROLE.FARM_OWNER, ACCOUNT_ROLE.TECHNICIAN].includes(role);
+    const fallback = 'Chưa cài App hoặc đang dùng máy tính?';
+    const prefill = 'Email đã được điền sẵn. Nhập mã OTP trong email này để xác minh.';
+    const appLink = useApp
+        ? `Đã cài App trên điện thoại? <a href="${escapeHtml(mobile)}">Mở ứng dụng SmartShrimp</a><br>`
+        : '';
+    return {
+        text: [
+            ...(useApp
+                ? [`Đã cài App trên điện thoại? Mở ứng dụng SmartShrimp: ${mobile}`, fallback]
+                : []),
+            `Tiếp tục trên Web: ${web}`,
+            prefill,
+        ].join('\n'),
+        html: `<p style="margin:16px 0;font-family:${EMAIL_FONT_FAMILY};font-size:16px;line-height:26px;">${appLink}${useApp ? fallback + ' ' : ''}<a href="${escapeHtml(web)}">Tiếp tục trên Web</a><br>${prefill}</p>`,
+    };
+};
+
 const sendOtp = async ({ email, code, purpose }) => {
-    const emailContent = buildOtpEmail({ code, purpose });
-
     await getTransporter().sendMail({
         from: config.email.from,
         to: email,
-        ...emailContent,
+        ...buildOtpEmail({ code, purpose }),
     });
 };
 
-const buildActivationInviteEmail = () => {
-    const subject = `Lời mời kích hoạt tài khoản ${BRAND_NAME}`;
-    const text = [
-        'Chào mừng bạn đến với SmartShrimp,',
-        'Tài khoản của bạn đã được khởi tạo thành công trên hệ thống quản lý nuôi tôm SmartShrimp.',
-        'Vui lòng truy cập hệ thống SmartShrimp (qua trình duyệt web hoặc ứng dụng di động) để tiến hành kích hoạt tài khoản và thiết lập mật khẩu đăng nhập.',
-        'Nếu bạn không rõ về lời mời này hoặc cần hỗ trợ, vui lòng liên hệ với quản trị viên trang trại.',
-        `${BRAND_NAME} Team`,
-    ].join('\n\n');
+const buildActivationInviteEmail = ({ email, role, code }) =>
+    buildEmail({
+        code,
+        content: ACTIVATION_INVITE_CONTENT,
+        instructions: buildInvitationInstructions({ email, role }),
+    });
 
-    const html = `<!doctype html>
-<html lang="vi">
-<head>
-  <meta charset="utf-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1">
-  <meta name="color-scheme" content="light">
-  <title>${escapeHtml(subject)}</title>
-</head>
-<body style="margin:0;padding:0;background:#f2f7f5;color:#18352c;font-family:Arial,sans-serif;">
-  <table role="presentation" width="100%" cellspacing="0" cellpadding="0" style="width:100%;background:#f2f7f5;margin:0;padding:28px 12px;">
-    <tr>
-      <td align="center">
-        <table role="presentation" width="100%" cellspacing="0" cellpadding="0" style="max-width:600px;width:100%;background:#ffffff;border-radius:18px;overflow:hidden;border:1px solid #dceae5;box-shadow:0 16px 42px rgba(24,53,44,0.10);">
-          <tr>
-            <td style="background-image:linear-gradient(to top, #fff1eb 0%, #ace0f9 100%);padding:20px 0;">
-              <img src="${LOGO_URL}" width="220" alt="${BRAND_NAME}" draggable="false" style="display:block;margin:0 auto;width:220px;max-width:220px;height:auto;border:0;">
-            </td>
-          </tr>
-          <tr>
-            <td style="padding:34px 32px 16px 32px;">
-              <h2 style="margin:0 0 14px 0;font-size:24px;line-height:32px;color:#123b31;font-weight:800;">Chào mừng bạn đến với SmartShrimp!</h2>
-              <p style="margin:0 0 14px 0;font-size:16px;line-height:26px;color:#36574f;">Xin chào,</p>
-              <p style="margin:0 0 16px 0;font-size:16px;line-height:26px;color:#36574f;">Tài khoản của bạn đã được khởi tạo thành công trên hệ thống quản lý nuôi tôm <strong>SmartShrimp</strong>.</p>
-              <div style="background:#eefaf6;border:1px solid #bfe7db;border-radius:12px;padding:20px 24px;margin:20px 0;">
-                <p style="margin:0 0 8px 0;font-size:15px;line-height:24px;color:#0b6e5b;font-weight:700;">Hướng dẫn kích hoạt:</p>
-                <p style="margin:0;font-size:15px;line-height:24px;color:#36574f;">Vui lòng truy cập hệ thống <strong>SmartShrimp</strong> trên trình duyệt web hoặc ứng dụng di động để tiến hành kích hoạt tài khoản và hoàn tất thiết lập thông tin cá nhân cùng mật khẩu đăng nhập.</p>
-              </div>
-              <p style="margin:0;font-size:14px;line-height:22px;color:#5d786f;">Nếu bạn không rõ về lời mời này hoặc cần hỗ trợ, vui lòng liên hệ trực tiếp với quản trị viên trang trại của bạn.</p>
-            </td>
-          </tr>
-          <tr>
-            <td style="background:#f8fbfa;padding:20px 32px;text-align:center;border-top:1px solid #e5efeb;">
-              <p style="margin:0;font-size:13px;line-height:21px;color:#769188;">Email tự động từ ${BRAND_NAME}. Vui lòng không trả lời email này.</p>
-            </td>
-          </tr>
-        </table>
-      </td>
-    </tr>
-  </table>
-</body>
-</html>`;
-
-    return { subject, text, html };
-};
-
-const sendAccountActivationEmail = async ({ email }) => {
-    const emailContent = buildActivationInviteEmail();
-
+const sendAccountActivationEmail = async ({ email, role, code }) => {
     await getTransporter().sendMail({
         from: config.email.from,
         to: email,
-        ...emailContent,
+        ...buildActivationInviteEmail({ email, role, code }),
     });
 };
 
-module.exports = {
-    buildOtpEmail,
-    buildActivationInviteEmail,
-    sendOtp,
-    sendAccountActivationEmail,
-};
-
+module.exports = { buildOtpEmail, buildActivationInviteEmail, sendOtp, sendAccountActivationEmail };

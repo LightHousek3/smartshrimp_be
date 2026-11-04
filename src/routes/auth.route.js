@@ -1,6 +1,6 @@
 const express = require('express');
 const { authController } = require('../controllers');
-const { validate, authLimiter } = require('../middlewares');
+const { validate, authLimiter, otpRequestLimiter } = require('../middlewares');
 const { authValidator } = require('../validators');
 
 const router = express.Router();
@@ -40,7 +40,7 @@ router.post(
  */
 router.post(
     '/activation/request-otp',
-    authLimiter,
+    otpRequestLimiter,
     validate(authValidator.requestOtp),
     authController.requestActivationOtp,
 );
@@ -76,7 +76,7 @@ router.post(
  */
 router.post(
     '/forgot-password/request-otp',
-    authLimiter,
+    otpRequestLimiter,
     validate(authValidator.requestOtp),
     authController.requestPasswordResetOtp,
 );
