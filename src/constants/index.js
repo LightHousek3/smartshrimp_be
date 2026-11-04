@@ -222,14 +222,18 @@ const PRODUCTION_PROTOCOL_IN_PROGRESS_STATUSES = [
 const PRODUCTION_PROTOCOL_WRITABLE_SEASONS = [SEASON_STATUS.PLANNING, SEASON_STATUS.ACTIVE];
 const PRODUCTION_PROTOCOL_UNITS = ['KG', 'G', 'L', 'ML', 'PACK', 'BOTTLE', 'PCS'];
 const PRODUCTION_PROTOCOL_CATEGORIES = ['FEED', 'MEDICINE', 'MINERAL', 'CHEMICAL', 'OTHER'];
+const PRODUCTION_PROTOCOL_LIMITS = Object.freeze({ stages: 120, items: 1000, workerBatch: 20,
+    materialOptions: 50, biomassMaxAgeHours: 24, structureVersion: 1, maxDoc: 2147483647 });
 
 const allowedProductionProtocolDoseBases = (operationType, offset) => {
-    if (offset >= 30) {
-        return Object.values(DOSE_BASIS);
-    }
-
     if ([OPERATION_TYPE.FEEDING, OPERATION_TYPE.MEDICINE].includes(operationType)) {
-        return [DOSE_BASIS.FIXED_QUANTITY];
+        // API offsets are zero-based; the persisted DOC 30 boundary is offset 29.
+        return offset >= 29
+            ? [DOSE_BASIS.FIXED_QUANTITY, DOSE_BASIS.PERCENT_BIOMASS, DOSE_BASIS.PER_KG_BIOMASS]
+            : [DOSE_BASIS.FIXED_QUANTITY];
+    }
+    if (operationType === OPERATION_TYPE.OTHER && offset >= 30) {
+        return Object.values(DOSE_BASIS);
     }
 
     return [DOSE_BASIS.FIXED_QUANTITY, DOSE_BASIS.PER_M3_WATER];
@@ -421,6 +425,7 @@ module.exports = {
     PRODUCTION_PROTOCOL_WRITABLE_SEASONS,
     PRODUCTION_PROTOCOL_UNITS,
     PRODUCTION_PROTOCOL_CATEGORIES,
+    PRODUCTION_PROTOCOL_LIMITS,
     allowedProductionProtocolDoseBases,
     SCHEDULE_CANCELLATION_TYPE,
     NOTIFICATION_TYPE,

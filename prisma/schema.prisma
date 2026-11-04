@@ -506,30 +506,34 @@ model DiseaseCase {
 }
 
 model Protocol {
-  sourceTemplate ProductionProtocolTemplate? @relation(fields: [sourceTemplateId], references: [id], onDelete: Restrict)
-  id                   String         @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
-  protocolType         ProtocolType   @map("protocol_type")
-  seasonId             String         @map("season_id") @db.Uuid
-  diseaseCaseId        String?        @map("disease_case_id") @db.Uuid
-  sourceTemplateId     String?        @map("source_template_id") @db.Uuid
-  versionNo            Int            @map("version_no")
-  supersedesProtocolId String?        @map("supersedes_protocol_id") @db.Uuid
-  title                String         @db.VarChar(500)
+  contentVersion          Int   @default(1) @map("content_version") @db.SmallInt
+  sourceTemplateVersionNo Int?  @map("source_template_version_no")
+  sourceTemplateSnapshot  Json? @map("source_template_snapshot") @db.JsonB
+  productionStructure     Json? @map("production_structure") @db.JsonB
+  sourceTemplate       ProductionProtocolTemplate? @relation(fields: [sourceTemplateId], references: [id], onDelete: Restrict)
+  id                   String                      @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  protocolType         ProtocolType                @map("protocol_type")
+  seasonId             String                      @map("season_id") @db.Uuid
+  diseaseCaseId        String?                     @map("disease_case_id") @db.Uuid
+  sourceTemplateId     String?                     @map("source_template_id") @db.Uuid
+  versionNo            Int                         @map("version_no")
+  supersedesProtocolId String?                     @map("supersedes_protocol_id") @db.Uuid
+  title                String                      @db.VarChar(500)
   summary              String?
-  allowedVariancePct   Decimal?       @map("allowed_variance_pct") @db.Decimal(5, 2)
-  rollingWindowDays    Int            @default(7) @map("rolling_window_days") @db.SmallInt
-  status               ProtocolStatus @default(DRAFT)
-  createdBy            String         @map("created_by") @db.Uuid
-  submittedAt          DateTime?      @map("submitted_at") @db.Timestamptz(6)
-  reviewedBy           String?        @map("reviewed_by") @db.Uuid
-  reviewedAt           DateTime?      @map("reviewed_at") @db.Timestamptz(6)
-  rejectionReason      String?        @map("rejection_reason")
-  supersededAt         DateTime?      @map("superseded_at") @db.Timestamptz(6)
-  abortReason          String?        @map("abort_reason")
-  abortedBy            String?        @map("aborted_by") @db.Uuid
-  abortedAt            DateTime?      @map("aborted_at") @db.Timestamptz(6)
-  createdAt            DateTime       @default(now()) @map("created_at") @db.Timestamptz(6)
-  updatedAt            DateTime       @default(now()) @map("updated_at") @db.Timestamptz(6)
+  allowedVariancePct   Decimal?                    @map("allowed_variance_pct") @db.Decimal(5, 2)
+  rollingWindowDays    Int                         @default(7) @map("rolling_window_days") @db.SmallInt
+  status               ProtocolStatus              @default(DRAFT)
+  createdBy            String                      @map("created_by") @db.Uuid
+  submittedAt          DateTime?                   @map("submitted_at") @db.Timestamptz(6)
+  reviewedBy           String?                     @map("reviewed_by") @db.Uuid
+  reviewedAt           DateTime?                   @map("reviewed_at") @db.Timestamptz(6)
+  rejectionReason      String?                     @map("rejection_reason")
+  supersededAt         DateTime?                   @map("superseded_at") @db.Timestamptz(6)
+  abortReason          String?                     @map("abort_reason")
+  abortedBy            String?                     @map("aborted_by") @db.Uuid
+  abortedAt            DateTime?                   @map("aborted_at") @db.Timestamptz(6)
+  createdAt            DateTime                    @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt            DateTime                    @default(now()) @map("updated_at") @db.Timestamptz(6)
 
   season        AquacultureSeason       @relation(fields: [seasonId], references: [id], onDelete: Restrict)
   items         ProtocolItem[]
@@ -554,24 +558,31 @@ model ProtocolStatusHistory {
 }
 
 model ProtocolItem {
-  id                     String           @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
-  protocolId             String           @map("protocol_id") @db.Uuid
-  operationType          OperationType    @map("operation_type")
-  productId              String?          @map("product_id") @db.Uuid
-  recommendedProductName String?          @map("recommended_product_name") @db.VarChar(255)
-  recommendedCategory    ProductCategory? @map("recommended_category")
-  startDayOffset         Int              @map("start_day_offset")
-  endDayOffset           Int              @map("end_day_offset")
-  repeatIntervalDays     Int              @default(1) @map("repeat_interval_days") @db.SmallInt
-  mealNumber             Int?             @map("meal_number")
-  plannedTime            DateTime?        @map("planned_time") @db.Time(6)
-  doseBasis              DoseBasis        @map("dose_basis")
-  doseValue              Decimal          @map("dose_value") @db.Decimal(14, 4)
-  doseUnit               ProductUnit      @map("dose_unit")
-  instructions           String?
-  sequenceOrder          Int              @default(1) @map("sequence_order")
-  createdAt              DateTime         @default(now()) @map("created_at") @db.Timestamptz(6)
-  updatedAt              DateTime         @default(now()) @map("updated_at") @db.Timestamptz(6)
+  productionMealId          String?  @map("production_meal_id") @db.Uuid
+  dailyDoseIncrement        Decimal? @map("daily_dose_increment") @db.Decimal(14, 4)
+  recurrenceAnchorDay       Int?     @map("recurrence_anchor_day")
+  doseAnchorDay             Int?     @map("dose_anchor_day")
+  materialSnapshot          Json?    @map("material_snapshot") @db.JsonB
+  id                        String                        @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  protocolId                String                        @map("protocol_id") @db.Uuid
+  operationType             OperationType                 @map("operation_type")
+  productId                 String?                       @map("product_id") @db.Uuid
+  recommendedProductName    String?                       @map("recommended_product_name") @db.VarChar(255)
+  recommendedCategory       ProductCategory?              @map("recommended_category")
+  recommendedProductDetails Json?                         @map("recommended_product_details") @db.JsonB
+  recommendedManufacturerId String?                       @map("recommended_manufacturer_id") @db.Uuid
+  startDayOffset            Int                           @map("start_day_offset")
+  endDayOffset              Int                           @map("end_day_offset")
+  repeatIntervalDays        Int                           @default(1) @map("repeat_interval_days") @db.SmallInt
+  mealNumber                Int?                          @map("meal_number")
+  plannedTime               DateTime?                     @map("planned_time") @db.Time(6)
+  doseBasis                 DoseBasis                     @map("dose_basis")
+  doseValue                 Decimal                       @map("dose_value") @db.Decimal(14, 4)
+  doseUnit                  ProductUnit                   @map("dose_unit")
+  instructions              String?
+  sequenceOrder             Int                           @default(1) @map("sequence_order")
+  createdAt                 DateTime                      @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt                 DateTime                      @default(now()) @map("updated_at") @db.Timestamptz(6)
 
   protocol  Protocol            @relation(fields: [protocolId], references: [id], onDelete: Restrict)
   product   Product?            @relation(fields: [productId], references: [id], onDelete: Restrict)
@@ -806,7 +817,7 @@ model ProductionProtocolTemplateItem {
   sequenceOrder             Int                        @default(1) @map("sequence_order")
   createdAt                 DateTime                   @default(now()) @map("created_at") @db.Timestamptz(6)
   updatedAt                 DateTime                   @default(now()) @map("updated_at") @db.Timestamptz(6)
-  template                  ProductionProtocolTemplate @relation(fields: [templateId], references: [id], onDelete: Cascade)
+  template                  ProductionProtocolTemplate @relation(fields: [templateId], references: [id], onDelete: Restrict, onUpdate: NoAction)
   product                   Product?                   @relation(fields: [productId], references: [id], onDelete: Restrict)
 
   @@unique([templateId, sequenceOrder], map: "uq_template_item_sequence")
