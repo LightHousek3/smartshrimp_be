@@ -1,5 +1,6 @@
 const dotenv = require('dotenv');
 const path = require('path');
+const { PRODUCTION_PROTOCOL_LIMITS } = require('../constants');
 
 dotenv.config({ path: path.join(__dirname, '../../.env') });
 
@@ -91,6 +92,14 @@ const config = {
 
     security: {
         bcryptSaltRounds: parseInt(process.env.BCRYPT_SALT_ROUNDS, 10) || 12,
+    },
+    productionProtocol: {
+        v2Enabled: process.env.PRODUCTION_PROTOCOL_V2_ENABLED === 'true',
+        templateApplyEnabled: process.env.PRODUCTION_PROTOCOL_TEMPLATE_APPLY_ENABLED === 'true',
+        scheduleWorkerEnabled: process.env.PRODUCTION_PROTOCOL_SCHEDULE_WORKER_ENABLED === 'true',
+        workerIntervalMs: Math.max(10000, Number(process.env.PRODUCTION_PROTOCOL_WORKER_INTERVAL_MS) || 60000),
+        transactionTimeoutMs: 60000,
+        biomassMaxAgeHours: PRODUCTION_PROTOCOL_LIMITS.biomassMaxAgeHours,
     },
     rag: {
         serviceUrl: (process.env.RAG_SERVICE_URL || '').replace(/\/+$/, ''),
