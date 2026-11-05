@@ -13,6 +13,7 @@ const {
     SEASON_STATUS,
     AI_RUN_STATUS,
     AI_LABELS,
+    AI_LABEL_NAMES,
     AI_LIMITS,
     AI_IMAGE_TYPES,
     messages,
@@ -298,6 +299,13 @@ const classifyImages = async (files, requestId) => {
 
 // History response mapping ---------------------------------------------------
 
+/** Expand disease abbreviations in advice, including recommendations stored by older runs. */
+const recommendationText = (value) => value
+    .replace(/\s*\((?:WSSV|BG|WSSV_BG|WSSV\/BG)\)/gi, '')
+    .replace(/\bWSSV(?:_BG|\/BG)\b/gi, 'đốm trắng và mang đen')
+    .replace(/\bWSSV\b/gi, 'đốm trắng')
+    .replace(/\bBG\b/gi, 'mang đen');
+
 const summarySelect = {
     id: true, createdAt: true, runStatus: true, predictedLabel: true, confidence: true, imageUrls: true,
 };
@@ -309,7 +317,7 @@ const summary = (row) => ({
     runStatus: row.runStatus,
     imageCount: row.imageUrls.length,
     ...(row.runStatus === AI_RUN_STATUS.SUCCESS && {
-        predictedLabel: row.predictedLabel,
+        predictedLabel: AI_LABEL_NAMES[row.predictedLabel],
         confidence: Number(row.confidence),
     }),
 });
@@ -331,10 +339,12 @@ const detail = (row) => {
         modelVersion: row.modelVersion,
         processingTimeMs: row.processingTimeMs,
         ...(row.runStatus === AI_RUN_STATUS.SUCCESS ? {
-            predictedLabel: row.predictedLabel,
+            predictedLabel: AI_LABEL_NAMES[row.predictedLabel],
             confidence: Number(row.confidence),
-            predictions: row.predictions,
-            recommendation: row.recommendation,
+            predictions: row.predictions.map((prediction) => ({
+                ...prediction, label: AI_LABEL_NAMES[prediction.label],
+            })),
+            recommendation: recommendationText(row.recommendation),
         } : { error: { code: row.errorCode, message: row.errorMessage } }),
     };
 };

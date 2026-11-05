@@ -13,7 +13,8 @@ const {
 } = buildAutoPaths(config.apiPrefix);
 
 const notificationDetailPath = `${config.apiPrefix}/notifications/{notificationId}`;
-const { RAG_DOCUMENT_CATEGORIES } = require('../constants');
+const { RAG_DOCUMENT_CATEGORIES, AI_LABEL_NAMES } = require('../constants');
+const aiLabelDescription = ` Public classification labels: ${Object.values(AI_LABEL_NAMES).join('; ')}. Prediction entries use the same names.`;
 const documentUpload = autoPaths[`${config.apiPrefix}/admin/rag/documents`]?.post;
 const aiBasePath = `${config.apiPrefix}/technician/seasons/{seasonId}/ai-diagnoses`;
 const aiUpload = autoPaths[aiBasePath]?.post;
@@ -45,6 +46,9 @@ if (autoPaths[aiBasePath]?.get) {
 }
 if (autoPaths[`${aiBasePath}/{diagnosisId}`]?.get) {
     autoPaths[`${aiBasePath}/{diagnosisId}`].get.description = 'Own result only, with a current assignment. data: {id, seasonId, createdAt, runStatus, imageUrls, imageUrlsExpireAt?, modelVersion, processingTimeMs, predictedLabel?, confidence?, predictions?, recommendation?, error?: {code, message}}. New image URLs expire after five minutes; reload detail to refresh. Internal input snapshots are never returned.';
+}
+for (const operation of [aiUpload, autoPaths[aiBasePath]?.get, autoPaths[`${aiBasePath}/{diagnosisId}`]?.get]) {
+    if (operation) operation.description = (operation.description || '') + aiLabelDescription;
 }
 if (documentUpload) {
     documentUpload.requestBody = {
