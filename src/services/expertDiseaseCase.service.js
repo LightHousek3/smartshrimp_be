@@ -1,14 +1,12 @@
 const prisma = require('../config/prisma');
 const { ApiError } = require('../utils');
-const { messages, NOTIFICATION_TYPE, PROTOCOL_STATUS } = require('../constants');
+const {
+    messages,
+    NOTIFICATION_TYPE,
+    PROTOCOL_STATUS,
+    SCHEDULE_CANCELLATION_TYPE,
+} = require('../constants');
 const { emitNotification } = require('../realtime/notification.socket');
-
-if (!BigInt.prototype.toJSON) {
-    BigInt.prototype.toJSON = function () {
-        return this.toString();
-    };
-}
-
 const { createHash } = require('crypto');
 
 const timeText = (value) => (value == null ? null : value.toISOString().slice(11, 23));
@@ -69,13 +67,6 @@ const groupItems = (items) => {
     return stages;
 };
 
-const SEVERITY_ORDER = {
-    CRITICAL: 1,
-    HIGH: 2,
-    MEDIUM: 3,
-    LOW: 4,
-};
-
 /**
  * List disease cases assigned to the authenticated expert.
  */
@@ -86,8 +77,7 @@ const list = async (expertId, query = {}) => {
 
     const where = {
         expertId,
-        ...(query.status ? { status: query.status } : {}),
-        ...(query.severity ? { severity: query.severity } : {}),
+        ...(query.status && query.status !== 'action' ? { status: query.status } : {}),
         ...(query.seasonId ? { seasonId: query.seasonId } : {}),
         ...(query.farmId ? { season: { pond: { farmId: query.farmId } } } : {}),
         ...(query.search
@@ -104,6 +94,37 @@ const list = async (expertId, query = {}) => {
             : {}),
     };
 
+    // F07: Handle multiple severities or array
+    if (query.severity) {
+        const sevs = Array.isArray(query.severity)
+            ? query.severity
+            : query.severity.includes(',')
+                ? query.severity.split(',').map((s) => s.trim()).filter(Boolean)
+                : [query.severity];
+        where.severity = sevs.length === 1 ? sevs[0] : { in: sevs };
+    }
+
+    // F07: Filter "Needs response" directly before pagination
+    if (query.needsResponse === true || query.needsResponse === 'true' || query.status === 'action') {
+        const matchingCases = await prisma.$queryRaw`
+            SELECT c.id FROM disease_cases c
+            WHERE c.expert_id = ${expertId}::uuid
+              AND c.status <> 'RESOLVED'
+              AND (
+                NOT EXISTS (SELECT 1 FROM disease_case_responses r WHERE r.case_id = c.id)
+                OR (
+                  SELECT a.role FROM disease_case_responses r
+                  JOIN accounts a ON a.id = r.author_id
+                  WHERE r.case_id = c.id
+                  ORDER BY r.created_at DESC LIMIT 1
+                ) <> 'expert'::account_role
+              )
+        `;
+        const ids = matchingCases.map((r) => r.id);
+        where.id = { in: ids };
+    }
+
+    // F08: Sort entire table by severity priority and updatedAt before pagination
     const [total, rawCases] = await Promise.all([
         prisma.diseaseCase.count({ where }),
         prisma.diseaseCase.findMany({
@@ -149,7 +170,11 @@ const list = async (expertId, query = {}) => {
                     },
                 },
             },
-            orderBy: [{ updatedAt: 'desc' }],
+            orderBy: [
+                { severity: 'desc' },
+                { updatedAt: 'desc' },
+                { id: 'desc' },
+            ],
             skip,
             take: limit,
         }),
@@ -178,12 +203,6 @@ const list = async (expertId, query = {}) => {
         };
     });
 
-    items.sort((a, b) => {
-        const sevDiff = (SEVERITY_ORDER[a.severity] || 99) - (SEVERITY_ORDER[b.severity] || 99);
-        if (sevDiff !== 0) return sevDiff;
-        return new Date(b.updatedAt) - new Date(a.updatedAt);
-    });
-
     return {
         data: items,
         meta: {
@@ -197,88 +216,65 @@ const list = async (expertId, query = {}) => {
 };
 
 /**
- * Get detailed disease case for clinical evaluation.
+ * Get disease case details by ID.
  */
 const detail = async (expertId, caseId) => {
     const diseaseCase = await prisma.diseaseCase.findUnique({
         where: { id: caseId },
         include: {
-            season: {
-                include: {
-                    pond: {
-                        include: { farm: true },
-                    },
-                },
-            },
             reporter: {
-                select: {
-                    id: true,
-                    fullName: true,
-                    phone: true,
-                    email: true,
-                    role: true,
-                },
+                select: { id: true, fullName: true, phone: true, role: true, avatarUrl: true },
             },
             expert: {
+                select: { id: true, fullName: true, phone: true, role: true, avatarUrl: true },
+            },
+            season: {
                 select: {
                     id: true,
-                    fullName: true,
-                    phone: true,
-                    email: true,
-                    role: true,
-                },
-            },
-            resolver: {
-                select: {
-                    id: true,
-                    fullName: true,
-                    role: true,
-                },
-            },
-            attachments: {
-                orderBy: { createdAt: 'asc' },
-            },
-            responses: {
-                include: {
-                    author: {
+                    name: true,
+                    status: true,
+                    shrimpType: true,
+                    stockingDate: true,
+                    initialQuantity: true,
+                    pond: {
                         select: {
                             id: true,
-                            fullName: true,
-                            role: true,
-                        },
-                    },
-                },
-                orderBy: { createdAt: 'asc' },
-            },
-            statusHistory: {
-                include: {
-                    changer: {
-                        select: {
-                            id: true,
-                            fullName: true,
-                            role: true,
-                        },
-                    },
-                },
-                orderBy: { changedAt: 'desc' },
-            },
-            protocols: {
-                include: {
-                    items: {
-                        include: {
-                            product: {
+                            name: true,
+                            areaM2: true,
+                            volumeM3: true,
+                            farm: {
                                 select: {
                                     id: true,
                                     name: true,
-                                    unit: true,
-                                    category: true,
+                                    ownerId: true,
+                                    address: true,
+                                    owner: {
+                                        select: { id: true, fullName: true, phone: true },
+                                    },
                                 },
                             },
                         },
-                        orderBy: [{ startDayOffset: 'asc' }, { sequenceOrder: 'asc' }],
                     },
                 },
-                orderBy: { versionNo: 'desc' },
+            },
+            attachments: {
+                orderBy: { createdAt: 'desc' },
+            },
+            responses: {
+                orderBy: { createdAt: 'asc' },
+                include: {
+                    author: {
+                        select: { id: true, fullName: true, role: true, avatarUrl: true },
+                    },
+                },
+            },
+            statusHistory: {
+                orderBy: { changedAt: 'desc' },
+                include: {
+                    changer: {
+                        select: { id: true, fullName: true, role: true },
+                    },
+                },
             },
         },
     });
@@ -291,92 +287,166 @@ const detail = async (expertId, caseId) => {
         throw ApiError.forbidden(messages.DISEASE_CASE.NOT_ASSIGNED);
     }
 
-    // Schedule metrics for treatment protocols
-    const protocolsWithMetrics = await Promise.all(
-        diseaseCase.protocols.map(async (p) => {
-            const itemIds = p.items.map((i) => i.id);
-            const [completedCount, plannedCount, cancelledCount] = await Promise.all([
-                prisma.operationSchedule.count({
-                    where: { protocolItemId: { in: itemIds }, status: 'COMPLETED' },
-                }),
-                prisma.operationSchedule.count({
-                    where: { protocolItemId: { in: itemIds }, status: 'PLANNED' },
-                }),
-                prisma.operationSchedule.count({
-                    where: { protocolItemId: { in: itemIds }, status: 'CANCELLED' },
-                }),
-            ]);
+    // Fetch active/linked protocols for this disease case
+    const linkedProtocols = await prisma.protocol.findMany({
+        where: {
+            diseaseCaseId: caseId,
+        },
+        orderBy: { versionNo: 'desc' },
+        include: {
+            items: {
+                orderBy: [
+                    { startDayOffset: 'asc' },
+                    { mealNumber: 'asc' },
+                    { plannedTime: 'asc' },
+                ],
+                include: {
+                    product: {
+                        select: { id: true, name: true, category: true, unit: true },
+                    },
+                },
+            },
+            statusHistory: {
+                orderBy: { changedAt: 'desc' },
+                select: {
+                    id: true,
+                    fromStatus: true,
+                    toStatus: true,
+                    changedBy: true,
+                    changedAt: true,
+                    reason: true,
+                },
+            },
+        },
+    });
 
-            const stages = groupItems(p.items).map((stage) => ({
-                ...stage,
-                meals: stage.meals.map((meal) => ({
-                    ...meal,
-                    items: meal.items.map(wireItem),
-                })),
+    // Populate changer accounts for protocol status histories
+    const protoChangerIds = new Set();
+    linkedProtocols.forEach((p) => {
+        (p.statusHistory || []).forEach((h) => {
+            if (h.changedBy) protoChangerIds.add(h.changedBy);
+        });
+    });
+
+    const protoChangers = protoChangerIds.size > 0
+        ? await prisma.account.findMany({
+            where: { id: { in: Array.from(protoChangerIds) } },
+            select: { id: true, fullName: true, role: true },
+        })
+        : [];
+    const protoChangerMap = new Map(protoChangers.map((c) => [c.id, c]));
+
+    // Compute progress metrics for each protocol
+    const protocolsWithMetrics = await Promise.all(
+        linkedProtocols.map(async (proto) => {
+            const itemIds = proto.items.map((i) => i.id);
+            let totalSchedules = 0;
+            let completedCount = 0;
+            let cancelledCount = 0;
+
+            if (itemIds.length > 0) {
+                const [tot, comp, canc] = await Promise.all([
+                    prisma.operationSchedule.count({
+                        where: { protocolItemId: { in: itemIds } },
+                    }),
+                    prisma.operationSchedule.count({
+                        where: {
+                            protocolItemId: { in: itemIds },
+                            status: 'COMPLETED',
+                        },
+                    }),
+                    prisma.operationSchedule.count({
+                        where: {
+                            protocolItemId: { in: itemIds },
+                            status: 'CANCELLED',
+                        },
+                    }),
+                ]);
+                totalSchedules = tot;
+                completedCount = comp;
+                cancelledCount = canc;
+            }
+
+            const rawItems = proto.items.map(wireItem);
+            const stages = groupItems(rawItems);
+
+            const statusHistoryWithChanger = (proto.statusHistory || []).map((h) => ({
+                ...h,
+                changer: protoChangerMap.get(h.changedBy) || null,
             }));
 
-            const statusHistoryRows = await prisma.protocolStatusHistory.findMany({
-                where: { protocolId: p.id },
-                orderBy: [{ changedAt: 'asc' }, { id: 'asc' }],
-            });
-
             return {
-                ...p,
-                allowedVariancePct: p.allowedVariancePct != null ? String(p.allowedVariancePct) : '10',
-                rollingWindowDays: p.rollingWindowDays || 3,
-                availableActions: {
-                    update: false,
-                    submit: false,
-                },
+                id: proto.id,
+                protocolCode: `PRT-CASE-${proto.versionNo}`,
+                protocolType: proto.protocolType,
+                title: proto.title,
+                summary: proto.summary,
+                versionNo: proto.versionNo,
+                status: proto.status,
+                allowedVariancePct: proto.allowedVariancePct,
+                rollingWindowDays: proto.rollingWindowDays,
+                abortReason: proto.abortReason,
+                abortedAt: proto.abortedAt,
+                createdAt: proto.createdAt,
+                updatedAt: proto.updatedAt,
                 stages,
-                statusHistory: statusHistoryRows,
+                statusHistory: statusHistoryWithChanger,
                 metrics: {
+                    totalSchedules,
                     completedCount,
-                    plannedCount,
                     cancelledCount,
-                    totalSchedules: completedCount + plannedCount + cancelledCount,
+                    progressPct: totalSchedules > 0
+                        ? Math.round((completedCount / totalSchedules) * 100)
+                        : 0,
                 },
             };
-        }),
+        })
     );
 
-    // Latest health and water logs
-    const [latestHealthLog, latestWaterLog] = await Promise.all([
+    // Latest shrimp health log & water quality log for comparative snapshot
+    const [latestHealth, latestWater] = await Promise.all([
         prisma.shrimpHealthLog.findFirst({
             where: { seasonId: diseaseCase.seasonId, isVoided: false },
             orderBy: { recordedAt: 'desc' },
-            select: {
-                id: true,
-                recordedAt: true,
-                avgWeightG: true,
-                avgLengthCm: true,
-                estimatedBiomassKg: true,
-                healthStatus: true,
-                note: true,
-            },
         }),
         prisma.waterQualityLog.findFirst({
             where: { seasonId: diseaseCase.seasonId, isVoided: false },
             orderBy: { recordedAt: 'desc' },
-            select: {
-                id: true,
-                recordedAt: true,
-                temperatureC: true,
-                ph: true,
-                dissolvedOxygenMgL: true,
-                salinityPpt: true,
-                alkalinityMgLCaCO3: true,
-                nh3MgL: true,
-                no2MgL: true,
-            },
         }),
     ]);
 
     return {
         ...diseaseCase,
         protocols: protocolsWithMetrics,
-        latestHealthLog,
-        latestWaterLog,
+        latestWaterLog: latestWater,
+        latestMetrics: {
+            health: latestHealth
+                ? {
+                    ...latestHealth,
+                    mortalityCount:
+                        latestHealth.mortalityCount != null
+                            ? Number(latestHealth.mortalityCount)
+                            : 0,
+                    estimatedPopulation:
+                        latestHealth.estimatedPopulation != null
+                            ? Number(latestHealth.estimatedPopulation)
+                            : null,
+                    avgWeightG:
+                        latestHealth.avgWeightG != null
+                            ? Number(latestHealth.avgWeightG)
+                            : null,
+                    avgLengthCm:
+                        latestHealth.avgLengthCm != null
+                            ? Number(latestHealth.avgLengthCm)
+                            : null,
+                    estimatedBiomassKg:
+                        latestHealth.estimatedBiomassKg != null
+                            ? Number(latestHealth.estimatedBiomassKg)
+                            : null,
+                }
+                : null,
+            water: latestWater,
+        },
     };
 };
 
@@ -384,53 +454,64 @@ const detail = async (expertId, caseId) => {
  * Expert responds to the disease case (BR-CASE-02).
  */
 const respond = async (expertId, caseId, data) => {
-    const diseaseCase = await prisma.diseaseCase.findUnique({
-        where: { id: caseId },
-        include: {
-            season: {
-                include: {
-                    pond: { include: { farm: true } },
-                },
-            },
-        },
-    });
-
-    if (!diseaseCase) {
-        throw ApiError.notFound(messages.DISEASE_CASE.NOT_FOUND);
-    }
-
-    if (diseaseCase.expertId !== expertId) {
-        throw ApiError.forbidden(messages.DISEASE_CASE.NOT_ASSIGNED);
-    }
-
-    if (diseaseCase.status === 'RESOLVED') {
-        throw ApiError.badRequest(messages.DISEASE_CASE.ALREADY_RESOLVED);
-    }
-
-    const isRequestInfo = data.responseType === 'REQUEST_INFO';
-    const isMonitoring = data.switchToMonitoring === true;
-    let nextStatus = null;
-    let statusReason = null;
-
-    if (isRequestInfo && diseaseCase.status !== 'WAITING_FOR_INFO') {
-        nextStatus = 'WAITING_FOR_INFO';
-        statusReason = 'Chuyên gia yêu cầu thêm thông tin/kết quả xét nghiệm';
-    } else if (isMonitoring && diseaseCase.status !== 'MONITORING') {
-        nextStatus = 'MONITORING';
-        statusReason = 'Chuyên gia chỉ dẫn xử lý và chuyển ca sang trạng thái theo dõi';
-    }
-
     const now = new Date();
+    const pendingNotifications = [];
 
     const result = await prisma.$transaction(async (tx) => {
+        // F05: Read and validate inside transaction
+        const diseaseCase = await tx.diseaseCase.findUnique({
+            where: { id: caseId },
+            include: {
+                season: {
+                    include: {
+                        pond: { include: { farm: true } },
+                    },
+                },
+            },
+        });
+
+        if (!diseaseCase) {
+            throw ApiError.notFound(messages.DISEASE_CASE.NOT_FOUND);
+        }
+
+        if (diseaseCase.expertId !== expertId) {
+            throw ApiError.forbidden(messages.DISEASE_CASE.NOT_ASSIGNED);
+        }
+
+        if (diseaseCase.status === 'RESOLVED') {
+            throw ApiError.badRequest(messages.DISEASE_CASE.ALREADY_RESOLVED);
+        }
+
+        // F09: State machine alignment
+        const isRequestInfo = data.responseType === 'REQUEST_INFO';
+        const isInstruction = data.responseType === 'EXPERT_INSTRUCTION';
+        const isMonitoring = isInstruction && data.switchToMonitoring === true;
+        let nextStatus = null;
+        let statusReason = null;
+
+        // Never downgrade IN_TREATMENT status via basic info request or instruction switch
+        if (diseaseCase.status !== 'IN_TREATMENT') {
+            if (isRequestInfo && diseaseCase.status !== 'WAITING_FOR_INFO') {
+                nextStatus = 'WAITING_FOR_INFO';
+                statusReason = 'Chuyên gia yêu cầu thêm thông tin/kết quả xét nghiệm';
+            } else if (isMonitoring && diseaseCase.status !== 'MONITORING') {
+                nextStatus = 'MONITORING';
+                statusReason = 'Chuyên gia chỉ dẫn xử lý và chuyển ca sang trạng thái theo dõi';
+            }
+        }
+
+        // F05: Atomic conditional update
         if (nextStatus) {
-            await tx.diseaseCase.update({
-                where: { id: caseId },
+            const updateCount = await tx.diseaseCase.updateMany({
+                where: { id: caseId, expertId, status: diseaseCase.status },
                 data: {
                     status: nextStatus,
                     updatedAt: now,
                 },
             });
+            if (updateCount.count === 0) {
+                throw ApiError.conflict(messages.DISEASE_CASE.CASE_OR_ROLE_CONFLICT);
+            }
 
             await tx.diseaseCaseStatusHistory.create({
                 data: {
@@ -443,10 +524,13 @@ const respond = async (expertId, caseId, data) => {
                 },
             });
         } else {
-            await tx.diseaseCase.update({
-                where: { id: caseId },
+            const updateCount = await tx.diseaseCase.updateMany({
+                where: { id: caseId, expertId, status: diseaseCase.status },
                 data: { updatedAt: now },
             });
+            if (updateCount.count === 0) {
+                throw ApiError.conflict(messages.DISEASE_CASE.CASE_OR_ROLE_CONFLICT);
+            }
         }
 
         const newResponse = await tx.diseaseCaseResponse.create({
@@ -454,7 +538,7 @@ const respond = async (expertId, caseId, data) => {
                 caseId,
                 authorId: expertId,
                 responseType: data.responseType,
-                message: data.message,
+                message: data.message.trim(),
                 attachments: data.attachments || [],
                 createdAt: now,
             },
@@ -494,12 +578,22 @@ const respond = async (expertId, caseId, data) => {
                         referenceId: caseId,
                     },
                 });
-                emitNotification(recipientId, 'notification:new', notif);
+                // F10: Collect notification to emit AFTER commit
+                pendingNotifications.push({ recipientId, event: 'notification:new', payload: notif });
             }
         }
 
         return newResponse;
     });
+
+    // F10: Emit notifications after transaction is successfully committed
+    for (const item of pendingNotifications) {
+        try {
+            emitNotification(item.recipientId, item.event, item.payload);
+        } catch {
+            // Ignore socket delivery error
+        }
+    }
 
     return result;
 };
@@ -508,39 +602,72 @@ const respond = async (expertId, caseId, data) => {
  * Mark a disease case as RESOLVED (BR-CASE-03).
  */
 const resolve = async (expertId, caseId, data) => {
-    const diseaseCase = await prisma.diseaseCase.findUnique({
-        where: { id: caseId },
-        include: {
-            season: {
-                include: {
-                    pond: { include: { farm: true } },
-                },
-            },
-        },
-    });
-
-    if (!diseaseCase) {
-        throw ApiError.notFound(messages.DISEASE_CASE.NOT_FOUND);
-    }
-
-    if (diseaseCase.expertId !== expertId) {
-        throw ApiError.forbidden(messages.DISEASE_CASE.NOT_ASSIGNED);
-    }
-
-    if (diseaseCase.status === 'RESOLVED') {
-        throw ApiError.badRequest(messages.DISEASE_CASE.ALREADY_RESOLVED);
-    }
-
     if (!data.resolutionSummary || !data.resolutionSummary.trim()) {
         throw ApiError.badRequest(messages.DISEASE_CASE.RESOLUTION_SUMMARY_REQUIRED);
     }
 
     const now = new Date();
     const summary = data.resolutionSummary.trim();
+    const pendingNotifications = [];
 
     const result = await prisma.$transaction(async (tx) => {
-        const updatedCase = await tx.diseaseCase.update({
+        // F05: Read and validate inside transaction
+        const diseaseCase = await tx.diseaseCase.findUnique({
             where: { id: caseId },
+            include: {
+                season: {
+                    include: {
+                        pond: { include: { farm: true } },
+                    },
+                },
+            },
+        });
+
+        if (!diseaseCase) {
+            throw ApiError.notFound(messages.DISEASE_CASE.NOT_FOUND);
+        }
+
+        if (diseaseCase.expertId !== expertId) {
+            throw ApiError.forbidden(messages.DISEASE_CASE.NOT_ASSIGNED);
+        }
+
+        if (diseaseCase.status === 'RESOLVED') {
+            throw ApiError.badRequest(messages.DISEASE_CASE.ALREADY_RESOLVED);
+        }
+
+        // F04: Check active linked protocols before resolving
+        const activeProtocols = await tx.protocol.findMany({
+            where: {
+                diseaseCaseId: caseId,
+                status: { in: [PROTOCOL_STATUS.PENDING_APPROVAL, PROTOCOL_STATUS.APPROVED] },
+            },
+            include: {
+                items: { select: { id: true } },
+            },
+        });
+
+        const pendingProto = activeProtocols.find((p) => p.status === PROTOCOL_STATUS.PENDING_APPROVAL);
+        if (pendingProto) {
+            throw ApiError.badRequest(messages.DISEASE_CASE.PROTOCOL_PENDING_APPROVAL_BLOCK);
+        }
+
+        const approvedProto = activeProtocols.find((p) => p.status === PROTOCOL_STATUS.APPROVED);
+        if (approvedProto) {
+            const itemIds = approvedProto.items.map((i) => i.id);
+            const remainingPlanned = await tx.operationSchedule.count({
+                where: {
+                    protocolItemId: { in: itemIds },
+                    status: 'PLANNED',
+                },
+            });
+            if (remainingPlanned > 0) {
+                throw ApiError.badRequest(messages.DISEASE_CASE.PROTOCOL_RUNNING_BLOCK);
+            }
+        }
+
+        // F05: Atomic conditional update
+        const updateCount = await tx.diseaseCase.updateMany({
+            where: { id: caseId, expertId, status: { not: 'RESOLVED' } },
             data: {
                 status: 'RESOLVED',
                 resolutionSummary: summary,
@@ -550,23 +677,28 @@ const resolve = async (expertId, caseId, data) => {
             },
         });
 
+        if (updateCount.count === 0) {
+            throw ApiError.conflict(messages.DISEASE_CASE.CASE_OR_ROLE_CONFLICT);
+        }
+
         await tx.diseaseCaseStatusHistory.create({
             data: {
                 caseId,
                 fromStatus: diseaseCase.status,
                 toStatus: 'RESOLVED',
                 changedBy: expertId,
-                reason: summary,
+                reason: summary.slice(0, 500),
                 changedAt: now,
             },
         });
 
+        // F06: Store raw summary directly (responseType=RESOLUTION identifies type, avoiding >500 overflow)
         await tx.diseaseCaseResponse.create({
             data: {
                 caseId,
                 authorId: expertId,
                 responseType: 'RESOLUTION',
-                message: `[KẾT THÚC CA BỆNH]: ${summary}`,
+                message: summary.slice(0, 500),
                 attachments: [],
                 createdAt: now,
             },
@@ -587,12 +719,22 @@ const resolve = async (expertId, caseId, data) => {
                         referenceId: caseId,
                     },
                 });
-                emitNotification(recipientId, 'notification:new', notif);
+                // F10: Collect notification to emit AFTER commit
+                pendingNotifications.push({ recipientId, event: 'notification:new', payload: notif });
             }
         }
 
-        return updatedCase;
+        return tx.diseaseCase.findUnique({ where: { id: caseId } });
     });
+
+    // F10: Emit notifications after commit
+    for (const item of pendingNotifications) {
+        try {
+            emitNotification(item.recipientId, item.event, item.payload);
+        } catch {
+            // Ignore socket delivery error
+        }
+    }
 
     return result;
 };
@@ -601,68 +743,75 @@ const resolve = async (expertId, caseId, data) => {
  * Emergency Treatment Abort (BR-TRT-01, BR-TRT-02, BR-TRT-03).
  */
 const abortProtocol = async (expertId, caseId, protocolId, data) => {
-    const diseaseCase = await prisma.diseaseCase.findUnique({
-        where: { id: caseId },
-        include: {
-            season: {
-                include: {
-                    pond: { include: { farm: true } },
-                },
-            },
-        },
-    });
-
-    if (!diseaseCase) {
-        throw ApiError.notFound(messages.DISEASE_CASE.NOT_FOUND);
-    }
-
-    if (diseaseCase.expertId !== expertId) {
-        throw ApiError.forbidden(messages.DISEASE_CASE.NOT_ASSIGNED);
-    }
-
-    const protocol = await prisma.protocol.findUnique({
-        where: { id: protocolId },
-        include: { items: true },
-    });
-
-    if (!protocol || protocol.diseaseCaseId !== caseId) {
-        throw ApiError.notFound('Không tìm thấy phác đồ điều trị liên kết với ca bệnh này');
-    }
-
-    if (protocol.status !== PROTOCOL_STATUS.APPROVED) {
-        throw ApiError.badRequest('Chỉ có thể dừng khẩn cấp phác đồ điều trị đang áp dụng (APPROVED)');
-    }
-
     const now = new Date();
     const reason = data.reason.trim();
-    const itemIds = protocol.items.map((i) => i.id);
+    const pendingNotifications = [];
 
     const result = await prisma.$transaction(async (tx) => {
-        // 1. Update protocol to ABORTED
-        await tx.protocol.update({
+        // F05: Read and validate inside transaction
+        const diseaseCase = await tx.diseaseCase.findUnique({
+            where: { id: caseId },
+            include: {
+                season: {
+                    include: {
+                        pond: { include: { farm: true } },
+                    },
+                },
+            },
+        });
+
+        if (!diseaseCase) {
+            throw ApiError.notFound(messages.DISEASE_CASE.NOT_FOUND);
+        }
+
+        if (diseaseCase.expertId !== expertId) {
+            throw ApiError.forbidden(messages.DISEASE_CASE.NOT_ASSIGNED);
+        }
+
+        const protocol = await tx.protocol.findUnique({
             where: { id: protocolId },
+            include: { items: true },
+        });
+
+        if (!protocol || protocol.diseaseCaseId !== caseId) {
+            throw ApiError.notFound(messages.DISEASE_CASE.PROTOCOL_NOT_FOUND);
+        }
+
+        if (protocol.status !== PROTOCOL_STATUS.APPROVED) {
+            throw ApiError.badRequest(messages.DISEASE_CASE.PROTOCOL_NOT_APPROVED);
+        }
+
+        const itemIds = protocol.items.map((i) => i.id);
+
+        // F05: Atomic update protocol to ABORTED
+        const updateProtocolCount = await tx.protocol.updateMany({
+            where: { id: protocolId, diseaseCaseId: caseId, status: PROTOCOL_STATUS.APPROVED },
             data: {
                 status: PROTOCOL_STATUS.ABORTED,
-                abortReason: reason,
+                abortReason: reason.slice(0, 500),
                 abortedBy: expertId,
                 abortedAt: now,
                 updatedAt: now,
             },
         });
 
-        // 2. Append protocol status history
+        if (updateProtocolCount.count === 0) {
+            throw ApiError.conflict(messages.DISEASE_CASE.PROTOCOL_STATUS_CONFLICT);
+        }
+
+        // Append protocol status history
         await tx.protocolStatusHistory.create({
             data: {
                 protocolId,
                 fromStatus: PROTOCOL_STATUS.APPROVED,
                 toStatus: PROTOCOL_STATUS.ABORTED,
                 changedBy: expertId,
-                reason,
+                reason: reason.slice(0, 500),
                 changedAt: now,
             },
         });
 
-        // 3. Cancel only unexecuted future PLANNED schedules
+        // F01 & F06: Cancel future PLANNED schedules with cancellationType and <=500 chars reason
         const cancelResult = await tx.operationSchedule.updateMany({
             where: {
                 protocolItemId: { in: itemIds },
@@ -670,17 +819,18 @@ const abortProtocol = async (expertId, caseId, protocolId, data) => {
             },
             data: {
                 status: 'CANCELLED',
-                cancellationReason: `Dừng khẩn cấp phác đồ: ${reason}`,
+                cancellationType: SCHEDULE_CANCELLATION_TYPE.TREATMENT_ABORTED,
+                cancellationReason: reason.slice(0, 500),
                 cancelledBy: expertId,
                 cancelledAt: now,
                 updatedAt: now,
             },
         });
 
-        // 4. Move Disease Case to MONITORING
+        // Move Disease Case to MONITORING if not already resolved
         if (diseaseCase.status !== 'MONITORING' && diseaseCase.status !== 'RESOLVED') {
-            await tx.diseaseCase.update({
-                where: { id: caseId },
+            await tx.diseaseCase.updateMany({
+                where: { id: caseId, status: { notIn: ['MONITORING', 'RESOLVED'] } },
                 data: {
                     status: 'MONITORING',
                     updatedAt: now,
@@ -693,25 +843,25 @@ const abortProtocol = async (expertId, caseId, protocolId, data) => {
                     fromStatus: diseaseCase.status,
                     toStatus: 'MONITORING',
                     changedBy: expertId,
-                    reason: `Phác đồ điều trị v${protocol.versionNo} bị dừng khẩn cấp: ${reason}`,
+                    reason: reason.slice(0, 500),
                     changedAt: now,
                 },
             });
         }
 
-        // 5. Append emergency alert response
+        // F06: Append emergency alert response with message <= 500 chars
         await tx.diseaseCaseResponse.create({
             data: {
                 caseId,
                 authorId: expertId,
                 responseType: 'EMERGENCY_ALERT',
-                message: `[DỪNG KHẨN CẤP PHÁC ĐỒ v${protocol.versionNo}]: ${reason}. Đã hủy ${cancelResult.count} lịch điều trị chưa thực hiện. Ca chuyển sang chế độ theo dõi.`,
+                message: reason.slice(0, 500),
                 attachments: [],
                 createdAt: now,
             },
         });
 
-        // 6. Notify KTV and Owner
+        // Notify KTV and Owner
         const ownerId = diseaseCase.season?.pond?.farm?.ownerId;
         const recipients = [diseaseCase.reportedBy, ownerId].filter(Boolean);
 
@@ -720,14 +870,15 @@ const abortProtocol = async (expertId, caseId, protocolId, data) => {
                 const notif = await tx.notification.create({
                     data: {
                         accountId: recipientId,
-                        title: `Dừng khẩn cấp phác đồ điều trị: ${protocol.title}`,
-                        content: `Chuyên gia đã dừng khẩn cấp phác đồ cho ca bệnh "${diseaseCase.title}". Lý do: ${reason}`,
+                        title: `Dừng khẩn cấp phác đồ điều trị: ${protocol.title}`.slice(0, 255),
+                        content: `Chuyên gia đã dừng khẩn cấp phác đồ cho ca bệnh "${diseaseCase.title}". Lý do: ${reason.slice(0, 200)}`,
                         type: NOTIFICATION_TYPE.TREATMENT_PROTOCOL_ABORTED,
                         referenceType: 'disease_case',
                         referenceId: caseId,
                     },
                 });
-                emitNotification(recipientId, 'notification:new', notif);
+                // F10: Collect notification to emit AFTER commit
+                pendingNotifications.push({ recipientId, event: 'notification:new', payload: notif });
             }
         }
 
@@ -737,6 +888,15 @@ const abortProtocol = async (expertId, caseId, protocolId, data) => {
             cancelledSchedulesCount: cancelResult.count,
         };
     });
+
+    // F10: Emit notifications after commit
+    for (const item of pendingNotifications) {
+        try {
+            emitNotification(item.recipientId, item.event, item.payload);
+        } catch {
+            // Ignore socket delivery error
+        }
+    }
 
     return result;
 };

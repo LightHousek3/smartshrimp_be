@@ -6,8 +6,16 @@ const list = {
     query: Joi.object({
         page: Joi.number().integer().min(1).default(1),
         limit: Joi.number().integer().min(1).max(100).default(10),
-        status: Joi.string().valid('OPEN', 'WAITING_FOR_INFO', 'MONITORING', 'IN_TREATMENT', 'RESOLVED').allow('', null),
-        severity: Joi.string().valid('LOW', 'MEDIUM', 'HIGH', 'CRITICAL').allow('', null),
+        status: Joi.string()
+            .valid('OPEN', 'WAITING_FOR_INFO', 'MONITORING', 'IN_TREATMENT', 'RESOLVED', 'action')
+            .allow('', null),
+        severity: Joi.alternatives()
+            .try(
+                Joi.string().valid('LOW', 'MEDIUM', 'HIGH', 'CRITICAL'),
+                Joi.array().items(Joi.string().valid('LOW', 'MEDIUM', 'HIGH', 'CRITICAL')),
+            )
+            .allow('', null),
+        needsResponse: Joi.boolean().allow('', null),
         farmId: uuid().allow('', null),
         seasonId: uuid().allow('', null),
         search: Joi.string().trim().max(255).allow('', null),
