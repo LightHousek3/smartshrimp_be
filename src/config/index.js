@@ -23,6 +23,15 @@ if (missingEnvVars.length > 0) {
 
 const BASE_URL = (process.env.APP_BASE_URL || '').replace(/\/+$/, '');
 const API_PREFIX = `/${(process.env.API_PREFIX || '/api/v1').replace(/^\/+|\/+$/g, '')}`;
+const WEB_BASE_URL = (process.env.WEB_BASE_URL
+    || (process.env.NODE_ENV !== 'production' ? 'http://localhost:5173' : '')).replace(/\/+$/, '');
+if (!/^https?:\/\//i.test(WEB_BASE_URL)) {
+    throw new Error('WEB_BASE_URL must be an absolute HTTP(S) URL; it is required in production.');
+}
+const webUrl = new URL(WEB_BASE_URL);
+if (webUrl.username || webUrl.password || webUrl.search || webUrl.hash) {
+    throw new Error('WEB_BASE_URL must not contain credentials, query parameters or a fragment.');
+}
 
 const config = {
     env: process.env.NODE_ENV || 'development',
@@ -30,6 +39,7 @@ const config = {
     apiPrefix: API_PREFIX,
     app: {
         backendUrl: BASE_URL || undefined,
+        webBaseUrl: WEB_BASE_URL,
     },
 
     jwt: {

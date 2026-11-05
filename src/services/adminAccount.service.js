@@ -5,6 +5,7 @@ const { ApiError } = require('../utils');
 const { httpStatus, messages, ACCOUNT_ROLE, ACCOUNT_STATUS } = require('../constants');
 const emailService = require('./email.service');
 const tokenService = require('./token.service');
+const authTransaction = require('../utils/authTransaction');
 
 const ACTIVATION_PURPOSE = 'ACCOUNT_ACTIVATION';
 const OPEN_SEASON_STATUSES = ['PLANNING', 'ACTIVE'];
@@ -216,76 +217,40 @@ const validateManagingOwner = async (database, role, managedByOwnerId) => {
 const hashActivationCode = (code) =>
     crypto.createHmac('sha256', config.email.otpPepper).update(code).digest('hex');
 
-const buildActivationChallenge = async (
-    account,
-    { enforceCooldown = true } = {},
-) => {
-    const now = new Date();
-    const activeChallenge = await prisma.emailVerificationChallenge.findFirst({
-        where: {
-            accountId: account.id,
-            purpose: ACTIVATION_PURPOSE,
-            consumedAt: null,
-            supersededAt: null,
-        },
-        orderBy: { createdAt: 'desc' },
-    });
-
-    if (enforceCooldown && activeChallenge?.resendAvailableAt > now) {
-        throw new ApiError(
-            httpStatus.TOO_MANY_REQUESTS,
-            messages.ACCOUNT.ACTIVATION_RESEND_TOO_SOON,
-        );
-    }
-
+const buildActivationChallenge = async (account, { enforceCooldown = true } = {}) => {
     const code = crypto.randomInt(0, 1000000).toString().padStart(6, '0');
-    const expiresAt = new Date(now.getTime() + config.email.verificationExpiresMinutes * 60000);
-    const resendAvailableAt = new Date(now.getTime() + config.email.resendDelaySeconds * 1000);
-
-    let challenge;
-
-    try {
-        challenge = await prisma.$transaction(async (transaction) => {
-            await transaction.emailVerificationChallenge.updateMany({
-                where: {
-                    accountId: account.id,
-                    purpose: ACTIVATION_PURPOSE,
-                    consumedAt: null,
-                    supersededAt: null,
-                },
-                data: { supersededAt: now },
-            });
-
-            return transaction.emailVerificationChallenge.create({
-                data: {
-                    accountId: account.id,
-                    purpose: ACTIVATION_PURPOSE,
-                    codeHash: hashActivationCode(code),
-                    expiresAt,
-                    resendAvailableAt,
-                },
-                select: { id: true, expiresAt: true, resendAvailableAt: true },
-            });
-        });
-    } catch (error) {
-        if (error.code === 'P2002') {
-            throw new ApiError(
-                httpStatus.TOO_MANY_REQUESTS,
-                messages.ACCOUNT.ACTIVATION_RESEND_TOO_SOON,
-            );
+    const challenge = await authTransaction(async (transaction) => {
+        const currentAccount = await transaction.account.findUnique({ where: { id: account.id } });
+        if (!currentAccount || currentAccount.status !== ACCOUNT_STATUS.PENDING_ACTIVATION
+            || currentAccount.passwordHash || currentAccount.activatedAt) {
+            throw new ApiError(httpStatus.CONFLICT, messages.ACCOUNT.ACTIVATION_NOT_PENDING);
         }
-        throw error;
-    }
-
+        const now = new Date();
+        const where = { accountId: account.id, purpose: ACTIVATION_PURPOSE, consumedAt: null, supersededAt: null };
+        const active = await transaction.emailVerificationChallenge.findFirst({ where });
+        if (enforceCooldown && active?.resendAvailableAt > now) {
+            throw new ApiError(httpStatus.TOO_MANY_REQUESTS, messages.ACCOUNT.ACTIVATION_RESEND_TOO_SOON);
+        }
+        await transaction.emailVerificationChallenge.updateMany({ where, data: { supersededAt: now } });
+        return transaction.emailVerificationChallenge.create({
+            data: {
+                accountId: account.id, purpose: ACTIVATION_PURPOSE, codeHash: hashActivationCode(code), createdAt: now,
+                expiresAt: new Date(now.getTime() + config.email.verificationExpiresMinutes * 60000),
+                resendAvailableAt: new Date(now.getTime() + config.email.resendDelaySeconds * 1000),
+            }, select: { id: true, expiresAt: true, resendAvailableAt: true },
+        });
+    });
     return { code, challenge };
 };
 
 const sendActivationEmail = async (account, options) => {
-    const { challenge } = await buildActivationChallenge(account, options);
+    const { code, challenge } = await buildActivationChallenge(account, options);
 
     try {
         await emailService.sendAccountActivationEmail({
             email: account.email,
+            role: account.role,
+            code,
         });
     } catch (error) {
         await prisma.emailVerificationChallenge.updateMany({
@@ -354,7 +319,7 @@ const createAccount = async ({ email, role, managedByOwnerId }, adminId) => {
 const findPendingActivationAccount = async (accountId) => {
     const account = await prisma.account.findUnique({
         where: { id: accountId },
-        select: { id: true, email: true, status: true },
+        select: { id: true, email: true, role: true, status: true },
     });
 
     if (!account) {
