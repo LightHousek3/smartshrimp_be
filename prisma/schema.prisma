@@ -49,6 +49,13 @@ enum PersonnelRole {
   @@map("personnel_role")
 }
 
+enum AiRunStatus {
+  SUCCESS @map("success")
+  ERROR   @map("error")
+
+  @@map("ai_run_status")
+}
+
 enum PondStatus {
   AVAILABLE   @map("available")
   MAINTENANCE @map("maintenance")
@@ -316,6 +323,7 @@ model Account {
   ragQueries             RagQuery[]
   ragFeedback            RagFeedback[]
   ragDocuments           RagDocument[]
+  aiDiagnosisLogs        AiDiagnosisLog[]
   cancelledSchedules     OperationSchedule[]          @relation("ScheduleCancelledBy")
   executedOperations     OperationExecution[]         @relation("ExecutionExecutedBy")
   inventoryTransactions  InventoryTransaction[]       @relation("InventoryTransactionPerformedBy")
@@ -430,6 +438,7 @@ model AquacultureSeason {
   waterQualityLogs      WaterQualityLog[]
   diseaseCases          DiseaseCase[]
   ragConversations      RagConversation[]
+  aiDiagnosisLogs       AiDiagnosisLog[]
   schedules             OperationSchedule[]
   inventoryTransactions InventoryTransaction[]
   protocols             Protocol[]
@@ -488,6 +497,30 @@ model WaterQualityLog {
   @@unique([seasonId, recordedAt, recordedBy], map: "uq_water_quality_log_no_duplicate")
   @@index([seasonId, recordedAt(sort: Desc)], map: "idx_water_quality_season_date")
   @@map("water_quality_logs")
+}
+
+model AiDiagnosisLog {
+  id               String            @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  seasonId         String            @map("season_id") @db.Uuid
+  requestedBy      String            @map("requested_by") @db.Uuid
+  imageUrls        String[]          @map("image_urls")
+  inputSnapshot    Json              @default("{}") @map("input_snapshot")
+  runStatus        AiRunStatus       @map("run_status")
+  predictedLabel   String?           @map("predicted_label") @db.VarChar(255)
+  confidence       Decimal?          @db.Decimal(6, 5)
+  predictions      Json              @default("[]")
+  recommendation   String?           @db.VarChar(500)
+  modelVersion     String?           @map("model_version") @db.VarChar(100)
+  processingTimeMs Int?              @map("processing_time_ms")
+  errorCode        String?           @map("error_code") @db.VarChar(100)
+  errorMessage     String?           @map("error_message")
+  createdAt        DateTime          @default(now()) @map("created_at") @db.Timestamptz(6)
+  season           AquacultureSeason @relation(fields: [seasonId], references: [id], onDelete: Restrict)
+  requester        Account           @relation(fields: [requestedBy], references: [id], onDelete: Restrict)
+
+  @@index([seasonId, createdAt(sort: Desc)], map: "idx_ai_diagnosis_season_date")
+  @@index([runStatus, createdAt(sort: Desc)], map: "idx_ai_diagnosis_run_status")
+  @@map("ai_diagnosis_logs")
 }
 
 model DiseaseCase {

@@ -2,6 +2,27 @@
  * Centralized message constants
  */
 const messages = {
+    AI_DIAGNOSIS: {
+        CREATED: 'Nhận diện dấu hiệu bệnh thành công.',
+        LIST_FETCHED: 'Lấy lịch sử nhận diện thành công.',
+        DETAIL_FETCHED: 'Lấy chi tiết nhận diện thành công.',
+        NOT_FOUND: 'Không tìm thấy kết quả nhận diện.',
+        SEASON_NOT_FOUND: 'Không tìm thấy vụ nuôi.',
+        ASSIGNMENT_REQUIRED: 'Bạn không còn được phân công kỹ thuật viên cho vụ nuôi này.',
+        ACTIVE_SEASON_REQUIRED: 'Chỉ được yêu cầu nhận diện trong vụ nuôi đang hoạt động.',
+        ACCOUNT_UNAVAILABLE: 'Tài khoản kỹ thuật viên không còn hoạt động.',
+        INVALID_IMAGES: 'Cần gửi từ 1 đến 5 ảnh JPEG, PNG hoặc WEBP, mỗi ảnh không quá 10 MiB.',
+        INVALID_MULTIPART: 'Yêu cầu phải là multipart/form-data, chỉ chứa các file trong trường images.',
+        INVALID_CURSOR: 'Con trỏ phân trang không hợp lệ.',
+        BUSY: 'Hệ thống đang xử lý ảnh. Vui lòng thử lại sau.',
+        UNAVAILABLE: 'Dịch vụ nhận diện chưa sẵn sàng. Vui lòng thử lại sau.',
+        TIMEOUT: 'Dịch vụ nhận diện phản hồi quá thời gian chờ. Vui lòng kiểm tra lịch sử trước khi gửi lại.',
+        INVALID_RESPONSE: 'Dịch vụ nhận diện trả kết quả không hợp lệ.',
+        IMAGE_REJECTED: 'Ảnh không đáp ứng yêu cầu nhận diện. Hãy chọn ảnh tôm rõ nét, tối thiểu 224 × 224 pixel.',
+        RATE_LIMITED: 'Đã vượt giới hạn yêu cầu nhận diện. Vui lòng thử lại sau.',
+        STORAGE_UNAVAILABLE: 'Chưa thể lưu hoặc mở ảnh nhận diện. Vui lòng thử lại sau.',
+        CONFLICT: 'Phân công hoặc trạng thái vụ nuôi vừa thay đổi. Vui lòng tải lại.',
+    },
     EXPERT_PROTOCOL_TEMPLATE: {
         SPECIES_REQUIRED: 'Phác đồ mẫu phải chỉ định tôm thẻ chân trắng hoặc tôm sú.',
         INVALID_APPLICATION_DAYS:
