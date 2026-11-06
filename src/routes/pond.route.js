@@ -4,7 +4,9 @@ const { authenticate, authorize, validate } = require('../middlewares');
 const { pondValidator } = require('../validators');
 const { ACCOUNT_ROLE } = require('../constants');
 
+// Preserve farmId from the parent route for validation and ownership checks.
 const router = express.Router({ mergeParams: true });
+// Role checks apply to every endpoint; the service checks ownership per resource.
 router.use(authenticate, authorize(ACCOUNT_ROLE.FARM_OWNER));
 
 /**
@@ -37,7 +39,7 @@ router.delete('/:pondId', validate(pondValidator.deletePond), pondController.del
 
 /**
  * @route   PATCH /api/v1/owner/farms/:farmId/ponds/:pondId
- * @desc    Update editable fields of an owned pond
+ * @desc    Update an owned pond with fixed dimensions; open seasons allow volume changes but protect type/readiness
  * @access  Owner
  */
 router.patch('/:pondId', validate(pondValidator.updatePond), pondController.updatePond);

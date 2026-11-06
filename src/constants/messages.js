@@ -205,9 +205,10 @@ const messages = {
         HAS_OPEN_SEASON: 'Không thể xóa ao đang có vụ nuôi lập kế hoạch hoặc hoạt động',
         HAS_REFERENCES: 'Không thể xóa ao còn dữ liệu liên quan hoặc lịch sử vụ nuôi',
         OPEN_SEASON_RESTRICTS_UPDATE:
-            'Vụ nuôi đang mở không cho phép thay đổi loại ao, ngừng hoạt động hoặc thay đổi thể tích',
+            'Vụ nuôi đang mở không cho phép thay đổi loại ao hoặc chuyển sang bảo trì',
         VOLUME_OUT_OF_RANGE: 'Thể tích tính từ diện tích và độ sâu vượt quá giới hạn cho phép',
         VOLUME_EXCEEDS_CAPACITY: 'Thể tích không được vượt quá diện tích nhân với độ sâu của ao',
+        DIMENSIONS_IMMUTABLE: 'Không được cập nhật diện tích và độ sâu của ao; chỉ được cập nhật thể tích',
         CHANGE_CONFLICT: 'Trạng thái ao đã thay đổi. Vui lòng tải lại và thử lại',
     },
 
