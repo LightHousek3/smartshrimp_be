@@ -2,10 +2,14 @@ const { pondService } = require('../services');
 const { asyncHandler, ResponseHandler } = require('../utils');
 const { messages } = require('../constants');
 
+// Controllers translate HTTP input/output; asyncHandler forwards service failures
+// to the shared error middleware, including ownership and season conflicts.
+
 /**
  * GET /owner/farms/:farmId/ponds
  */
 const getPonds = asyncHandler(async (req, res) => {
+    // Trust the authenticated account for ownership and the validator for query defaults.
     const { ponds, meta } = await pondService.getPonds(
         req.params.farmId,
         req.account.id,

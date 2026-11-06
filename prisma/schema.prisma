@@ -59,7 +59,6 @@ enum AiRunStatus {
 enum PondStatus {
   AVAILABLE   @map("available")
   MAINTENANCE @map("maintenance")
-  INACTIVE    @map("inactive")
 
   @@map("pond_status")
 }

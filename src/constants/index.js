@@ -1,7 +1,14 @@
 const httpStatus = require('./httpStatus');
 const messages = require('./messages');
 const NOTIFICATION_TYPE = require('./notificationType');
-const { FarmStatus: FARM_STATUS } = require('@prisma/client');
+// Re-export Prisma enums directly: aliases preserve the existing public imports.
+const {
+    FarmStatus: FARM_STATUS,
+    PondStatus: POND_STATUS,
+    PondType: POND_TYPE,
+    SeasonStatus: SEASON_STATUS,
+    AccountRole: ACCOUNT_ROLE,
+} = require('@prisma/client');
 const HARVEST_ERROR_CODE = Object.freeze({
     TIME_NOT_AFTER_LATEST: 'HARVEST_TIME_NOT_AFTER_LATEST',
     PARTIAL_COUNT_REQUIRED: 'HARVEST_PARTIAL_COUNT_REQUIRED',
@@ -51,13 +58,6 @@ const ALERT_KIND = Object.freeze({
 /**
  * Enums matching the database schema
  */
-const ACCOUNT_ROLE = {
-    ADMIN: 'ADMIN',
-    FARM_OWNER: 'FARM_OWNER',
-    TECHNICIAN: 'TECHNICIAN',
-    EXPERT: 'EXPERT',
-};
-
 const ACCOUNT_STATUS = {
     PENDING_ACTIVATION: 'PENDING_ACTIVATION',
     ACTIVE: 'ACTIVE',
@@ -75,12 +75,23 @@ const SHRIMP_TYPE = {
     BLACK_TIGER: 'BLACK_TIGER',
 };
 
-const SEASON_STATUS = {
-    PLANNING: 'PLANNING',
-    ACTIVE: 'ACTIVE',
-    COMPLETED: 'COMPLETED',
-    CANCELLED: 'CANCELLED',
-};
+// Measurement limits match the precision/scale of the pond database columns.
+const POND_LIMITS = Object.freeze({
+    NAME: 255,
+    AREA_M2: 9999999999.99,
+    DEPTH_M: 9999.99,
+    VOLUME_M3: 999999999999.99,
+});
+const POND_PAGINATION = Object.freeze({
+    DEFAULT_PAGE: 1,
+    DEFAULT_LIMIT: 20,
+    MAX_LIMIT: 100,
+});
+// Business rule: planning and active seasons reserve the pond, regardless of readiness.
+const OPEN_SEASON_STATUSES = Object.freeze([
+    SEASON_STATUS.PLANNING,
+    SEASON_STATUS.ACTIVE,
+]);
 
 const TASK_OPEN_STATUSES = Object.freeze(['PENDING', 'IN_PROGRESS']);
 const TASK_STATUSES = Object.freeze([...TASK_OPEN_STATUSES, 'COMPLETED', 'CANCELLED']);
@@ -411,6 +422,11 @@ module.exports = {
     VERIFICATION_PURPOSE,
     SHRIMP_TYPE,
     SEASON_STATUS,
+    POND_STATUS,
+    POND_TYPE,
+    POND_LIMITS,
+    POND_PAGINATION,
+    OPEN_SEASON_STATUSES,
     TASK_OPEN_STATUSES,
     TASK_STATUSES,
     TASK_LIMITS,
