@@ -12,6 +12,8 @@ const {
     PERSONNEL_ROLE,
     SEASON_STATUS,
     AI_RUN_STATUS,
+    AI_RECOGNITION_STATUS,
+    AI_MIN_RECOGNITION_CONFIDENCE,
     AI_LABELS,
     AI_LABEL_NAMES,
     AI_LIMITS,
@@ -299,6 +301,18 @@ const classifyImages = async (files, requestId) => {
 
 // History response mapping ---------------------------------------------------
 
+/** Apply the public recognition policy without changing the four stored model classes. */
+const recognitionResult = (row) => {
+    // NUMERIC(6,5) rounds confidence in SQL. Keep the original JSON probability at the 80% boundary.
+    const confidence = row.predictions[0].probability;
+    const recognized = confidence >= AI_MIN_RECOGNITION_CONFIDENCE;
+    return {
+        recognitionStatus: recognized ? AI_RECOGNITION_STATUS.RECOGNIZED : AI_RECOGNITION_STATUS.UNRECOGNIZED,
+        predictedLabel: recognized ? AI_LABEL_NAMES[row.predictedLabel] : null,
+        confidence,
+    };
+};
+
 /** Expand disease abbreviations in advice, including recommendations stored by older runs. */
 const recommendationText = (value) => value
     .replace(/\s*\((?:WSSV|BG|WSSV_BG|WSSV\/BG)\)/gi, '')
@@ -307,7 +321,7 @@ const recommendationText = (value) => value
     .replace(/\bBG\b/gi, 'mang đen');
 
 const summarySelect = {
-    id: true, createdAt: true, runStatus: true, predictedLabel: true, confidence: true, imageUrls: true,
+    id: true, createdAt: true, runStatus: true, predictedLabel: true, predictions: true, imageUrls: true,
 };
 
 /** Return a compact list item; failed runs have no prediction fields. */
@@ -316,14 +330,12 @@ const summary = (row) => ({
     createdAt: row.createdAt,
     runStatus: row.runStatus,
     imageCount: row.imageUrls.length,
-    ...(row.runStatus === AI_RUN_STATUS.SUCCESS && {
-        predictedLabel: AI_LABEL_NAMES[row.predictedLabel],
-        confidence: Number(row.confidence),
-    }),
+    ...(row.runStatus === AI_RUN_STATUS.SUCCESS && recognitionResult(row)),
 });
 
 /** Return an owned result with temporary image access and compatibility for legacy snapshots. */
 const detail = (row) => {
+    const recognition = row.runStatus === AI_RUN_STATUS.SUCCESS ? recognitionResult(row) : null;
     const expiresAt = Math.floor(Date.now() / 1000) + AI_LIMITS.IMAGE_URL_TTL_SECONDS;
     const assets = row.inputSnapshot?.images;
     const hasStoredAssets = Array.isArray(assets) && assets.length === row.imageUrls.length &&
@@ -338,13 +350,13 @@ const detail = (row) => {
         ...(hasStoredAssets && { imageUrlsExpireAt: new Date(expiresAt * 1000) }),
         modelVersion: row.modelVersion,
         processingTimeMs: row.processingTimeMs,
-        ...(row.runStatus === AI_RUN_STATUS.SUCCESS ? {
-            predictedLabel: AI_LABEL_NAMES[row.predictedLabel],
-            confidence: Number(row.confidence),
+        ...(recognition ? {
+            ...recognition,
             predictions: row.predictions.map((prediction) => ({
                 ...prediction, label: AI_LABEL_NAMES[prediction.label],
             })),
-            recommendation: recommendationText(row.recommendation),
+            recommendation: recognition.recognitionStatus === AI_RECOGNITION_STATUS.RECOGNIZED
+                ? recommendationText(row.recommendation) : text.LOW_CONFIDENCE,
         } : { error: { code: row.errorCode, message: row.errorMessage } }),
     };
 };

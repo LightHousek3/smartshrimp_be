@@ -6,6 +6,16 @@ const { ACCOUNT_ROLE } = require('../constants');
 
 const router = express.Router();
 
+// ─── Assigned-season professional metrics ─────────────────────────────────────
+
+/**
+ * @route   GET /api/v1/expert/seasons/:seasonId/metrics
+ * @desc    Get header, stocking, growth and latest water metrics for the detail tab
+ * @access  Private (EXPERT; current assignment or historical assignment on an ended season)
+ */
+router.get('/:seasonId/metrics', authenticate, authorize(ACCOUNT_ROLE.EXPERT),
+    validate(expertSeasonValidator.getAssignedSeasonMetrics), expertSeasonController.getAssignedSeasonMetrics);
+
 // Protocol endpoints apply authentication and EXPERT authorization in the child router.
 router.use('/:seasonId/production-protocols', require('./expertProductionProtocol.route'));
 
