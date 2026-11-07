@@ -1,4 +1,5 @@
 const { farmService } = require('../services');
+const farmGeocodingService = require('../services/farmGeocoding.service');
 const { asyncHandler, ResponseHandler } = require('../utils');
 const { messages } = require('../constants');
 
@@ -12,6 +13,15 @@ const getListFarm = asyncHandler(async (req, res) => {
     ResponseHandler.success(res, {
         message: messages.FARM.LIST_FETCHED,
         data: farms,
+    });
+});
+
+/** Resolve a location without exposing the Goong REST key to mobile clients. */
+const geocodeFarm = asyncHandler(async (req, res) => {
+    const location = await farmGeocodingService.geocode(req.query);
+    ResponseHandler.success(res, {
+        message: messages.FARM.GEOCODE_FETCHED,
+        data: { location },
     });
 });
 
@@ -68,6 +78,7 @@ const deleteFarm = asyncHandler(async (req, res) => {
 });
 
 module.exports = {
+    geocodeFarm,
     getListFarm,
     getFarm,
     createFarm,

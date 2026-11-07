@@ -16,6 +16,9 @@ router.use(authenticate, authorize(ACCOUNT_ROLE.FARM_OWNER));
  */
 router.get('/', farmController.getListFarm);
 
+/** Resolve an Owner's entered address or device coordinates through Goong. */
+router.get('/geocode', validate(farmValidator.geocodeFarm), farmController.geocodeFarm);
+
 /**
  * @route   GET /api/v1/owner/farms/:farmId
  * @desc    Get an owned farm

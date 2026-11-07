@@ -116,6 +116,9 @@ const config = {
         apiKey: process.env.AI_API_KEY,
         timeoutMs: parseInt(process.env.AI_REQUEST_TIMEOUT_MS, 10) || 120000,
     },
+    goong: {
+        apiKey: process.env.GOONG_API_KEY,
+    },
     rag: {
         serviceUrl: (process.env.RAG_SERVICE_URL || '').replace(/\/+$/, ''),
         internalApiKey: process.env.RAG_INTERNAL_API_KEY,

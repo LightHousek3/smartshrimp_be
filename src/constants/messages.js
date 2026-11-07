@@ -176,6 +176,9 @@ const messages = {
     },
 
     FARM: {
+        GEOCODE_FETCHED: 'Tra cứu vị trí trang trại thành công',
+        GEOCODE_UNAVAILABLE: 'Dịch vụ bản đồ đang bận. Vui lòng thử lại sau.',
+        GEOCODE_NOT_CONFIGURED: 'Dịch vụ bản đồ chưa được cấu hình.',
         LIST_FETCHED: 'Lấy danh sách trang trại thành công',
         FETCHED: 'Lấy chi tiết trang trại thành công',
         CREATED: 'Tạo trang trại thành công',
