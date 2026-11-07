@@ -982,6 +982,16 @@ model SeasonPersonnelAssignment {
   @@map("season_personnel_assignments")
 }
 
+/// FCR tạm tính cho vụ thả tôm giống nhỏ; tử/mẫu số cùng mốc asOf.
+view SeasonOperationalMetrics {
+  seasonId     String    @unique @map("season_id") @db.Uuid
+  asOf         DateTime? @map("as_of") @db.Timestamptz(6)
+  totalFeedKg  Decimal?  @map("total_feed_kg") @db.Decimal
+  estimatedFcr Decimal?  @map("estimated_fcr") @db.Decimal
+
+  @@map("v_season_operational_metrics")
+}
+
 view TechnicianKpi {
   technicianId            String   @unique @map("technician_id") @db.Uuid
   seasonsParticipated     BigInt?  @map("seasons_participated")

@@ -1,4 +1,6 @@
 const AI_RUN_STATUS = Object.freeze({ SUCCESS: 'SUCCESS', ERROR: 'ERROR' });
+const AI_RECOGNITION_STATUS = Object.freeze({ RECOGNIZED: 'RECOGNIZED', UNRECOGNIZED: 'UNRECOGNIZED' });
+const AI_MIN_RECOGNITION_CONFIDENCE = 0.8;
 const AI_LABELS = Object.freeze(['Healthy', 'BG', 'WSSV', 'WSSV_BG']);
 const AI_LABEL_NAMES = Object.freeze({
     Healthy: 'Khỏe mạnh',
@@ -23,4 +25,7 @@ const AI_LIMITS = Object.freeze({
 });
 const AI_IMAGE_TYPES = Object.freeze({ 'image/jpeg': 'jpg', 'image/png': 'png', 'image/webp': 'webp' });
 
-module.exports = { AI_RUN_STATUS, AI_LABELS, AI_LABEL_NAMES, AI_LIMITS, AI_IMAGE_TYPES };
+module.exports = {
+    AI_RUN_STATUS, AI_RECOGNITION_STATUS, AI_MIN_RECOGNITION_CONFIDENCE,
+    AI_LABELS, AI_LABEL_NAMES, AI_LIMITS, AI_IMAGE_TYPES,
+};

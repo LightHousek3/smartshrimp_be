@@ -16,4 +16,10 @@ const getAssignedSeasons = {
     }).unknown(false),
 };
 
-module.exports = { getAssignedSeasons };
+/** Reject malformed IDs and unsupported filters before any detail query. */
+const getAssignedSeasonMetrics = {
+    params: Joi.object({ seasonId: Joi.string().uuid({ version: 'uuidv4' }).required() }).unknown(false),
+    query: Joi.object({}).unknown(false),
+};
+
+module.exports = { getAssignedSeasons, getAssignedSeasonMetrics };

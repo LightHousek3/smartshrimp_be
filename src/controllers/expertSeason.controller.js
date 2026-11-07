@@ -19,4 +19,13 @@ const getAssignedSeasons = asyncHandler(async (req, res) => {
     });
 });
 
-module.exports = { getAssignedSeasons };
+/**
+ * GET /expert/seasons/:seasonId/metrics
+ * Return the assigned-season header, stocking data and professional metrics.
+ */
+const getAssignedSeasonMetrics = asyncHandler(async (req, res) => {
+    const data = await expertSeasonService.getAssignedSeasonMetrics(req.account.id, req.params.seasonId);
+    ResponseHandler.success(res, { message: messages.EXPERT_SEASON.METRICS_FETCHED, data });
+});
+
+module.exports = { getAssignedSeasons, getAssignedSeasonMetrics };
