@@ -43,7 +43,7 @@ const POND_SELECT = {
 const POND_DETAIL_SELECT = {
     ...POND_SELECT,
     farm: {
-        select: { id: true, name: true },
+        select: { id: true, name: true, status: true },
     },
     seasons: {
         where: { status: { in: OPEN_SEASON_STATUSES } },
