@@ -49,10 +49,16 @@ enum PersonnelRole {
   @@map("personnel_role")
 }
 
+enum AiRunStatus {
+  SUCCESS @map("success")
+  ERROR   @map("error")
+
+  @@map("ai_run_status")
+}
+
 enum PondStatus {
   AVAILABLE   @map("available")
   MAINTENANCE @map("maintenance")
-  INACTIVE    @map("inactive")
 
   @@map("pond_status")
 }
@@ -101,6 +107,19 @@ enum CaseSeverity {
   CRITICAL @map("critical")
 
   @@map("case_severity")
+}
+
+enum CaseResponseType {
+  REQUEST_INFO       @map("request_info")
+  PROVIDE_INFO       @map("provide_info")
+  MONITORING_RESULT  @map("monitoring_result")
+  TREATMENT_RESULT   @map("treatment_result")
+  EMERGENCY_ALERT    @map("emergency_alert")
+  EXPERT_ASSESSMENT  @map("expert_assessment")
+  EXPERT_INSTRUCTION @map("expert_instruction")
+  RESOLUTION         @map("resolution")
+
+  @@map("case_response_type")
 }
 
 enum DiseaseCaseStatus {
@@ -312,10 +331,16 @@ model Account {
   complianceChecks       ProductCompliance[]
   ownedFarms             Farm[]
   reportedDiseaseCases   DiseaseCase[]                @relation("DiseaseCaseReporter")
+  assignedDiseaseCases   DiseaseCase[]                @relation("DiseaseCaseExpert")
+  resolvedDiseaseCases   DiseaseCase[]                @relation("DiseaseCaseResolver")
+  diseaseCaseAttachments DiseaseCaseAttachment[]
+  diseaseCaseResponses   DiseaseCaseResponse[]
+  diseaseStatusChanges   DiseaseCaseStatusHistory[]
   ragConversations       RagConversation[]
   ragQueries             RagQuery[]
   ragFeedback            RagFeedback[]
   ragDocuments           RagDocument[]
+  aiDiagnosisLogs        AiDiagnosisLog[]
   cancelledSchedules     OperationSchedule[]          @relation("ScheduleCancelledBy")
   executedOperations     OperationExecution[]         @relation("ExecutionExecutedBy")
   inventoryTransactions  InventoryTransaction[]       @relation("InventoryTransactionPerformedBy")
@@ -380,7 +405,7 @@ model Farm {
   latitude          Decimal? @db.Decimal(10, 8)
   longitude         Decimal? @db.Decimal(11, 8)
   totalAreaHectares Decimal? @map("total_area_hectares") @db.Decimal(10, 2)
-  status            String   @default("active") @db.VarChar(8)
+  status            FarmStatus @default(ACTIVE)
   createdAt         DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
   updatedAt         DateTime @default(now()) @map("updated_at") @db.Timestamptz(6)
   owner             Account  @relation(fields: [ownerId], references: [id], onDelete: Restrict)
@@ -430,6 +455,7 @@ model AquacultureSeason {
   waterQualityLogs      WaterQualityLog[]
   diseaseCases          DiseaseCase[]
   ragConversations      RagConversation[]
+  aiDiagnosisLogs       AiDiagnosisLog[]
   schedules             OperationSchedule[]
   inventoryTransactions InventoryTransaction[]
   protocols             Protocol[]
@@ -490,50 +516,141 @@ model WaterQualityLog {
   @@map("water_quality_logs")
 }
 
+model AiDiagnosisLog {
+  id               String            @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  seasonId         String            @map("season_id") @db.Uuid
+  requestedBy      String            @map("requested_by") @db.Uuid
+  imageUrls        String[]          @map("image_urls")
+  inputSnapshot    Json              @default("{}") @map("input_snapshot")
+  runStatus        AiRunStatus       @map("run_status")
+  predictedLabel   String?           @map("predicted_label") @db.VarChar(255)
+  confidence       Decimal?          @db.Decimal(6, 5)
+  predictions      Json              @default("[]")
+  recommendation   String?           @db.VarChar(500)
+  modelVersion     String?           @map("model_version") @db.VarChar(100)
+  processingTimeMs Int?              @map("processing_time_ms")
+  errorCode        String?           @map("error_code") @db.VarChar(100)
+  errorMessage     String?           @map("error_message")
+  createdAt        DateTime          @default(now()) @map("created_at") @db.Timestamptz(6)
+  season           AquacultureSeason @relation(fields: [seasonId], references: [id], onDelete: Restrict)
+  requester        Account           @relation(fields: [requestedBy], references: [id], onDelete: Restrict)
+
+  @@index([seasonId, createdAt(sort: Desc)], map: "idx_ai_diagnosis_season_date")
+  @@index([runStatus, createdAt(sort: Desc)], map: "idx_ai_diagnosis_run_status")
+  @@map("ai_diagnosis_logs")
+}
+
 model DiseaseCase {
-  id         String            @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
-  seasonId   String            @map("season_id") @db.Uuid
-  reportedBy String            @map("reported_by") @db.Uuid
-  expertId   String            @map("expert_id") @db.Uuid
-  title      String            @db.VarChar(500)
-  severity   CaseSeverity      @default(MEDIUM)
-  status     DiseaseCaseStatus @default(OPEN)
-  updatedAt  DateTime          @default(now()) @map("updated_at") @db.Timestamptz(6)
-  season     AquacultureSeason @relation(fields: [seasonId], references: [id], onDelete: Restrict)
-  reporter   Account           @relation("DiseaseCaseReporter", fields: [reportedBy], references: [id], onDelete: Restrict)
+  id                String                      @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  seasonId          String                      @map("season_id") @db.Uuid
+  relatedCaseId     String?                     @map("related_case_id") @db.Uuid
+  reportedBy        String                      @map("reported_by") @db.Uuid
+  expertId          String                      @map("expert_id") @db.Uuid
+  aiDiagnosisId     String?                     @map("ai_diagnosis_id") @db.Uuid
+  title             String                      @db.VarChar(500)
+  description       String                      @db.VarChar(500)
+  severity          CaseSeverity                @default(MEDIUM)
+  status            DiseaseCaseStatus           @default(OPEN)
+  caseSnapshot      Json                        @map("case_snapshot")
+  resolutionSummary String?                     @map("resolution_summary") @db.VarChar(500)
+  resolvedBy        String?                     @map("resolved_by") @db.Uuid
+  resolvedAt        DateTime?                   @map("resolved_at") @db.Timestamptz(6)
+  createdAt         DateTime                    @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt         DateTime                    @default(now()) @map("updated_at") @db.Timestamptz(6)
+
+  season            AquacultureSeason           @relation(fields: [seasonId], references: [id], onDelete: Restrict)
+  reporter          Account                     @relation("DiseaseCaseReporter", fields: [reportedBy], references: [id], onDelete: Restrict)
+  expert            Account                     @relation("DiseaseCaseExpert", fields: [expertId], references: [id], onDelete: Restrict)
+  resolver          Account?                    @relation("DiseaseCaseResolver", fields: [resolvedBy], references: [id], onDelete: Restrict)
+  relatedCase       DiseaseCase?                @relation("RelatedDiseaseCase", fields: [relatedCaseId], references: [id], onDelete: Restrict)
+  recurrences       DiseaseCase[]               @relation("RelatedDiseaseCase")
+  attachments       DiseaseCaseAttachment[]
+  responses         DiseaseCaseResponse[]
+  statusHistory     DiseaseCaseStatusHistory[]
+  protocols         Protocol[]
 
   @@map("disease_cases")
 }
 
-model Protocol {
-  sourceTemplate ProductionProtocolTemplate? @relation(fields: [sourceTemplateId], references: [id], onDelete: Restrict)
-  id                   String         @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
-  protocolType         ProtocolType   @map("protocol_type")
-  seasonId             String         @map("season_id") @db.Uuid
-  diseaseCaseId        String?        @map("disease_case_id") @db.Uuid
-  sourceTemplateId     String?        @map("source_template_id") @db.Uuid
-  versionNo            Int            @map("version_no")
-  supersedesProtocolId String?        @map("supersedes_protocol_id") @db.Uuid
-  title                String         @db.VarChar(500)
-  summary              String?
-  allowedVariancePct   Decimal?       @map("allowed_variance_pct") @db.Decimal(5, 2)
-  rollingWindowDays    Int            @default(7) @map("rolling_window_days") @db.SmallInt
-  status               ProtocolStatus @default(DRAFT)
-  createdBy            String         @map("created_by") @db.Uuid
-  submittedAt          DateTime?      @map("submitted_at") @db.Timestamptz(6)
-  reviewedBy           String?        @map("reviewed_by") @db.Uuid
-  reviewedAt           DateTime?      @map("reviewed_at") @db.Timestamptz(6)
-  rejectionReason      String?        @map("rejection_reason")
-  supersededAt         DateTime?      @map("superseded_at") @db.Timestamptz(6)
-  abortReason          String?        @map("abort_reason")
-  abortedBy            String?        @map("aborted_by") @db.Uuid
-  abortedAt            DateTime?      @map("aborted_at") @db.Timestamptz(6)
-  createdAt            DateTime       @default(now()) @map("created_at") @db.Timestamptz(6)
-  updatedAt            DateTime       @default(now()) @map("updated_at") @db.Timestamptz(6)
+model DiseaseCaseAttachment {
+  id          String      @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  caseId      String      @map("case_id") @db.Uuid
+  uploadedBy  String      @map("uploaded_by") @db.Uuid
+  fileUrl     String      @map("file_url")
+  mediaType   String?     @map("media_type") @db.VarChar(100)
+  caption     String?     @db.VarChar(255)
+  createdAt   DateTime    @default(now()) @map("created_at") @db.Timestamptz(6)
 
-  season        AquacultureSeason       @relation(fields: [seasonId], references: [id], onDelete: Restrict)
-  items         ProtocolItem[]
-  statusHistory ProtocolStatusHistory[]
+  case        DiseaseCase @relation(fields: [caseId], references: [id], onDelete: Restrict)
+  uploader    Account     @relation(fields: [uploadedBy], references: [id], onDelete: Restrict)
+
+  @@map("disease_case_attachments")
+}
+
+model DiseaseCaseResponse {
+  id           String           @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  caseId       String           @map("case_id") @db.Uuid
+  authorId     String           @map("author_id") @db.Uuid
+  responseType CaseResponseType @map("response_type")
+  message      String           @db.VarChar(500)
+  attachments  Json             @default("[]")
+  createdAt    DateTime         @default(now()) @map("created_at") @db.Timestamptz(6)
+
+  case         DiseaseCase      @relation(fields: [caseId], references: [id], onDelete: Restrict)
+  author       Account          @relation(fields: [authorId], references: [id], onDelete: Restrict)
+
+  @@map("disease_case_responses")
+}
+
+model DiseaseCaseStatusHistory {
+  id         String             @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  caseId     String             @map("case_id") @db.Uuid
+  fromStatus DiseaseCaseStatus? @map("from_status")
+  toStatus   DiseaseCaseStatus  @map("to_status")
+  changedBy  String             @map("changed_by") @db.Uuid
+  reason     String?            @db.VarChar(500)
+  changedAt  DateTime           @default(now()) @map("changed_at") @db.Timestamptz(6)
+
+  case       DiseaseCase        @relation(fields: [caseId], references: [id], onDelete: Restrict)
+  changer    Account            @relation(fields: [changedBy], references: [id], onDelete: Restrict)
+
+  @@map("disease_case_status_history")
+}
+
+model Protocol {
+  contentVersion          Int   @default(1) @map("content_version") @db.SmallInt
+  sourceTemplateVersionNo Int?  @map("source_template_version_no")
+  sourceTemplateSnapshot  Json? @map("source_template_snapshot") @db.JsonB
+  productionStructure     Json? @map("production_structure") @db.JsonB
+  sourceTemplate       ProductionProtocolTemplate? @relation(fields: [sourceTemplateId], references: [id], onDelete: Restrict)
+  id                   String                      @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  protocolType         ProtocolType                @map("protocol_type")
+  seasonId             String                      @map("season_id") @db.Uuid
+  diseaseCaseId        String?                     @map("disease_case_id") @db.Uuid
+  sourceTemplateId     String?                     @map("source_template_id") @db.Uuid
+  versionNo            Int                         @map("version_no")
+  supersedesProtocolId String?                     @map("supersedes_protocol_id") @db.Uuid
+  title                String                      @db.VarChar(500)
+  summary              String?
+  allowedVariancePct   Decimal?                    @map("allowed_variance_pct") @db.Decimal(5, 2)
+  rollingWindowDays    Int                         @default(7) @map("rolling_window_days") @db.SmallInt
+  status               ProtocolStatus              @default(DRAFT)
+  createdBy            String                      @map("created_by") @db.Uuid
+  submittedAt          DateTime?                   @map("submitted_at") @db.Timestamptz(6)
+  reviewedBy           String?                     @map("reviewed_by") @db.Uuid
+  reviewedAt           DateTime?                   @map("reviewed_at") @db.Timestamptz(6)
+  rejectionReason      String?                     @map("rejection_reason")
+  supersededAt         DateTime?                   @map("superseded_at") @db.Timestamptz(6)
+  abortReason          String?                     @map("abort_reason")
+  abortedBy            String?                     @map("aborted_by") @db.Uuid
+  abortedAt            DateTime?                   @map("aborted_at") @db.Timestamptz(6)
+  createdAt            DateTime                    @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt            DateTime                    @default(now()) @map("updated_at") @db.Timestamptz(6)
+
+  season               AquacultureSeason @relation(fields: [seasonId], references: [id], onDelete: Restrict)
+  diseaseCase          DiseaseCase?          @relation(fields: [diseaseCaseId], references: [id], onDelete: Restrict)
+  items                ProtocolItem[]
+  statusHistory        ProtocolStatusHistory[]
 
   @@map("protocols")
 }
@@ -554,24 +671,31 @@ model ProtocolStatusHistory {
 }
 
 model ProtocolItem {
-  id                     String           @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
-  protocolId             String           @map("protocol_id") @db.Uuid
-  operationType          OperationType    @map("operation_type")
-  productId              String?          @map("product_id") @db.Uuid
-  recommendedProductName String?          @map("recommended_product_name") @db.VarChar(255)
-  recommendedCategory    ProductCategory? @map("recommended_category")
-  startDayOffset         Int              @map("start_day_offset")
-  endDayOffset           Int              @map("end_day_offset")
-  repeatIntervalDays     Int              @default(1) @map("repeat_interval_days") @db.SmallInt
-  mealNumber             Int?             @map("meal_number")
-  plannedTime            DateTime?        @map("planned_time") @db.Time(6)
-  doseBasis              DoseBasis        @map("dose_basis")
-  doseValue              Decimal          @map("dose_value") @db.Decimal(14, 4)
-  doseUnit               ProductUnit      @map("dose_unit")
-  instructions           String?
-  sequenceOrder          Int              @default(1) @map("sequence_order")
-  createdAt              DateTime         @default(now()) @map("created_at") @db.Timestamptz(6)
-  updatedAt              DateTime         @default(now()) @map("updated_at") @db.Timestamptz(6)
+  productionMealId          String?  @map("production_meal_id") @db.Uuid
+  dailyDoseIncrement        Decimal? @map("daily_dose_increment") @db.Decimal(14, 4)
+  recurrenceAnchorDay       Int?     @map("recurrence_anchor_day")
+  doseAnchorDay             Int?     @map("dose_anchor_day")
+  materialSnapshot          Json?    @map("material_snapshot") @db.JsonB
+  id                        String                        @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  protocolId                String                        @map("protocol_id") @db.Uuid
+  operationType             OperationType                 @map("operation_type")
+  productId                 String?                       @map("product_id") @db.Uuid
+  recommendedProductName    String?                       @map("recommended_product_name") @db.VarChar(255)
+  recommendedCategory       ProductCategory?              @map("recommended_category")
+  recommendedProductDetails Json?                         @map("recommended_product_details") @db.JsonB
+  recommendedManufacturerId String?                       @map("recommended_manufacturer_id") @db.Uuid
+  startDayOffset            Int                           @map("start_day_offset")
+  endDayOffset              Int                           @map("end_day_offset")
+  repeatIntervalDays        Int                           @default(1) @map("repeat_interval_days") @db.SmallInt
+  mealNumber                Int?                          @map("meal_number")
+  plannedTime               DateTime?                     @map("planned_time") @db.Time(6)
+  doseBasis                 DoseBasis                     @map("dose_basis")
+  doseValue                 Decimal                       @map("dose_value") @db.Decimal(14, 4)
+  doseUnit                  ProductUnit                   @map("dose_unit")
+  instructions              String?
+  sequenceOrder             Int                           @default(1) @map("sequence_order")
+  createdAt                 DateTime                      @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt                 DateTime                      @default(now()) @map("updated_at") @db.Timestamptz(6)
 
   protocol  Protocol            @relation(fields: [protocolId], references: [id], onDelete: Restrict)
   product   Product?            @relation(fields: [productId], references: [id], onDelete: Restrict)
@@ -766,7 +890,7 @@ model Supplier {
 
 model ProductionProtocolTemplate {
   id                 String                           @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
-  farmId             String                           @map("farm_id") @db.Uuid
+  farmId             String?                          @map("farm_id") @db.Uuid
   title              String                           @db.VarChar(500)
   description        String?
   shrimpType         ShrimpType?                      @map("shrimp_type")
@@ -777,7 +901,7 @@ model ProductionProtocolTemplate {
   createdBy          String                           @map("created_by") @db.Uuid
   createdAt          DateTime                         @default(now()) @map("created_at") @db.Timestamptz(6)
   updatedAt          DateTime                         @default(now()) @map("updated_at") @db.Timestamptz(6)
-  farm               Farm                             @relation(fields: [farmId], references: [id], onDelete: Restrict)
+  farm               Farm?                            @relation(fields: [farmId], references: [id], onDelete: Restrict)
   creator            Account                          @relation(fields: [createdBy], references: [id], onDelete: Restrict)
   items              ProductionProtocolTemplateItem[]
   sourcedProtocols   Protocol[]
@@ -806,7 +930,7 @@ model ProductionProtocolTemplateItem {
   sequenceOrder             Int                        @default(1) @map("sequence_order")
   createdAt                 DateTime                   @default(now()) @map("created_at") @db.Timestamptz(6)
   updatedAt                 DateTime                   @default(now()) @map("updated_at") @db.Timestamptz(6)
-  template                  ProductionProtocolTemplate @relation(fields: [templateId], references: [id], onDelete: Cascade)
+  template                  ProductionProtocolTemplate @relation(fields: [templateId], references: [id], onDelete: Restrict, onUpdate: NoAction)
   product                   Product?                   @relation(fields: [productId], references: [id], onDelete: Restrict)
 
   @@unique([templateId, sequenceOrder], map: "uq_template_item_sequence")
@@ -856,6 +980,16 @@ model SeasonPersonnelAssignment {
 
   @@index([accountId, role], map: "idx_season_assignments_account_active")
   @@map("season_personnel_assignments")
+}
+
+/// FCR tạm tính cho vụ thả tôm giống nhỏ; tử/mẫu số cùng mốc asOf.
+view SeasonOperationalMetrics {
+  seasonId     String    @unique @map("season_id") @db.Uuid
+  asOf         DateTime? @map("as_of") @db.Timestamptz(6)
+  totalFeedKg  Decimal?  @map("total_feed_kg") @db.Decimal
+  estimatedFcr Decimal?  @map("estimated_fcr") @db.Decimal
+
+  @@map("v_season_operational_metrics")
 }
 
 view TechnicianKpi {

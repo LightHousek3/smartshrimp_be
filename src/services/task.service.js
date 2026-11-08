@@ -1,6 +1,6 @@
 const prisma = require('../config/prisma');
 const { ApiError } = require('../utils');
-const { httpStatus, messages, TASK_OPEN_STATUSES, TASK_STATUSES, TASK_LIMITS } = require('../constants');
+const { httpStatus, messages, FARM_STATUS, TASK_OPEN_STATUSES, TASK_STATUSES, TASK_LIMITS } = require('../constants');
 const { emitNotification } = require('../realtime/notification.socket');
 
 const identity = { id: true, fullName: true, email: true };
@@ -24,7 +24,7 @@ const present = ({ assignee, assigner, season, ...row }) => ({
         pond: season?.pond ?? null }),
 });
 const scope = (ownerId) => ({ farm: { ownerId } });
-const activeFarm = (ownerId) => ({ ownerId, status: 'active' });
+const activeFarm = (ownerId) => ({ ownerId, status: FARM_STATUS.ACTIVE });
 const technician = (ownerId) => ({ managedByOwnerId: ownerId, role: 'TECHNICIAN', status: 'ACTIVE' });
 
 /**
@@ -72,7 +72,7 @@ const getOptions = async (ownerId, farmId) => {
         prisma.farm.findMany({ where: activeFarm(ownerId), select: { id: true, name: true }, orderBy: { name: 'asc' } }),
         prisma.account.findMany({ where: technician(ownerId), select: identity, orderBy: [{ fullName: 'asc' }, { id: 'asc' }] }),
     ]);
-    // Reading only needed fields supports both the deployed farm_status enum and V2 varchar.
+    // Season options use only active owned farms returned by the compact choices query.
     const seasons = farms.some((farm) => farm.id === farmId) ? await prisma.aquacultureSeason.findMany({
             where: { pond: { farmId, farm: activeFarm(ownerId) }, status: { in: ['PLANNING', 'ACTIVE'] } },
             select: { id: true, name: true, pond: { select: { name: true } }, personnelAssignments: {

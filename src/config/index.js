@@ -1,5 +1,6 @@
 const dotenv = require('dotenv');
 const path = require('path');
+const { PRODUCTION_PROTOCOL_LIMITS } = require('../constants');
 
 dotenv.config({ path: path.join(__dirname, '../../.env') });
 
@@ -22,6 +23,15 @@ if (missingEnvVars.length > 0) {
 
 const BASE_URL = (process.env.APP_BASE_URL || '').replace(/\/+$/, '');
 const API_PREFIX = `/${(process.env.API_PREFIX || '/api/v1').replace(/^\/+|\/+$/g, '')}`;
+const WEB_BASE_URL = (process.env.WEB_BASE_URL
+    || (process.env.NODE_ENV !== 'production' ? 'http://localhost:5173' : '')).replace(/\/+$/, '');
+if (!/^https?:\/\//i.test(WEB_BASE_URL)) {
+    throw new Error('WEB_BASE_URL must be an absolute HTTP(S) URL; it is required in production.');
+}
+const webUrl = new URL(WEB_BASE_URL);
+if (webUrl.username || webUrl.password || webUrl.search || webUrl.hash) {
+    throw new Error('WEB_BASE_URL must not contain credentials, query parameters or a fragment.');
+}
 
 const config = {
     env: process.env.NODE_ENV || 'development',
@@ -29,6 +39,7 @@ const config = {
     apiPrefix: API_PREFIX,
     app: {
         backendUrl: BASE_URL || undefined,
+        webBaseUrl: WEB_BASE_URL,
     },
 
     jwt: {
@@ -91,6 +102,22 @@ const config = {
 
     security: {
         bcryptSaltRounds: parseInt(process.env.BCRYPT_SALT_ROUNDS, 10) || 12,
+    },
+    productionProtocol: {
+        v2Enabled: process.env.PRODUCTION_PROTOCOL_V2_ENABLED === 'true',
+        templateApplyEnabled: process.env.PRODUCTION_PROTOCOL_TEMPLATE_APPLY_ENABLED === 'true',
+        scheduleWorkerEnabled: process.env.PRODUCTION_PROTOCOL_SCHEDULE_WORKER_ENABLED === 'true',
+        workerIntervalMs: Math.max(10000, Number(process.env.PRODUCTION_PROTOCOL_WORKER_INTERVAL_MS) || 60000),
+        transactionTimeoutMs: 60000,
+        biomassMaxAgeHours: PRODUCTION_PROTOCOL_LIMITS.biomassMaxAgeHours,
+    },
+    ai: {
+        serviceUrl: (process.env.AI_SERVICE_URL || '').replace(/\/+$/, ''),
+        apiKey: process.env.AI_API_KEY,
+        timeoutMs: parseInt(process.env.AI_REQUEST_TIMEOUT_MS, 10) || 120000,
+    },
+    goong: {
+        apiKey: process.env.GOONG_API_KEY,
     },
     rag: {
         serviceUrl: (process.env.RAG_SERVICE_URL || '').replace(/\/+$/, ''),

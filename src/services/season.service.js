@@ -5,9 +5,11 @@ const {
     httpStatus,
     messages,
     ACCOUNT_STATUS,
+    FARM_STATUS,
     NOTIFICATION_TYPE,
     PERSONNEL_ROLE,
     SEASON_STATUS,
+    POND_STATUS,
 } = require('../constants');
 
 const MAX_INITIAL_DENSITY_PER_M2 = 9999999999.99;
@@ -134,6 +136,7 @@ const dayOfCulture = (stockingDate) => {
 const normalizePondSummary = (pond) => ({
     ...pond,
     areaM2: pond.areaM2 == null ? null : Number(pond.areaM2),
+    farm: { ...pond.farm, status: pond.farm.status?.toLowerCase() ?? null },
 });
 
 const normalizeSeasonBase = (season) => ({
@@ -180,8 +183,8 @@ const buildActivationEligibility = (season) => {
     );
 
     if (season.status !== SEASON_STATUS.PLANNING) missingConditions.push('SEASON_NOT_PLANNING');
-    if (season.pond.farm.status.toUpperCase() !== 'ACTIVE') missingConditions.push('FARM_NOT_ACTIVE');
-    if (season.pond.status !== 'AVAILABLE') missingConditions.push('POND_NOT_AVAILABLE');
+    if (season.pond.farm.status !== FARM_STATUS.ACTIVE) missingConditions.push('FARM_NOT_ACTIVE');
+    if (season.pond.status !== POND_STATUS.AVAILABLE) missingConditions.push('POND_NOT_AVAILABLE');
     if (season.pond.type !== 'AQUACULTURE') missingConditions.push('POND_NOT_AQUACULTURE');
     if (!season.stockingDate) missingConditions.push('STOCKING_DATE_REQUIRED');
     if (season.initialQuantity == null) missingConditions.push('INITIAL_QUANTITY_REQUIRED');
@@ -373,10 +376,10 @@ const buildCreateData = (seasonData, ownerId, areaM2) => {
 };
 
 const assertEligiblePond = (pond) => {
-    if (pond.farm.status.toUpperCase() !== 'ACTIVE') {
+    if (pond.farm.status !== FARM_STATUS.ACTIVE) {
         throw new ApiError(httpStatus.CONFLICT, messages.SEASON.FARM_NOT_ACTIVE);
     }
-    if (pond.status !== 'AVAILABLE') {
+    if (pond.status !== POND_STATUS.AVAILABLE) {
         throw new ApiError(httpStatus.CONFLICT, messages.SEASON.POND_NOT_AVAILABLE);
     }
     if (pond.type !== 'AQUACULTURE') {

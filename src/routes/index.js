@@ -12,8 +12,10 @@ const assignedSeasonRoute = require('./assignedSeason.route');
 const expertDashboardRoute = require('./expertDashboard.route');
 const ownerDashboardRoute = require('./ownerDashboard.route');
 const expertSeasonRoute = require('./expertSeason.route');
+const expertDiseaseCaseRoute = require('./expertDiseaseCase.route');
 const ragRoute = require('./rag.route');
 const waterLogRoute = require('./waterLog.route');
+const aiDiagnosisRoute = require('./aiDiagnosis.route');
 const shrimpHealthRoute = require('./shrimpHealth.route');
 const operationRoute = require('./operation.route');
 const protocolRoute = require('./protocol.route');
@@ -46,10 +48,12 @@ const routes = [
     { path: '/owner/dashboard', route: ownerDashboardRoute },
     { path: '/me/seasons', route: assignedSeasonRoute },
     { path: '/me/seasons/:seasonId/water-logs', route: waterLogRoute },
+    { path: '/technician/seasons/:seasonId/ai-diagnoses', route: aiDiagnosisRoute },
     { path: '/me/seasons/:seasonId/shrimp-health-logs', route: shrimpHealthRoute },
     { path: '/operations', route: operationRoute },
     { path: '/expert/dashboard', route: expertDashboardRoute },
     { path: '/expert/seasons', route: expertSeasonRoute },
+    { path: '/expert/disease-cases', route: expertDiseaseCaseRoute },
     { path: '/notifications', route: notificationRoute },
 ];
 

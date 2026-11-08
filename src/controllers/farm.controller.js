@@ -1,10 +1,11 @@
 const { farmService } = require('../services');
+const farmGeocodingService = require('../services/farmGeocoding.service');
 const { asyncHandler, ResponseHandler } = require('../utils');
 const { messages } = require('../constants');
 
 /**
  * GET /owner/farms
- * Scope the list to the authenticated owner, including pond and open-season summaries.
+ * Scope the complete list to the authenticated Owner for local App filtering.
  */
 const getListFarm = asyncHandler(async (req, res) => {
     const farms = await farmService.getListFarm(req.account.id);
@@ -12,6 +13,15 @@ const getListFarm = asyncHandler(async (req, res) => {
     ResponseHandler.success(res, {
         message: messages.FARM.LIST_FETCHED,
         data: farms,
+    });
+});
+
+/** Resolve a location without exposing the Goong REST key to mobile clients. */
+const geocodeFarm = asyncHandler(async (req, res) => {
+    const location = await farmGeocodingService.geocode(req.query);
+    ResponseHandler.success(res, {
+        message: messages.FARM.GEOCODE_FETCHED,
+        data: { location },
     });
 });
 
@@ -56,7 +66,7 @@ const updateFarm = asyncHandler(async (req, res) => {
 
 /**
  * DELETE /owner/farms/:farmId
- * Return the deleted farm only after open-season and reference checks succeed.
+ * Return the deleted farm only after all related-record checks succeed.
  */
 const deleteFarm = asyncHandler(async (req, res) => {
     const farm = await farmService.deleteFarm(req.params.farmId, req.account.id);
@@ -68,6 +78,7 @@ const deleteFarm = asyncHandler(async (req, res) => {
 });
 
 module.exports = {
+    geocodeFarm,
     getListFarm,
     getFarm,
     createFarm,

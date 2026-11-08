@@ -2,6 +2,32 @@
  * Centralized message constants
  */
 const messages = {
+    AI_DIAGNOSIS: {
+        CREATED: 'Đã xử lý yêu cầu nhận diện.',
+        LOW_CONFIDENCE:
+            'Vui lòng cung cấp lại ảnh tôm rõ nét, đủ sáng và thấy rõ vùng nghi bệnh để hỗ trợ nhận diện, hoặc liên hệ Chuyên gia để kiểm tra.',
+        LIST_FETCHED: 'Lấy lịch sử nhận diện thành công.',
+        DETAIL_FETCHED: 'Lấy chi tiết nhận diện thành công.',
+        NOT_FOUND: 'Không tìm thấy kết quả nhận diện.',
+        SEASON_NOT_FOUND: 'Không tìm thấy vụ nuôi.',
+        ASSIGNMENT_REQUIRED: 'Bạn không còn được phân công kỹ thuật viên cho vụ nuôi này.',
+        ACTIVE_SEASON_REQUIRED: 'Chỉ được yêu cầu nhận diện trong vụ nuôi đang hoạt động.',
+        ACCOUNT_UNAVAILABLE: 'Tài khoản kỹ thuật viên không còn hoạt động.',
+        INVALID_IMAGES: 'Cần gửi từ 1 đến 5 ảnh JPEG, PNG hoặc WEBP, mỗi ảnh không quá 10 MiB.',
+        INVALID_MULTIPART:
+            'Yêu cầu phải là multipart/form-data, chỉ chứa các file trong trường images.',
+        INVALID_CURSOR: 'Con trỏ phân trang không hợp lệ.',
+        BUSY: 'Hệ thống đang xử lý ảnh. Vui lòng thử lại sau.',
+        UNAVAILABLE: 'Dịch vụ nhận diện chưa sẵn sàng. Vui lòng thử lại sau.',
+        TIMEOUT:
+            'Dịch vụ nhận diện phản hồi quá thời gian chờ. Vui lòng kiểm tra lịch sử trước khi gửi lại.',
+        INVALID_RESPONSE: 'Dịch vụ nhận diện trả kết quả không hợp lệ.',
+        IMAGE_REJECTED:
+            'Ảnh không đáp ứng yêu cầu nhận diện. Hãy chọn ảnh tôm rõ nét, tối thiểu 224 × 224 pixel.',
+        RATE_LIMITED: 'Đã vượt giới hạn yêu cầu nhận diện. Vui lòng thử lại sau.',
+        STORAGE_UNAVAILABLE: 'Chưa thể lưu hoặc mở ảnh nhận diện. Vui lòng thử lại sau.',
+        CONFLICT: 'Phân công hoặc trạng thái vụ nuôi vừa thay đổi. Vui lòng tải lại.',
+    },
     EXPERT_PROTOCOL_TEMPLATE: {
         SPECIES_REQUIRED: 'Phác đồ mẫu phải chỉ định tôm thẻ chân trắng hoặc tôm sú.',
         INVALID_APPLICATION_DAYS:
@@ -11,6 +37,7 @@ const messages = {
         UPDATED: 'Cập nhật phác đồ mẫu thành công.',
         MATERIAL_UNAVAILABLE: 'Vật tư không khả dụng',
         FARM_NOT_FOUND: 'Không tìm thấy trang trại trong phạm vi quản lý.',
+        DELETED_FARM: 'Trang trại đã xóa',
         EXPERT_ASSIGNMENT_CHANGED: 'Phân công hoặc trạng thái tài khoản đã thay đổi.',
         WRITE_CONFLICT: 'Dữ liệu vừa thay đổi hoặc đã có tham chiếu. Hãy tải lại trước khi lưu.',
         EXPERT_UNASSIGNED: 'Chuyên gia chưa được phân công chủ trại.',
@@ -120,9 +147,9 @@ const messages = {
         LOGIN_SUCCESS: 'Đăng nhập thành công',
         LOGOUT_SUCCESS: 'Đăng xuất thành công',
         TOKEN_REFRESHED: 'Làm mới token thành công',
-        PENDING_ACTIVATION: 'Tài khoản chưa được kích hoạt. Vui lòng kích hoạt tài khoản trước',
+        PENDING_ACTIVATION: 'Tài khoản chưa được kích hoạt. Vui lòng kích hoạt trước',
         ACCOUNT_BLOCKED: 'Tài khoản của bạn đã bị khóa. Vui lòng liên hệ bộ phận hỗ trợ',
-        ACCOUNT_INACTIVE: 'Tài khoản tạm ngừng sử dụng theo quản lý nghiệp vụ',
+        ACCOUNT_INACTIVE: 'Tài khoản đang tạm ngừng sử dụng. Vui lòng liên hệ bộ phận hỗ trợ',
         INVALID_CREDENTIALS: 'Email hoặc mật khẩu không chính xác',
         INVALID_REFRESH_TOKEN: 'Refresh token không hợp lệ hoặc đã hết hạn',
         UNAUTHORIZED: 'Bạn chưa đăng nhập hoặc phiên đăng nhập không hợp lệ',
@@ -135,7 +162,8 @@ const messages = {
         OTP_ATTEMPTS_EXCEEDED:
             'Mã OTP đã bị vô hiệu hóa do nhập sai quá nhiều lần. Vui lòng yêu cầu mã mới',
         INVALID_ACTION_TOKEN: 'Phiên xác thực không hợp lệ hoặc đã hết hạn',
-        ACCOUNT_ALREADY_ACTIVATED: 'Tài khoản đã được kích hoạt hoặc không thể kích hoạt',
+        ACCOUNT_ALREADY_ACTIVATED: 'Tài khoản đã được kích hoạt. Vui lòng đăng nhập.',
+        VERIFICATION_CONFLICT: 'Yêu cầu xác thực đang được xử lý. Vui lòng thử lại',
         ACTIVATION_SUCCESS: 'Kích hoạt tài khoản thành công',
         PASSWORD_RESET_SUCCESS: 'Đặt lại mật khẩu thành công',
         EMAIL_DELIVERY_FAILED: 'Không thể gửi email xác thực. Vui lòng thử lại sau',
@@ -153,17 +181,24 @@ const messages = {
     },
 
     FARM: {
+        GEOCODE_FETCHED: 'Tra cứu vị trí trang trại thành công',
+        GEOCODE_UNAVAILABLE: 'Dịch vụ bản đồ đang bận. Vui lòng thử lại sau.',
+        GEOCODE_NOT_CONFIGURED: 'Dịch vụ bản đồ chưa được cấu hình.',
         LIST_FETCHED: 'Lấy danh sách trang trại thành công',
         FETCHED: 'Lấy chi tiết trang trại thành công',
         CREATED: 'Tạo trang trại thành công',
         UPDATED: 'Cập nhật trang trại thành công',
         DELETED: 'Xóa trang trại thành công',
         NOT_FOUND: 'Không tìm thấy trang trại',
-        NAME_ALREADY_EXISTS: 'Tên trang trại đã tồn tại trong danh sách đang hoạt động',
+        NAME_ALREADY_EXISTS: 'Tên trang trại đã tồn tại trong danh sách của bạn',
         OWNER_NOT_ELIGIBLE: 'Chỉ chủ trang trại đang hoạt động mới có thể tạo trang trại',
-        HAS_OPEN_SEASON:
-            'Không thể xóa trang trại đang có vụ nuôi ở trạng thái lập kế hoạch hoặc đang hoạt động',
-        HAS_REFERENCES: 'Không thể xóa trang trại còn dữ liệu liên quan',
+        CANNOT_DEACTIVATE_WITH_OPEN_SEASONS:
+            'Không thể ngừng hoạt động trang trại khi còn vụ nuôi đang lập kế hoạch hoặc hoạt động',
+        HAS_REFERENCES: 'Chỉ có thể xóa trang trại khi không còn ao, vật tư hoặc nhiệm vụ',
+        TEMPORARILY_UNAVAILABLE: 'Chức năng trang trại đang được cập nhật. Vui lòng thử lại sau.',
+        TEMPLATE_INACTIVATED_TITLE: 'Phác đồ mẫu ngừng sử dụng',
+        templateInactivatedContent: (farmName, templateTitle) =>
+            `Phác đồ mẫu đã ngừng sử dụng vì trang trại “${farmName}” bị xóa: “${templateTitle}”.`,
         CHANGE_CONFLICT: 'Trạng thái trang trại đã thay đổi. Vui lòng tải lại và thử lại',
     },
 
@@ -178,9 +213,11 @@ const messages = {
         HAS_OPEN_SEASON: 'Không thể xóa ao đang có vụ nuôi lập kế hoạch hoặc hoạt động',
         HAS_REFERENCES: 'Không thể xóa ao còn dữ liệu liên quan hoặc lịch sử vụ nuôi',
         OPEN_SEASON_RESTRICTS_UPDATE:
-            'Vụ nuôi đang mở không cho phép thay đổi loại ao, ngừng hoạt động hoặc thay đổi thể tích',
+            'Vụ nuôi đang mở không cho phép thay đổi loại ao hoặc chuyển sang bảo trì',
         VOLUME_OUT_OF_RANGE: 'Thể tích tính từ diện tích và độ sâu vượt quá giới hạn cho phép',
         VOLUME_EXCEEDS_CAPACITY: 'Thể tích không được vượt quá diện tích nhân với độ sâu của ao',
+        DIMENSIONS_IMMUTABLE:
+            'Không được cập nhật diện tích và độ sâu của ao; chỉ được cập nhật thể tích',
         CHANGE_CONFLICT: 'Trạng thái ao đã thay đổi. Vui lòng tải lại và thử lại',
     },
 
@@ -303,7 +340,8 @@ const messages = {
         CANCELLED: 'Hủy nhiệm vụ thành công.',
         STARTED: 'Đã bắt đầu nhiệm vụ và ghi nhận thời gian.',
         COMPLETED: 'Đã hoàn thành nhiệm vụ và ghi nhận thời gian.',
-        INVALID_TRANSITION: 'Trạng thái nhiệm vụ đã thay đổi hoặc không cho phép thao tác này. Vui lòng tải lại.',
+        INVALID_TRANSITION:
+            'Trạng thái nhiệm vụ đã thay đổi hoặc không cho phép thao tác này. Vui lòng tải lại.',
         COMPLETED_NOTIFICATION: 'Kỹ thuật viên đã hoàn thành nhiệm vụ.',
         NOT_FOUND: 'Không tìm thấy nhiệm vụ.',
         TERMINAL: 'Nhiệm vụ đã hoàn thành hoặc đã hủy, không thể thay đổi.',
@@ -425,6 +463,8 @@ const messages = {
 
     EXPERT_SEASON: {
         LIST_FETCHED: 'Lấy danh sách vụ nuôi được phân công thành công',
+        METRICS_FETCHED: 'Lấy chỉ số chuyên môn vụ nuôi thành công',
+        NOT_FOUND: 'Không tìm thấy vụ nuôi trong phạm vi được phân công.',
     },
 
     PROTOCOL: {
@@ -437,11 +477,60 @@ const messages = {
         INVALID_CASE: 'Ca bệnh không hợp lệ hoặc đã được giải quyết.',
         EMPTY: 'Phác đồ phải có ít nhất một hạng mục và giờ thực hiện hợp lệ.',
         PRODUCT: 'Vật tư đã liên kết phải đang hoạt động và thuộc cùng trang trại.',
-        PREDECESSOR: 'Phiên bản thay thế không còn khớp với phác đồ đang áp dụng.',
+        PREDECESSOR: 'Phiên bản thay thế không còn khớp với phác đồ đang có hiệu lực.',
         INVALID_DAY: 'Ngày nằm ngoài thời gian của phác đồ.',
     },
 
     PRODUCTION_PROTOCOL: {
+        HARVEST_COVERAGE: (minimumDoc) =>
+            `DOC kết thúc phác đồ nuôi phải lớn hơn hoặc bằng DOC ${minimumDoc} (ngày dự kiến thu hoạch của vụ nuôi).`,
+        V2_REQUIRED:
+            'Phác đồ này cần phiên bản hỗ trợ đầy đủ dữ liệu V2. Vui lòng tải lại hoặc cập nhật ứng dụng.',
+        TEMPLATE_CHANGED:
+            'Mẫu đã thay đổi hoặc chưa có phiên bản nguồn hợp lệ. Vui lòng nạp lại mẫu.',
+        APPLICATION_DAYS:
+            'Ngày áp dụng và mốc lặp phải nằm trong giai đoạn; không thay đổi mốc gốc khi chia lịch.',
+        DAILY_INCREMENT:
+            'Tăng liều chỉ dùng cho thức ăn liều cố định, mỗi ngày, trong DOC 1–29; liều cuối không được vượt giới hạn.',
+        MATERIAL_UNRESOLVED:
+            'Cần chọn vật tư catalog đủ điều kiện cho tất cả đề xuất trước khi phê duyệt.',
+        MATERIAL_CHANGED:
+            'Vật tư đã thay đổi nhà sản xuất, quy cách hoặc hồ sơ sau duyệt. Cần phác đồ được duyệt lại trước khi tạo hoặc thực thi lịch mới.',
+        MATERIAL_LOCKED:
+            'Lịch V2 phải dùng đúng vật tư Owner đã chọn. Vui lòng yêu cầu duyệt lại phác đồ nếu cần đổi vật tư.',
+        MATERIAL_RESOLUTION:
+            'Vật tư thay thế phải thuộc cùng trang trại, đúng loại và tương thích đơn vị với đề xuất.',
+        SCHEDULE_WAITING:
+            'Lịch được tạo theo cửa sổ cuốn chiếu khi vụ đang hoạt động và có đủ dữ liệu. Sinh khối hợp lệ tối đa 24 giờ tại thời điểm thao tác.',
+        SCHEDULE_BLOCKED: (reason) =>
+            `Một phần lịch chưa thể tạo: ${reason}. Vui lòng bổ sung dữ liệu; hệ thống sẽ thử lại.`,
+        SCHEDULE_BLOCKERS: {
+            VOLUME_MISSING: 'thiếu thể tích ao hợp lệ',
+            BASIS_OUT_OF_RANGE: 'sinh khối hoặc thể tích vượt giới hạn dữ liệu lịch',
+            BIOMASS_MISSING_OR_STALE: 'thiếu sinh khối hợp lệ trong 24 giờ trước thao tác',
+            DOSE_INVALID: 'quy tắc liều không hợp lệ',
+            QUANTITY_OUT_OF_RANGE: 'lượng vật tư vượt giới hạn hoặc quá nhỏ',
+            MATERIAL_UNRESOLVED: 'vật tư chưa được xác nhận',
+            MATERIAL_INELIGIBLE:
+                'vật tư không còn đủ điều kiện hoặc hồ sơ đã đổi sau duyệt; cần kiểm tra và duyệt lại',
+        },
+        BIOMASS_WARNING:
+            'Chưa có sinh khối hợp lệ trong 24 giờ. Lịch theo sinh khối cần số liệu còn hạn tại thời điểm thao tác.',
+        SCHEDULE_FAILED: 'Chưa thể tạo lịch phác đồ; hệ thống sẽ kiểm tra lại.',
+        BIOMASS_SOURCE_INVALID:
+            'Nguồn sinh khối của lịch không còn hợp lệ. Vui lòng kiểm tra nhật ký sức khỏe và yêu cầu lập lại lịch.',
+        BIOMASS_SOURCE_VOIDED:
+            'Đã hủy lịch vì bản ghi sinh khối nguồn bị hủy. Cần phác đồ được duyệt lại để lập lịch thay thế.',
+        SCHEDULE_GENERATION_ERROR: (protocolId, detail) =>
+            `Production schedule generation failed; protocolId=${protocolId}; ${detail}; retrying on the next cycle.`,
+        SCHEDULE_WORKER_ERROR: (cursor, detail) =>
+            `Production schedule worker failed; cursor=${cursor ?? 'none'}; ${detail}; retrying on the next tick.`,
+        SCHEDULE_DELIVERY_ERROR: (protocolId, detail) =>
+            `Production schedule warning realtime delivery failed after commit; protocolId=${protocolId}; ${detail}.`,
+        SCHEMA_NOT_READY:
+            'Database chưa sẵn sàng cho phác đồ V2. Vui lòng hoàn tất migration đã được duyệt.',
+        STORED_CONTENT_INVALID:
+            'Dữ liệu cấu trúc hoặc liều của phác đồ V2 không đầy đủ. Vui lòng kiểm tra dữ liệu trước khi tiếp tục.',
         PENDING_NOTIFICATION_CONTENT: (title, versionNo, seasonName, pondName, farmName) =>
             `Phác đồ "${title}" (v${versionNo}) của vụ ${seasonName}, ao ${pondName}, trang trại ${farmName} đang chờ chủ trại duyệt.`,
         PENDING_NOTIFICATION_TITLE: 'Phác đồ nuôi đang chờ duyệt',
@@ -496,6 +585,9 @@ const messages = {
 
     RAG_DOCUMENT: {
         CREATED: 'Đã thêm tài liệu vào kho kiến thức chatbot.',
+        NOT_FOUND: 'Không tìm thấy tài liệu.',
+        RETRY_FAILED_ONLY: 'Chỉ thử lại tài liệu xử lý thất bại.',
+        RETRY_CONFLICT: 'Tài liệu vừa thay đổi. Vui lòng làm mới.',
         FILE_REQUIRED: 'Vui lòng tải lên một tài liệu trong trường file.',
         INVALID_UPLOAD: 'Chỉ được tải lên một tài liệu cùng tên, danh mục và mô tả.',
         INVALID_NAME: 'Tên tài liệu không hợp lệ hoặc vượt quá 500 ký tự.',
@@ -567,6 +659,19 @@ const messages = {
         FINANCE_FETCHED: 'Lấy thống kê thu chi thành công',
         INVALID_RANGE:
             'Khoảng ngày phải từ trước đến sau, không ở tương lai và không quá 60 tháng.',
+    },
+
+    // Disease case
+    DISEASE_CASE: {
+        LIST_FETCHED: 'Lấy danh sách ca bệnh thành công',
+        FETCHED: 'Lấy chi tiết ca bệnh thành công',
+        NOT_FOUND: 'Không tìm thấy ca bệnh',
+        NOT_ASSIGNED: 'Bạn không có quyền truy cập ca bệnh này',
+        RESPONSE_SENT: 'Gửi phản hồi thành công',
+        RESOLVED: 'Đánh dấu ca bệnh đã giải quyết thành công',
+        ALREADY_RESOLVED: 'Ca bệnh đã được giải quyết, không thể thực hiện thêm thao tác',
+        RESOLUTION_SUMMARY_REQUIRED: 'Bắt buộc nhập nội dung tóm tắt giải quyết',
+        PROTOCOL_ABORTED: 'Dừng khẩn cấp phác đồ điều trị thành công',
     },
 
     // Server

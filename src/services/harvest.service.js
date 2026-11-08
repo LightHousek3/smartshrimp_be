@@ -1,6 +1,7 @@
 /**
  * Read immutable harvest history and record partial or final harvests for farm owners.
  * Writes coordinate through the season row lock; final harvest also completes the season.
+ * The professional read projection is reserved for callers that already authorized their season.
  */
 const { Prisma } = require('@prisma/client');
 // The config entry point exposes settings; Prisma has a dedicated shared client.
@@ -263,4 +264,14 @@ const create = async (ownerId, seasonId, body, key) => {
         throw error;
     }
 };
-module.exports = { list, detail, create };
+/**
+ * Professional projection for an already authorized season, in the caller's snapshot.
+ * No Prisma harvest delegate exists; bind values and select no financial/customer fields.
+ * Reverse the legacy latest-estimate ordering so the conservative tied estimate is last.
+ */
+const readProfessionalHistory = (tx, seasonId, at) => tx.$queryRaw(Prisma.sql`
+    SELECT id, harvest_type, harvested_at, quantity_count, total_weight_kg, estimated_remaining_count
+    FROM harvest_events WHERE season_id = ${seasonId}::uuid AND harvested_at <= ${at}
+    ORDER BY harvested_at ASC, estimated_remaining_count DESC NULLS FIRST, id ASC`);
+
+module.exports = { list, detail, create, readProfessionalHistory };

@@ -12,8 +12,14 @@ const getAssignedSeasons = {
         farmId: Joi.string().uuid({ version: 'uuidv4' }),
         shrimpType: Joi.string().uppercase().valid(...Object.values(SHRIMP_TYPE)),
         page: Joi.number().integer().min(1).max(100000).default(1),
-        limit: Joi.number().integer().valid(10, 20, 50).default(10),
+        limit: Joi.number().integer().min(1).max(100).default(10),
     }).unknown(false),
 };
 
-module.exports = { getAssignedSeasons };
+/** Reject malformed IDs and unsupported filters before any detail query. */
+const getAssignedSeasonMetrics = {
+    params: Joi.object({ seasonId: Joi.string().uuid({ version: 'uuidv4' }).required() }).unknown(false),
+    query: Joi.object({}).unknown(false),
+};
+
+module.exports = { getAssignedSeasons, getAssignedSeasonMetrics };

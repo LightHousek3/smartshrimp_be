@@ -4,6 +4,8 @@ const prisma = require('../config/prisma');
 const { ApiError } = require('../utils');
 const { httpStatus, messages, ACCOUNT_STATUS } = require('../constants');
 const tokenService = require('./token.service');
+const authTransaction = require('../utils/authTransaction');
+const { createAuthError } = require('../utils/authPolicy');
 
 const LOGIN_ACCOUNT_SELECT = {
     id: true,
@@ -49,28 +51,35 @@ const login = async (email, password, deviceId) => {
     }
 
     if (account.status !== ACCOUNT_STATUS.ACTIVE) {
-        throw new ApiError(
-            httpStatus.FORBIDDEN,
-            ACCOUNT_STATUS_ERRORS[account.status] || messages.AUTH.UNAUTHORIZED,
-        );
+        const key = account.status === ACCOUNT_STATUS.PENDING_ACTIVATION
+            ? 'PENDING_ACTIVATION' : `ACCOUNT_${account.status}`;
+        throw createAuthError(ACCOUNT_STATUS_ERRORS[account.status] ? key : 'FORBIDDEN', 403);
     }
 
     const loginAt = new Date();
     const resolvedDeviceId = deviceId || crypto.randomUUID();
 
-    const tokens = await prisma.$transaction(async (transaction) => {
-        await transaction.account.update({
-            where: { id: account.id },
+    const result = await authTransaction(async (transaction) => {
+        const current = await transaction.account.findUnique({
+            where: { id: account.id }, select: LOGIN_ACCOUNT_SELECT,
+        });
+        if (!current || current.passwordHash !== account.passwordHash) {
+            throw createAuthError('INVALID_CREDENTIALS', 401);
+        }
+        if (current.status !== ACCOUNT_STATUS.ACTIVE) {
+            const key = current.status === ACCOUNT_STATUS.PENDING_ACTIVATION
+                ? 'PENDING_ACTIVATION' : `ACCOUNT_${current.status}`;
+            throw createAuthError(ACCOUNT_STATUS_ERRORS[current.status] ? key : 'FORBIDDEN', 403);
+        }
+        const updated = await transaction.account.updateMany({
+            where: { id: account.id, status: ACCOUNT_STATUS.ACTIVE, passwordHash: account.passwordHash },
             data: { lastLoginAt: loginAt },
         });
-
-        return tokenService.generateAuthTokens(account, resolvedDeviceId, transaction);
+        if (updated.count !== 1) throw createAuthError('VERIFICATION_CONFLICT', 409);
+        const tokens = await tokenService.generateAuthTokens(current, resolvedDeviceId, transaction);
+        return { account: withoutPassword({ ...current, lastLoginAt: loginAt }), tokens };
     });
-
-    return {
-        account: withoutPassword({ ...account, lastLoginAt: loginAt }),
-        tokens,
-    };
+    return result;
 };
 
 /**

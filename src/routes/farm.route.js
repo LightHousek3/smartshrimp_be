@@ -16,6 +16,9 @@ router.use(authenticate, authorize(ACCOUNT_ROLE.FARM_OWNER));
  */
 router.get('/', farmController.getListFarm);
 
+/** Resolve an Owner's entered address or device coordinates through Goong. */
+router.get('/geocode', validate(farmValidator.geocodeFarm), farmController.geocodeFarm);
+
 /**
  * @route   GET /api/v1/owner/farms/:farmId
  * @desc    Get an owned farm
@@ -32,7 +35,7 @@ router.post('/', validate(farmValidator.createFarm), farmController.createFarm);
 
 /**
  * @route   DELETE /api/v1/owner/farms/:farmId
- * @desc    Delete an owned farm; reject open seasons and foreign-key references
+ * @desc    Delete an owned farm without ponds, products or tasks; retain templates as inactive
  * @access  Owner
  */
 router.delete('/:farmId', validate(farmValidator.deleteFarm), farmController.deleteFarm);

@@ -10,6 +10,7 @@ const email = Joi.string().trim().lowercase().email().max(320).required();
 const actionToken = Joi.string()
     .trim()
     .pattern(/^[A-Za-z0-9_-]+$/)
+    .messages({ 'string.pattern.base': 'Phiên xác thực không hợp lệ' })
     .min(32)
     .max(128)
     .required();
@@ -33,6 +34,7 @@ const verifyOtp = {
         email,
         code: Joi.string()
             .pattern(/^\d{6}$/)
+            .messages({ 'string.pattern.base': 'Mã OTP phải gồm đúng 6 chữ số' })
             .required(),
     }),
 };

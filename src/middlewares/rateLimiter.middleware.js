@@ -33,6 +33,21 @@ const authLimiter = rateLimit({
     skipSuccessfulRequests: true,
 });
 
+/**
+ * Count successful requests too: both public OTP purposes share this IP quota.
+ */
+const otpRequestLimiter = rateLimit({
+    windowMs: 15 * 60 * 1000,
+    max: 10,
+    message: {
+        success: false,
+        statusCode: httpStatus.TOO_MANY_REQUESTS,
+        message: messages.SERVER.TOO_MANY_REQUESTS,
+    },
+    standardHeaders: true,
+    legacyHeaders: false,
+});
+
 // Share one IP quota across document writes, including cancellation and metadata edits.
 const writeLimiter = rateLimit({
     windowMs: config.rateLimit.writeWindowMs,
@@ -49,5 +64,6 @@ const writeLimiter = rateLimit({
 module.exports = {
     apiLimiter,
     authLimiter,
+    otpRequestLimiter,
     writeLimiter,
 };

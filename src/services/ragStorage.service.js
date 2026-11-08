@@ -1,7 +1,8 @@
-const { createHash, timingSafeEqual } = require('node:crypto');
+const { timingSafeEqual } = require('node:crypto');
 const axios = require('axios');
 const config = require('../config');
 const { ApiError, createDocumentError } = require('../utils');
+const sign = require('../utils/cloudinarySignature');
 const { RAG_DOCUMENT_MAX_FILE_BYTES, RAG_DOCUMENT_ASSET_FOLDER } = require('../constants');
 
 // Cloudinary's signed REST API avoids adding a second upload SDK to the backend.
@@ -12,9 +13,6 @@ const settings = () => {
     }
     return value;
 };
-const sign = (params, secret) => createHash('sha1').update(
-    Object.keys(params).sort().map((key) => `${key}=${params[key]}`).join('&') + secret,
-).digest('hex');
 const endpoint = (action) => `https://api.cloudinary.com/v1_1/${settings().cloudName}/raw/${action}`;
 const signed = (params) => ({ ...params, api_key: settings().apiKey, signature: sign(params, settings().apiSecret) });
 const createUploadIntent = (storageKey) => {

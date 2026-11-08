@@ -1,21 +1,20 @@
 const prisma = require('../config/prisma');
 const { ApiError } = require('../utils');
-const { httpStatus, messages } = require('../constants');
-
-const OPEN_SEASON_STATUSES = ['PLANNING', 'ACTIVE'];
-const MAX_VOLUME_M3 = 999999999999.99;
+const { httpStatus, messages, POND_STATUS, POND_LIMITS, OPEN_SEASON_STATUSES } = require('../constants');
 
 const normalizePondNameKey = (name) => name.replace(/\s+/gu, '').toLocaleLowerCase('vi');
 
+/** Round capacity to the database's two decimal places before comparing volumes. */
 const calculateVolumeM3 = (areaM2, depthM) => {
     if (areaM2 == null || depthM == null) return null;
     const volumeM3 = Math.round(Number(areaM2) * Number(depthM) * 100) / 100;
-    if (volumeM3 > MAX_VOLUME_M3) {
+    if (volumeM3 > POND_LIMITS.VOLUME_M3) {
         throw new ApiError(httpStatus.BAD_REQUEST, messages.POND.VOLUME_OUT_OF_RANGE);
     }
     return volumeM3;
 };
 
+/** Omitted usable volume defaults to capacity; an explicit value cannot exceed it. */
 const resolveVolumeM3 = (areaM2, depthM, suppliedVolumeM3) => {
     const calculatedVolumeM3 = calculateVolumeM3(areaM2, depthM);
     if (suppliedVolumeM3 === undefined) return calculatedVolumeM3;
@@ -39,10 +38,12 @@ const POND_SELECT = {
     updatedAt: true,
 };
 
+// A current season represents occupancy, independently of AVAILABLE/MAINTENANCE.
+// History is fetched separately through the season endpoints.
 const POND_DETAIL_SELECT = {
     ...POND_SELECT,
     farm: {
-        select: { id: true, name: true },
+        select: { id: true, name: true, status: true },
     },
     seasons: {
         where: { status: { in: OPEN_SEASON_STATUSES } },
@@ -52,6 +53,7 @@ const POND_DETAIL_SELECT = {
     },
 };
 
+// Prisma Decimal values must be JSON numbers, while missing dimensions stay null.
 const normalizePond = (pond) => ({
     ...pond,
     areaM2: pond.areaM2 == null ? null : Number(pond.areaM2),
@@ -64,6 +66,7 @@ const normalizePondDetail = ({ seasons = [], ...pond }) => ({
     currentSeason: seasons[0] || null,
 });
 
+/** Use the same 404 for missing and foreign farms without disclosing ownership. */
 const requireOwnedFarm = async (client, farmId, ownerId) => {
     const farm = await client.farm.findFirst({
         where: { id: farmId, ownerId },
@@ -73,6 +76,7 @@ const requireOwnedFarm = async (client, farmId, ownerId) => {
     return farm;
 };
 
+/** Ignore whitespace/case, and exclude the current pond when checking a rename. */
 const requireUniquePondName = async (client, farmId, name, excludedPondId) => {
     const ponds = await client.pond.findMany({
         where: {
@@ -100,6 +104,7 @@ const getPonds = async (farmId, ownerId, query) => {
         ...(status && { status }),
         ...(type && { type }),
     };
+    // Reuse the filters for both queries so pagination describes the returned set.
     const [ponds, totalResults] = await Promise.all([
         prisma.pond.findMany({
             where,
@@ -122,6 +127,7 @@ const getPonds = async (farmId, ownerId, query) => {
     };
 };
 
+/** Keep pond ID, parent farm and authenticated owner in the same query scope. */
 const findOwnedPond = async (client, farmId, pondId, ownerId, select) => {
     const pond = await client.pond.findFirst({
         where: { id: pondId, farmId, farm: { ownerId } },
@@ -140,6 +146,7 @@ const getPond = async (farmId, pondId, ownerId) => {
     return normalizePondDetail(pond);
 };
 
+/** Translate expected database conflicts; preserve unexpected failures for logging. */
 const mapWriteError = (error) => {
     if (error instanceof ApiError) throw error;
     if (error.code === 'P2002') {
@@ -182,9 +189,35 @@ const createPond = async (farmId, pondData, ownerId) => {
     }
 };
 
+/** Keep dimensions immutable and validate volume against the stored capacity. */
+const buildPondUpdate = (current, changes) => {
+    if (Object.hasOwn(changes, 'areaM2') || Object.hasOwn(changes, 'depthM')) {
+        throw new ApiError(httpStatus.BAD_REQUEST, messages.POND.DIMENSIONS_IMMUTABLE);
+    }
+    const data = { ...changes };
+    if (Object.hasOwn(changes, 'volumeM3')) {
+        data.volumeM3 = resolveVolumeM3(
+            current.areaM2,
+            current.depthM,
+            changes.volumeM3,
+        );
+    }
+    return data;
+};
+
+/** An open season protects pond type and prevents entering maintenance. */
+const assertOpenSeasonAllowsUpdate = (current, changes) => {
+    if (current.seasons.length === 0) return;
+    const changesType = changes.type !== undefined && changes.type !== current.type;
+    const entersMaintenance = changes.status === POND_STATUS.MAINTENANCE
+        && current.status !== POND_STATUS.MAINTENANCE;
+    if (changesType || entersMaintenance) {
+        throw new ApiError(httpStatus.CONFLICT, messages.POND.OPEN_SEASON_RESTRICTS_UPDATE);
+    }
+};
+
 /**
- * Update an owned pond and recalculate volume when dimensions change.
- * An open season prevents changes to pond type, volume or inactive status.
+ * Update an owned pond; open seasons protect type and readiness while allowing volume changes.
  * Ownership, name uniqueness and updates share a serializable transaction.
  */
 const updatePond = async (farmId, pondId, pondData, ownerId) => {
@@ -196,48 +229,18 @@ const updatePond = async (farmId, pondId, pondData, ownerId) => {
                 farmId,
                 pondId,
                 ownerId,
-                { ...POND_SELECT, seasons: {
-                    where: { status: { in: OPEN_SEASON_STATUSES } },
-                    select: { id: true },
-                    take: 1,
-                } },
+                POND_DETAIL_SELECT,
             );
             if (pondData.name !== undefined) {
                 await requireUniquePondName(transaction, farmId, pondData.name, pondId);
             }
-            const nextAreaM2 = Object.hasOwn(pondData, 'areaM2')
-                ? pondData.areaM2
-                : current.areaM2;
-            const nextDepthM = Object.hasOwn(pondData, 'depthM')
-                ? pondData.depthM
-                : current.depthM;
-            const resolvesVolume = Object.hasOwn(pondData, 'areaM2')
-                || Object.hasOwn(pondData, 'depthM')
-                || Object.hasOwn(pondData, 'volumeM3');
-            const updateData = {
-                ...pondData,
-                ...(resolvesVolume && {
-                    volumeM3: resolveVolumeM3(
-                        nextAreaM2,
-                        nextDepthM,
-                        pondData.volumeM3,
-                    ),
-                }),
-            };
-            const hasOpenSeason = current.seasons.length > 0;
-            const changesProtectedType = pondData.type !== undefined
-                && pondData.type !== current.type;
-            const changesToInactive = pondData.status === 'INACTIVE'
-                && current.status !== 'INACTIVE';
-            const changesVolume = resolvesVolume
-                && Number(updateData.volumeM3) !== Number(current.volumeM3);
-            if (hasOpenSeason && (changesProtectedType || changesToInactive || changesVolume)) {
-                throw new ApiError(httpStatus.CONFLICT, messages.POND.OPEN_SEASON_RESTRICTS_UPDATE);
-            }
+            const updateData = buildPondUpdate(current, pondData);
+            assertOpenSeasonAllowsUpdate(current, updateData);
             const result = await transaction.pond.updateMany({
                 where: { id: pondId, farmId },
                 data: updateData,
             });
+            // Never report success if the guarded write did not affect one pond.
             if (result.count !== 1) {
                 throw new ApiError(httpStatus.CONFLICT, messages.POND.CHANGE_CONFLICT);
             }
@@ -271,6 +274,8 @@ const deletePond = async (farmId, pondId, ownerId) => {
             if (openSeasonCount > 0) {
                 throw new ApiError(httpStatus.CONFLICT, messages.POND.HAS_OPEN_SEASON);
             }
+            // Completed/cancelled season history can still block this physical
+            // deletion through RESTRICT; mapWriteError reports that as a conflict.
             const result = await transaction.pond.deleteMany({
                 where: { id: pondId, farmId },
             });
