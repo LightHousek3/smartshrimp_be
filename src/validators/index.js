@@ -10,6 +10,7 @@ const seasonValidator = require('./season.validator');
 const assignedSeasonValidator = require('./assignedSeason.validator');
 const expertDashboardValidator = require('./expertDashboard.validator');
 const ownerDashboardValidator = require('./ownerDashboard.validator');
+const technicianDashboardValidator = require('./technicianDashboard.validator');
 const expertSeasonValidator = require('./expertSeason.validator');
 const expertProductionProtocolValidator = require('./expertProductionProtocol.validator');
 const expertProtocolTemplateValidator = require('./expertProtocolTemplate.validator');
@@ -44,6 +45,7 @@ module.exports = {
     assignedSeasonValidator,
     expertDashboardValidator,
     ownerDashboardValidator,
+    technicianDashboardValidator,
     expertSeasonValidator,
     expertProductionProtocolValidator,
     expertProtocolTemplateValidator,

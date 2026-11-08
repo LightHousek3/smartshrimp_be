@@ -220,7 +220,7 @@ const PRODUCTION_PROTOCOL_WRITABLE_SEASONS = [SEASON_STATUS.PLANNING, SEASON_STA
 const PRODUCTION_PROTOCOL_UNITS = ['KG', 'G', 'L', 'ML', 'PACK', 'BOTTLE', 'PCS'];
 const PRODUCTION_PROTOCOL_CATEGORIES = ['FEED', 'MEDICINE', 'MINERAL', 'CHEMICAL', 'OTHER'];
 const PRODUCTION_PROTOCOL_LIMITS = Object.freeze({ stages: 120, items: 1000, workerBatch: 20,
-    materialOptions: 50, biomassMaxAgeHours: 24, structureVersion: 1, maxDoc: 2147483647 });
+    materialOptions: 50, biomassMaxAgeHours: 168, structureVersion: 1, maxDoc: 2147483647 });
 
 const allowedProductionProtocolDoseBases = (operationType, offset) => {
     if ([OPERATION_TYPE.FEEDING, OPERATION_TYPE.MEDICINE].includes(operationType)) {
@@ -384,6 +384,7 @@ const checkWaterThresholds = (shrimpType, values = {}) => {
 };
 
 module.exports = {
+    ...require('./technicianDashboard'),
     ...require('./aiDiagnosis'),
     FARM_STATUS,
     HARVEST_POLICY,
