@@ -56,10 +56,10 @@ const formatSchedule = (s) => {
 };
 
 /**
- * UC-09: Xem danh sách kế hoạch vận hành
+ * List operation schedules for an assigned technician across a rolling 3-day calendar window.
+ * Enforces technician assignment to an active season and returns contextual progress summaries.
  */
 const listSchedules = async (technicianId, seasonId, query = {}) => {
-    // 1. Verify active technician assignment
     const assignment = await prisma.seasonPersonnelAssignment.findFirst({
         where: {
             seasonId,
@@ -72,7 +72,6 @@ const listSchedules = async (technicianId, seasonId, query = {}) => {
         throw ApiError.forbidden(messages.OPERATION.NOT_ASSIGNED_TECHNICIAN);
     }
 
-    // 2. Verify season existence
     const season = await prisma.aquacultureSeason.findUnique({
         where: { id: seasonId },
         select: {
@@ -110,14 +109,12 @@ const listSchedules = async (technicianId, seasonId, query = {}) => {
         ? messages.PRODUCTION_PROTOCOL.BIOMASS_WARNING
         : null;
 
-    // 4. Overall stats summary for top tabs / header
     const [plannedCount, completedCount, cancelledCount] = await Promise.all([
         prisma.operationSchedule.count({ where: { seasonId, status: OPERATION_STATUS.PLANNED } }),
         prisma.operationSchedule.count({ where: { seasonId, status: OPERATION_STATUS.COMPLETED } }),
         prisma.operationSchedule.count({ where: { seasonId, status: OPERATION_STATUS.CANCELLED } }),
     ]);
 
-    // 5. Build filter
     const where = {
         seasonId,
         ...(query.status && { status: query.status }),
@@ -236,7 +233,7 @@ const listSchedules = async (technicianId, seasonId, query = {}) => {
 };
 
 /**
- * UC-10: Xem chi tiết kế hoạch vận hành
+ * Retrieve schedule details with calculation inputs, product compliance, and execution status.
  */
 const getSchedule = async (technicianId, scheduleId) => {
     const schedule = await prisma.operationSchedule.findUnique({
@@ -338,7 +335,8 @@ const getSchedule = async (technicianId, scheduleId) => {
 };
 
 /**
- * UC-11: Ghi nhận thực hiện hoạt động
+ * Execute a planned schedule atomically with inventory stock deduction and variance validation.
+ * Deducts inventory using FEFO lot ordering under a serializable transaction.
  */
 const executeSchedule = async (technicianId, scheduleId, payload) => {
     const pointer = await prisma.operationSchedule.findUnique({ where: { id: scheduleId }, select: { seasonId: true } });
@@ -509,10 +507,9 @@ const executeSchedule = async (technicianId, scheduleId, payload) => {
 };
 
 /**
- * UC-12: Xem thống kê vận hành
+ * Aggregate operational progress and compliance metrics by category and schedule status.
  */
 const getSeasonStats = async (technicianId, seasonId) => {
-    // 1. Verify technician assignment
     const assignment = await prisma.seasonPersonnelAssignment.findFirst({
         where: {
             seasonId,

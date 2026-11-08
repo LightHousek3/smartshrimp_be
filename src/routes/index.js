@@ -1,5 +1,6 @@
 const express = require('express');
 const authRoute = require('./auth.route');
+const adminDashboardRoute = require('./adminDashboard.route');
 const adminAccountRoute = require('./adminAccount.route');
 const adminRagDocumentRoute = require('./adminRagDocument.route');
 const profileRoute = require('./profile.route');
@@ -35,6 +36,7 @@ const routes = [
     { path: '/owner/protocols', route: protocolRoute },
     { path: '/me/rag', route: ragRoute },
     { path: '/auth', route: authRoute },
+    { path: '/admin/dashboard', route: adminDashboardRoute },
     { path: '/admin/accounts', route: adminAccountRoute },
     { path: '/admin/inventory', route: adminInventoryRoute },
     { path: '/admin/rag/documents', route: adminRagDocumentRoute },

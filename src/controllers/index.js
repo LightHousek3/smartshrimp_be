@@ -1,4 +1,5 @@
 const expertDiseaseCaseController = require('./expertDiseaseCase.controller');
+const adminDashboardController = require('./adminDashboard.controller');
 const authController = require('./auth.controller');
 const adminAccountController = require('./adminAccount.controller');
 const profileController = require('./profile.controller');
@@ -55,4 +56,5 @@ module.exports = {
     taskController,
     harvestController,
     expertDiseaseCaseController,
+    adminDashboardController,
 };

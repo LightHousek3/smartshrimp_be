@@ -1,3 +1,10 @@
+const SEVERITY_WEIGHT = {
+    CRITICAL: 4,
+    HIGH: 3,
+    MEDIUM: 2,
+    LOW: 1,
+};
+
 const prisma = require('../config/prisma');
 const { ApiError } = require('../utils');
 const {
@@ -94,7 +101,7 @@ const list = async (expertId, query = {}) => {
             : {}),
     };
 
-    // F07: Handle multiple severities or array
+    // Normalize multiple severity filter options or comma-separated criteria.
     if (query.severity) {
         const sevs = Array.isArray(query.severity)
             ? query.severity
@@ -104,7 +111,7 @@ const list = async (expertId, query = {}) => {
         where.severity = sevs.length === 1 ? sevs[0] : { in: sevs };
     }
 
-    // F07: Filter "Needs response" directly before pagination
+    // Restrict to unresolved cases awaiting expert feedback before pagination.
     if (query.needsResponse === true || query.needsResponse === 'true' || query.status === 'action') {
         const matchingCases = await prisma.$queryRaw`
             SELECT c.id FROM disease_cases c
@@ -124,7 +131,7 @@ const list = async (expertId, query = {}) => {
         where.id = { in: ids };
     }
 
-    // F08: Sort entire table by severity priority and updatedAt before pagination
+    // Prioritize clinical urgency by severity rank before ordering by recency.
     const [total, rawCases] = await Promise.all([
         prisma.diseaseCase.count({ where }),
         prisma.diseaseCase.findMany({
@@ -202,6 +209,8 @@ const list = async (expertId, query = {}) => {
             reporter: c.reporter,
         };
     });
+    items.sort((a, b) => ((SEVERITY_WEIGHT[b.severity] || 0) - (SEVERITY_WEIGHT[a.severity] || 0)) || (new Date(b.updatedAt) - new Date(a.updatedAt)));
+
 
     return {
         data: items,
@@ -394,6 +403,7 @@ const detail = async (expertId, caseId) => {
                 metrics: {
                     totalSchedules,
                     completedCount,
+                    plannedCount: Math.max(0, totalSchedules - completedCount - cancelledCount),
                     cancelledCount,
                     progressPct: totalSchedules > 0
                         ? Math.round((completedCount / totalSchedules) * 100)
@@ -458,7 +468,7 @@ const respond = async (expertId, caseId, data) => {
     const pendingNotifications = [];
 
     const result = await prisma.$transaction(async (tx) => {
-        // F05: Read and validate inside transaction
+        // Verify ownership and lifecycle validity within the transaction.
         const diseaseCase = await tx.diseaseCase.findUnique({
             where: { id: caseId },
             include: {
@@ -482,7 +492,7 @@ const respond = async (expertId, caseId, data) => {
             throw ApiError.badRequest(messages.DISEASE_CASE.ALREADY_RESOLVED);
         }
 
-        // F09: State machine alignment
+        // Align case lifecycle with response intent while preserving active treatments.
         const isRequestInfo = data.responseType === 'REQUEST_INFO';
         const isInstruction = data.responseType === 'EXPERT_INSTRUCTION';
         const isMonitoring = isInstruction && data.switchToMonitoring === true;
@@ -500,7 +510,7 @@ const respond = async (expertId, caseId, data) => {
             }
         }
 
-        // F05: Atomic conditional update
+        // Atomic conditional state transition guarded by expected current status.
         if (nextStatus) {
             const updateCount = await tx.diseaseCase.updateMany({
                 where: { id: caseId, expertId, status: diseaseCase.status },
@@ -578,7 +588,7 @@ const respond = async (expertId, caseId, data) => {
                         referenceId: caseId,
                     },
                 });
-                // F10: Collect notification to emit AFTER commit
+                // Buffer notifications for dispatch only after the transaction successfully commits.
                 pendingNotifications.push({ recipientId, event: 'notification:new', payload: notif });
             }
         }
@@ -586,7 +596,7 @@ const respond = async (expertId, caseId, data) => {
         return newResponse;
     });
 
-    // F10: Emit notifications after transaction is successfully committed
+    // Dispatch buffered notifications outside the database transaction.
     for (const item of pendingNotifications) {
         try {
             emitNotification(item.recipientId, item.event, item.payload);
@@ -611,7 +621,7 @@ const resolve = async (expertId, caseId, data) => {
     const pendingNotifications = [];
 
     const result = await prisma.$transaction(async (tx) => {
-        // F05: Read and validate inside transaction
+        // Verify ownership and lifecycle validity within the transaction.
         const diseaseCase = await tx.diseaseCase.findUnique({
             where: { id: caseId },
             include: {
@@ -635,7 +645,7 @@ const resolve = async (expertId, caseId, data) => {
             throw ApiError.badRequest(messages.DISEASE_CASE.ALREADY_RESOLVED);
         }
 
-        // F04: Check active linked protocols before resolving
+        // Resolve requires all linked treatment schedules to be completed or stopped.
         const activeProtocols = await tx.protocol.findMany({
             where: {
                 diseaseCaseId: caseId,
@@ -665,7 +675,7 @@ const resolve = async (expertId, caseId, data) => {
             }
         }
 
-        // F05: Atomic conditional update
+        // Atomic conditional state transition guarded by expected current status.
         const updateCount = await tx.diseaseCase.updateMany({
             where: { id: caseId, expertId, status: { not: 'RESOLVED' } },
             data: {
@@ -692,7 +702,7 @@ const resolve = async (expertId, caseId, data) => {
             },
         });
 
-        // F06: Store raw summary directly (responseType=RESOLUTION identifies type, avoiding >500 overflow)
+        // Persist the resolution summary in the case response thread.
         await tx.diseaseCaseResponse.create({
             data: {
                 caseId,
@@ -719,15 +729,22 @@ const resolve = async (expertId, caseId, data) => {
                         referenceId: caseId,
                     },
                 });
-                // F10: Collect notification to emit AFTER commit
+                // Buffer notifications for dispatch only after the transaction successfully commits.
                 pendingNotifications.push({ recipientId, event: 'notification:new', payload: notif });
             }
         }
 
-        return tx.diseaseCase.findUnique({ where: { id: caseId } });
+        return {
+            ...diseaseCase,
+            status: 'RESOLVED',
+            resolutionSummary: summary,
+            resolvedBy: expertId,
+            resolvedAt: now,
+            updatedAt: now,
+        };
     });
 
-    // F10: Emit notifications after commit
+    // Dispatch buffered notifications outside the database transaction.
     for (const item of pendingNotifications) {
         try {
             emitNotification(item.recipientId, item.event, item.payload);
@@ -748,7 +765,7 @@ const abortProtocol = async (expertId, caseId, protocolId, data) => {
     const pendingNotifications = [];
 
     const result = await prisma.$transaction(async (tx) => {
-        // F05: Read and validate inside transaction
+        // Verify ownership and lifecycle validity within the transaction.
         const diseaseCase = await tx.diseaseCase.findUnique({
             where: { id: caseId },
             include: {
@@ -783,7 +800,7 @@ const abortProtocol = async (expertId, caseId, protocolId, data) => {
 
         const itemIds = protocol.items.map((i) => i.id);
 
-        // F05: Atomic update protocol to ABORTED
+        // Atomic protocol transition to ABORTED with mandatory clinical rationale.
         const updateProtocolCount = await tx.protocol.updateMany({
             where: { id: protocolId, diseaseCaseId: caseId, status: PROTOCOL_STATUS.APPROVED },
             data: {
@@ -811,7 +828,7 @@ const abortProtocol = async (expertId, caseId, protocolId, data) => {
             },
         });
 
-        // F01 & F06: Cancel future PLANNED schedules with cancellationType and <=500 chars reason
+        // Cancel remaining unexecuted PLANNED treatment schedules.
         const cancelResult = await tx.operationSchedule.updateMany({
             where: {
                 protocolItemId: { in: itemIds },
@@ -849,7 +866,7 @@ const abortProtocol = async (expertId, caseId, protocolId, data) => {
             });
         }
 
-        // F06: Append emergency alert response with message <= 500 chars
+        // Record emergency response event to document early protocol termination.
         await tx.diseaseCaseResponse.create({
             data: {
                 caseId,
@@ -877,7 +894,7 @@ const abortProtocol = async (expertId, caseId, protocolId, data) => {
                         referenceId: caseId,
                     },
                 });
-                // F10: Collect notification to emit AFTER commit
+                // Buffer notifications for dispatch only after the transaction successfully commits.
                 pendingNotifications.push({ recipientId, event: 'notification:new', payload: notif });
             }
         }
@@ -889,7 +906,7 @@ const abortProtocol = async (expertId, caseId, protocolId, data) => {
         };
     });
 
-    // F10: Emit notifications after commit
+    // Dispatch buffered notifications outside the database transaction.
     for (const item of pendingNotifications) {
         try {
             emitNotification(item.recipientId, item.event, item.payload);
