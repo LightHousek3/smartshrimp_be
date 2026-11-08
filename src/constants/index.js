@@ -8,7 +8,20 @@ const {
     PondType: POND_TYPE,
     SeasonStatus: SEASON_STATUS,
     AccountRole: ACCOUNT_ROLE,
+    AccountStatus: ACCOUNT_STATUS,
+    PersonnelRole: PERSONNEL_ROLE,
+    ShrimpType: SHRIMP_TYPE,
+    HealthStatus: HEALTH_STATUS,
 } = require('@prisma/client');
+
+// Shared by the technician list validator and service; keep cursor bounds at the boundary.
+const ASSIGNED_SEASON_LIMITS = Object.freeze({
+    MIN_PAGE_SIZE: 10,
+    DEFAULT_PAGE_SIZE: 20,
+    MAX_PAGE_SIZE: 50,
+    SEARCH_LENGTH: 255,
+    CURSOR_LENGTH: 1000,
+});
 const HARVEST_ERROR_CODE = Object.freeze({
     TIME_NOT_AFTER_LATEST: 'HARVEST_TIME_NOT_AFTER_LATEST',
     PARTIAL_COUNT_REQUIRED: 'HARVEST_PARTIAL_COUNT_REQUIRED',
@@ -55,24 +68,9 @@ const ALERT_KIND = Object.freeze({
     MONITORING: 'MONITORING',
 });
 
-/**
- * Enums matching the database schema
- */
-const ACCOUNT_STATUS = {
-    PENDING_ACTIVATION: 'PENDING_ACTIVATION',
-    ACTIVE: 'ACTIVE',
-    INACTIVE: 'INACTIVE',
-    BLOCKED: 'BLOCKED',
-};
-
 const VERIFICATION_PURPOSE = {
     ACCOUNT_ACTIVATION: 'ACCOUNT_ACTIVATION',
     PASSWORD_RESET: 'PASSWORD_RESET',
-};
-
-const SHRIMP_TYPE = {
-    WHITELEG: 'WHITELEG',
-    BLACK_TIGER: 'BLACK_TIGER',
 };
 
 // Measurement limits match the precision/scale of the pond database columns.
@@ -100,18 +98,6 @@ const TASK_LIMITS = Object.freeze({
     DESCRIPTION: 500,
     CANCELLATION_REASON: 500,
     DEADLINE_LEAD_MS: 10 * 60 * 1000,
-});
-
-const PERSONNEL_ROLE = {
-    TECHNICIAN: 'TECHNICIAN',
-    EXPERT: 'EXPERT',
-};
-
-const HEALTH_STATUS = Object.freeze({
-    EXCELLENT: 'EXCELLENT',
-    GOOD: 'GOOD',
-    WARNING: 'WARNING',
-    CRITICAL: 'CRITICAL',
 });
 
 const OPERATION_TYPE = {
@@ -418,6 +404,7 @@ module.exports = {
     httpStatus,
     messages,
     ACCOUNT_ROLE,
+    ASSIGNED_SEASON_LIMITS,
     ACCOUNT_STATUS,
     VERIFICATION_PURPOSE,
     SHRIMP_TYPE,

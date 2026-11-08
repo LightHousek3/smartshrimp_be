@@ -24,4 +24,13 @@ const getAssignedSeason = asyncHandler(async (req, res) => {
     ResponseHandler.success(res, { message: messages.ASSIGNED_SEASON.FETCHED, data: season });
 });
 
-module.exports = { getAssignedSeasons, getAssignedSeason };
+/**
+ * GET /me/seasons/farms
+ */
+const getAssignedSeasonFarms = asyncHandler(async (req, res) => {
+    const farms = await assignedSeasonService.getAssignedSeasonFarms(req.account.id);
+    res.set('Cache-Control', 'private, no-store');
+    ResponseHandler.success(res, { message: messages.ASSIGNED_SEASON.FARMS_FETCHED, data: farms });
+});
+
+module.exports = { getAssignedSeasons, getAssignedSeason, getAssignedSeasonFarms };
