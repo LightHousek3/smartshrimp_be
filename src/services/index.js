@@ -11,6 +11,7 @@ const seasonService = require('./season.service');
 const assignedSeasonService = require('./assignedSeason.service');
 const expertDashboardService = require('./expertDashboard.service');
 const ownerDashboardService = require('./ownerDashboard.service');
+const technicianDashboardService = require('./technicianDashboard.service');
 const expertSeasonService = require('./expertSeason.service');
 const expertProductionProtocolService = require('./expertProductionProtocol.service');
 const productionScheduleWorker = require('./productionScheduleWorker');
@@ -54,6 +55,7 @@ module.exports = {
     assignedSeasonService,
     expertDashboardService,
     ownerDashboardService,
+    technicianDashboardService,
     expertSeasonService,
     expertProductionProtocolService,
     productionScheduleWorker,

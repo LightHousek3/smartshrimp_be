@@ -10,6 +10,7 @@ const seasonController = require('./season.controller');
 const assignedSeasonController = require('./assignedSeason.controller');
 const expertDashboardController = require('./expertDashboard.controller');
 const ownerDashboardController = require('./ownerDashboard.controller');
+const technicianDashboardController = require('./technicianDashboard.controller');
 const expertSeasonController = require('./expertSeason.controller');
 const expertProductionProtocolController = require('./expertProductionProtocol.controller');
 const expertProtocolTemplateController = require('./expertProtocolTemplate.controller');
@@ -44,6 +45,7 @@ module.exports = {
     assignedSeasonController,
     expertDashboardController,
     ownerDashboardController,
+    technicianDashboardController,
     expertSeasonController,
     expertProductionProtocolController,
     expertProtocolTemplateController,
