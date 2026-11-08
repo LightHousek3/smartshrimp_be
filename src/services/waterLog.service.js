@@ -27,7 +27,6 @@ const { emitNotification } = require('../realtime/notification.socket');
  */
 
 const RECORDED_AT_FUTURE_TOLERANCE_MS = WATER_RECORDED_AT_FUTURE_TOLERANCE_SECONDS * 1000;
-const STATISTICS_MAX_RANGE_DAYS = 90;
 const FARM_TZ_OFFSET_MS = 7 * 60 * 60 * 1000; // Asia/Saigon, không DST
 
 const METRIC_FIELDS = [
@@ -318,7 +317,7 @@ const createWaterLog = async (accountId, seasonId, payload, idempotencyKey) => {
     idempotencySet(key, { status: 'processing', fingerprint });
 
     try {
-        const { log, exceeded, ownerId, notificationId } = await prisma.$transaction(async (tx) => {
+        const { log, exceeded, notifications } = await prisma.$transaction(async (tx) => {
             // Final harvest holds this same aggregate lock until completion commits.
             // Re-read state and assignment after waiting; the earlier scope is only a fast rejection.
             await tx.$queryRaw`SELECT id FROM aquaculture_seasons WHERE id = ${seasonId}::uuid FOR UPDATE`;
@@ -335,33 +334,46 @@ const createWaterLog = async (accountId, seasonId, payload, idempotencyKey) => {
 
             // Use persisted NUMERIC values so the alert agrees with the response/statistics.
             const exceededParams = checkWaterThresholds(season.shrimpType, created);
-            let createdNotificationId = null;
+            const notifications = [];
             if (exceededParams.length > 0) {
-                // BR-NOTI-03: chủ trại nhận cảnh báo nước — cùng transaction với log.
-                const notification = await tx.notification.create({
-                    data: {
-                        accountId: season.pond.farm.ownerId,
-                        title: 'Cảnh báo chất lượng nước',
-                        content: buildThresholdAlertContent(season, exceededParams),
-                        type: NOTIFICATION_TYPE.WATER_THRESHOLD_EXCEEDED,
-                        referenceType: 'water_quality_log',
-                        referenceId: created.id,
-                    },
-                    select: { id: true },
+                // BR-74: alert the owner and current technician/expert atomically with the log.
+                const assignments = await tx.seasonPersonnelAssignment.findMany({
+                    where: { seasonId, unassignedAt: null },
+                    select: { role: true, accountId: true },
                 });
-                createdNotificationId = notification.id;
+                const recipients = new Set([season.pond.farm.ownerId]);
+                for (const assignment of assignments) {
+                    if (assignment.role === PERSONNEL_ROLE.TECHNICIAN
+                        || assignment.role === PERSONNEL_ROLE.EXPERT) {
+                        recipients.add(assignment.accountId);
+                    }
+                }
+                const content = buildThresholdAlertContent(season, exceededParams);
+                for (const recipientId of recipients) {
+                    const notification = await tx.notification.create({
+                        data: {
+                            accountId: recipientId,
+                            title: 'Cảnh báo chất lượng nước',
+                            content,
+                            type: NOTIFICATION_TYPE.WATER_THRESHOLD_EXCEEDED,
+                            referenceType: 'water_quality_log',
+                            referenceId: created.id,
+                        },
+                        select: { id: true },
+                    });
+                    notifications.push({ accountId: recipientId, notificationId: notification.id });
+                }
             }
             return {
                 log: created,
                 exceeded: exceededParams,
-                ownerId: season.pond.farm.ownerId,
-                notificationId: createdNotificationId,
+                notifications,
             };
         });
 
         // Emit socket SAU khi transaction đã commit (tránh báo tin chưa chắc chắn).
-        if (notificationId) {
-            emitNotification(ownerId, 'notification:new', { id: notificationId });
+        for (const notification of notifications) {
+            emitNotification(notification.accountId, 'notification:new', { id: notification.notificationId });
         }
 
         idempotencySet(key, { status: 'done', fingerprint, logId: log.id });
@@ -467,9 +479,19 @@ const listWaterLogs = async (accountId, seasonId, query = {}, scope = 'ktv') => 
     const nextCursor = hasNextPage
         ? encodeCursor({ recordedAt: logs[logs.length - 1].recordedAt, id: logs[logs.length - 1].id })
         : null;
+    // Resolve the original recorder, including replaced personnel, once per page.
+    const recorderIds = [...new Set(logs.map((log) => log.recordedBy).filter(Boolean))];
+    const recorders = recorderIds.length > 0 ? await prisma.account.findMany({
+        where: { id: { in: recorderIds } },
+        select: { id: true, fullName: true },
+    }) : [];
+    const recorderNames = new Map(recorders.map((account) => [account.id, account.fullName]));
 
     return {
-        logs: logs.map((log) => normalizeLog(log, season.shrimpType)),
+        logs: logs.map((log) => ({
+            ...normalizeLog(log, season.shrimpType),
+            recordedByName: recorderNames.get(log.recordedBy) ?? null,
+        })),
         meta: { totalResults, hasNextPage, nextCursor, ...(counts && { counts }) },
     };
 };
@@ -546,7 +568,7 @@ const bucketKeyOf = (date, granularity) => {
 
 /**
  * Aggregate valid water logs after resolving technician, expert or owner access.
- * Limit the date range to 90 days and group daily or weekly series in farm time
+ * Default to all recorded history through now and group daily or weekly series in farm time
  * (UTC+7). Voided logs are counted separately and excluded from measurements
  * and threshold exceedance rates.
  */
@@ -557,11 +579,11 @@ const getStatistics = async (accountId, seasonId, query = {}, scope = 'ktv') => 
     }
     const season = await resolver(accountId, seasonId);
 
-    const from = new Date(query.from);
-    const to = new Date(query.to);
+    const requestedFrom = query.from === undefined ? null : new Date(query.from);
+    const to = query.to === undefined ? new Date() : new Date(query.to);
     const granularity = query.granularity || 'day';
-    const rangeDays = (to.getTime() - from.getTime()) / 86400000;
-    if (!Number.isFinite(rangeDays) || rangeDays < 0 || rangeDays > STATISTICS_MAX_RANGE_DAYS) {
+    if (!Number.isFinite(to.getTime())
+        || (requestedFrom && (!Number.isFinite(requestedFrom.getTime()) || requestedFrom > to))) {
         throw ApiError.badRequest(messages.WATER_LOG.INVALID_DATE_RANGE);
     }
 
@@ -569,14 +591,18 @@ const getStatistics = async (accountId, seasonId, query = {}, scope = 'ktv') => 
         where: {
             seasonId,
             isVoided: false,
-            recordedAt: { gte: from, lte: to },
+            recordedAt: { ...(requestedFrom ? { gte: requestedFrom } : {}), lte: to },
         },
         orderBy: { recordedAt: 'asc' },
     });
+    // Reuse the sorted valid rows instead of querying the earliest reading separately.
+    const from = requestedFrom ?? rows[0]?.recordedAt ?? to;
 
     const summary = {};
     for (const field of METRIC_FIELDS) {
-        summary[field] = { count: 0, min: null, max: null, sum: 0, exceedCount: 0 };
+        summary[field] = {
+            count: 0, min: null, max: null, sum: 0, exceedCount: 0, belowMinCount: 0, aboveMaxCount: 0,
+        };
     }
     const buckets = new Map();
 
@@ -593,12 +619,13 @@ const getStatistics = async (accountId, seasonId, query = {}, scope = 'ktv') => 
                 s.max = s.max === null ? v : Math.max(s.max, v);
             }
         }
-        const exceeded = new Set(
-            checkWaterThresholds(season.shrimpType, values).map((e) => e.field),
-        );
-        for (const field of METRIC_FIELDS) {
-            if (values[field] !== null && exceeded.has(field)) {
-                summary[field].exceedCount += 1;
+        for (const exceeded of checkWaterThresholds(season.shrimpType, values)) {
+            const stat = summary[exceeded.field];
+            stat.exceedCount += 1;
+            if (exceeded.direction === 'below_min') {
+                stat.belowMinCount += 1;
+            } else if (exceeded.direction === 'above_max') {
+                stat.aboveMaxCount += 1;
             }
         }
 
@@ -631,7 +658,12 @@ const getStatistics = async (accountId, seasonId, query = {}, scope = 'ktv') => 
             min: s.min,
             max: s.max,
             avg: s.sum / s.count,
+            exceedCount: s.exceedCount,
             exceedanceRate: s.exceedCount / s.count,
+            belowMinCount: s.belowMinCount,
+            aboveMaxCount: s.aboveMaxCount,
+            belowMinRate: s.belowMinCount / s.count,
+            aboveMaxRate: s.aboveMaxCount / s.count,
         };
     }
 
