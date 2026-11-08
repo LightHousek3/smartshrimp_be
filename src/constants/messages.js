@@ -367,6 +367,7 @@ const messages = {
     },
 
     ASSIGNED_SEASON: {
+        FARMS_FETCHED: 'Lấy danh sách trại có vụ nuôi được phân công thành công',
         LIST_FETCHED: 'Lấy danh sách vụ nuôi được phân công thành công',
         FETCHED: 'Lấy chi tiết vụ nuôi được phân công thành công',
         NOT_FOUND: 'Không tìm thấy vụ nuôi được phân công',

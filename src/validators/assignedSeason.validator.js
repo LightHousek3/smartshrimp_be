@@ -1,5 +1,5 @@
 const Joi = require('joi');
-const { SEASON_STATUS } = require('../constants');
+const { SEASON_STATUS, ASSIGNED_SEASON_LIMITS } = require('../constants');
 
 /**
  * Bound list size and cursor length before querying current technician assignments.
@@ -8,10 +8,13 @@ const { SEASON_STATUS } = require('../constants');
 const getAssignedSeasons = {
     query: Joi.object().keys({
         status: Joi.string().uppercase().valid(...Object.values(SEASON_STATUS)),
-        search: Joi.string().trim().max(255).allow(''),
+        search: Joi.string().trim().max(ASSIGNED_SEASON_LIMITS.SEARCH_LENGTH).allow(''),
         farmId: Joi.string().uuid({ version: 'uuidv4' }),
-        limit: Joi.number().integer().min(10).max(50).default(20),
-        cursor: Joi.string().max(1000),
+        limit: Joi.number().integer()
+            .min(ASSIGNED_SEASON_LIMITS.MIN_PAGE_SIZE)
+            .max(ASSIGNED_SEASON_LIMITS.MAX_PAGE_SIZE)
+            .default(ASSIGNED_SEASON_LIMITS.DEFAULT_PAGE_SIZE),
+        cursor: Joi.string().max(ASSIGNED_SEASON_LIMITS.CURSOR_LENGTH),
     }),
 };
 
@@ -24,4 +27,6 @@ const getAssignedSeason = {
     }),
 };
 
-module.exports = { getAssignedSeasons, getAssignedSeason };
+const getAssignedSeasonFarms = { query: Joi.object().keys({}) };
+
+module.exports = { getAssignedSeasons, getAssignedSeason, getAssignedSeasonFarms };
