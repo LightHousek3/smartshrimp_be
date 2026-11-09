@@ -10,14 +10,9 @@ const {
 } = require('../constants');
 
 /**
- * Service cho nhật ký sức khỏe tôm (shrimp_health_logs).
- *
- * Business rules:
- * - BR-OPS-01: Chỉ KTV đang được phân công được ghi nhận / hủy nhật ký sức khỏe cho vụ ACTIVE.
- * - BR-HEALTH-01: Bản ghi sức khỏe là bất biến (immutable) sau khi tạo; sai sót chỉ được hủy
- *   (void) bởi KTV đương nhiệm kèm người hủy, thời gian và lý do hủy (void_reason).
- *   Chỉ bản ghi chưa hủy (is_voided = false) mới được đưa vào tính toán thống kê,
- *   tăng trưởng và làm căn cứ sinh lịch vận hành theo sinh khối.
+ * Manage immutable shrimp health observations, void lifecycle and growth projections.
+ * Only the currently assigned Technician of an ACTIVE season may record or void observations.
+ * Non-voided observations provide the authoritative biomass basis for rolling operational schedules.
  */
 
 const RECORDED_AT_FUTURE_TOLERANCE_MS = (WATER_RECORDED_AT_FUTURE_TOLERANCE_SECONDS || 300) * 1000;
@@ -46,9 +41,7 @@ const SEASON_WITH_FARM_SELECT = {
     },
 };
 
-// ---------------------------------------------------------------------------
-// Phạm vi truy cập (Scope resolvers)
-// ---------------------------------------------------------------------------
+// Scope resolvers ------------------------------------------------------------
 
 const findSeason = (seasonId) =>
     prisma.aquacultureSeason.findUnique({
@@ -103,9 +96,7 @@ const SCOPE_RESOLVERS = {
     owner: resolveOwnerScope,
 };
 
-// ---------------------------------------------------------------------------
-// Helpers chuyển đổi & chuẩn hóa
-// ---------------------------------------------------------------------------
+// Normalization and formatting helpers ----------------------------------------
 
 const toNumberOrNull = (value) =>
     value === null || value === undefined ? null : Number(value);
@@ -168,9 +159,7 @@ const fetchAccountMap = async (accountIds) => {
     return map;
 };
 
-// ---------------------------------------------------------------------------
-// Cursor Pagination
-// ---------------------------------------------------------------------------
+// Cursor condition ----------------------------------------------------------
 
 const encodeCursor = ({ recordedAt, id }) =>
     Buffer.from(
@@ -191,9 +180,7 @@ const decodeCursor = (cursor) => {
     }
 };
 
-// ---------------------------------------------------------------------------
-// Idempotency store (in-memory)
-// ---------------------------------------------------------------------------
+// In-memory idempotency store ------------------------------------------------
 
 const IDEMPOTENCY_TTL_MS = 10 * 60 * 1000;
 const idempotencyStore = new Map();
@@ -214,9 +201,7 @@ const idempotencySet = (key, value) => {
     idempotencyStore.set(key, { ...value, expiresAt: Date.now() + IDEMPOTENCY_TTL_MS });
 };
 
-// ---------------------------------------------------------------------------
-// UC 13: Ghi nhận sức khỏe tôm
-// ---------------------------------------------------------------------------
+/** Record a new quantitative shrimp health observation. */
 
 const createShrimpHealthLog = async (accountId, seasonId, data, idempotencyKey = '') => {
     const season = await resolveKtvScope(accountId, seasonId, { requireActiveSeason: true });
@@ -228,7 +213,7 @@ const createShrimpHealthLog = async (accountId, seasonId, data, idempotencyKey =
     if (recordedAt.getTime() > Date.now() + RECORDED_AT_FUTURE_TOLERANCE_MS) {
         throw ApiError.badRequest(messages.SHRIMP_HEALTH_LOG.RECORDED_AT_TOO_FAR_FUTURE);
     }
-    // BR-HEALTH: Chỉ cho phép ghi nhận quá khứ trong ngày hôm nay (farm timezone UTC+7)
+    // Observations cannot be backdated to previous calendar days in the farm timezone (UTC+7).
     const nowFarm = new Date(Date.now() + FARM_TZ_OFFSET_MS);
     const startOfTodayFarm = new Date(Date.UTC(
         nowFarm.getUTCFullYear(),
@@ -249,18 +234,18 @@ const createShrimpHealthLog = async (accountId, seasonId, data, idempotencyKey =
     const healthStatus = data.healthStatus || HEALTH_STATUS.GOOD;
     const note = (data.note || '').trim() || null;
 
-    // BR-HEALTH: Số lượng tôm ước tính không được vượt quá số giống thả ban đầu
+    // Estimated live population must not exceed the season initial stocking quantity.
     const initialQty = season.initialQuantity !== null && season.initialQuantity !== undefined ? Number(season.initialQuantity) : null;
     if (initialQty && initialQty > 0 && estimatedPopulation !== null && estimatedPopulation > initialQty) {
         throw ApiError.badRequest(`Ước tính đàn (${estimatedPopulation.toLocaleString('vi-VN')} con) không được vượt quá số lượng giống thả ban đầu (${initialQty.toLocaleString('vi-VN')} con)`);
     }
 
-    // Tự động tính sinh khối nếu có ước tính số lượng và trọng lượng TB mà chưa có sinh khối
+    // Infer biomass from population and mean body weight when an explicit weight is omitted.
     if (estimatedBiomassKg === null && estimatedPopulation !== null && avgWeightG !== null && estimatedPopulation > 0 && avgWeightG > 0) {
         estimatedBiomassKg = Math.round((estimatedPopulation * avgWeightG / 1000) * 1000) / 1000;
     }
 
-    // Idempotency check
+    // Reject concurrent submissions sharing the same in-flight idempotency key.
     const rawKey = (idempotencyKey || '').trim().slice(0, 128);
     const key = rawKey ? JSON.stringify([accountId, seasonId, rawKey]) : '';
     const fingerprint = JSON.stringify([
@@ -320,9 +305,7 @@ const createShrimpHealthLog = async (accountId, seasonId, data, idempotencyKey =
     }
 };
 
-// ---------------------------------------------------------------------------
-// UC 14: Xem danh sách ghi nhận sức khỏe
-// ---------------------------------------------------------------------------
+/** List paginated health observations for the assigned season. */
 
 const listShrimpHealthLogs = async (accountId, seasonId, query = {}, scope = 'ktv') => {
     const resolver = SCOPE_RESOLVERS[scope];
@@ -333,19 +316,19 @@ const listShrimpHealthLogs = async (accountId, seasonId, query = {}, scope = 'kt
 
     const where = { seasonId };
 
-    // Filter theo ngày
+    // Date range boundaries
     if (query.from || query.to) {
         where.recordedAt = {};
         if (query.from) where.recordedAt.gte = new Date(query.from);
         if (query.to) where.recordedAt.lte = new Date(query.to);
     }
 
-    // Filter theo trạng thái sức khỏe
+    // Health status filter
     if (query.healthStatus) {
         where.healthStatus = query.healthStatus;
     }
 
-    // Filter theo hợp lệ / đã hủy
+    // Validity filter
     const filter = query.filter || (query.includeVoided ? 'all' : 'valid');
     if (filter === 'valid') {
         where.isVoided = false;
@@ -378,7 +361,7 @@ const listShrimpHealthLogs = async (accountId, seasonId, query = {}, scope = 'kt
     const hasNext = rows.length > limit;
     const pageRows = hasNext ? rows.slice(0, limit) : rows;
 
-    // Thu thập IDs để lấy thông tin tài khoản (recordedBy, voidedBy)
+    // Resolve actor profile snapshots for distinct author IDs
     const accountIds = [];
     for (const r of pageRows) {
         accountIds.push(r.recordedBy);
@@ -419,9 +402,7 @@ const listShrimpHealthLogs = async (accountId, seasonId, query = {}, scope = 'kt
     };
 };
 
-// ---------------------------------------------------------------------------
-// UC 15: Xem chi tiết ghi nhận sức khỏe
-// ---------------------------------------------------------------------------
+/** Retrieve single health observation detail with actor metadata. */
 
 const getShrimpHealthLogDetail = async (accountId, seasonId, logId, scope = 'ktv') => {
     const resolver = SCOPE_RESOLVERS[scope];
@@ -441,9 +422,7 @@ const getShrimpHealthLogDetail = async (accountId, seasonId, logId, scope = 'ktv
     return normalizeLog(log, season.stockingDate, accountMap);
 };
 
-// ---------------------------------------------------------------------------
-// UC 16: Hủy ghi nhận sức khỏe tôm
-// ---------------------------------------------------------------------------
+/** Void an erroneous health observation and recalculate dependent schedules. */
 
 const voidShrimpHealthLog = async (accountId, seasonId, logId, { voidReason }) => {
     if (!voidReason || !voidReason.trim()) {
@@ -452,7 +431,7 @@ const voidShrimpHealthLog = async (accountId, seasonId, logId, { voidReason }) =
 
     const season = await resolveKtvScope(accountId, seasonId);
 
-    // BR-HEALTH: Chỉ được hủy hiệu lực bản ghi trong ngày hôm nay (farm timezone UTC+7)
+    // Voiding is restricted to observations recorded on the current calendar day in the farm timezone (UTC+7).
     const nowFarm = new Date(Date.now() + FARM_TZ_OFFSET_MS);
     const startOfTodayFarm = new Date(Date.UTC(
         nowFarm.getUTCFullYear(),
@@ -492,16 +471,20 @@ const voidShrimpHealthLog = async (accountId, seasonId, logId, { voidReason }) =
             data: { status: OPERATION_STATUS.CANCELLED, cancelledAt: voidedAt, cancelledBy: accountId,
                 cancellationReason: messages.PRODUCTION_PROTOCOL.BIOMASS_SOURCE_VOIDED },
         });
-        return tx.shrimpHealthLog.findFirst({ where: { id: logId, seasonId } });
+        return {
+            ...log,
+            isVoided: true,
+            voidedBy: accountId,
+            voidedAt,
+            voidReason: voidReason.trim(),
+        };
     });
 
     const accountMap = await fetchAccountMap([updated.recordedBy, updated.voidedBy]);
     return normalizeLog(updated, season.stockingDate, accountMap);
 };
 
-// ---------------------------------------------------------------------------
-// UC 17: Xem thống kê sức khỏe và tăng trưởng
-// ---------------------------------------------------------------------------
+/** Compute growth metrics, health status distribution and day-of-culture time series. */
 
 const bucketKeyOf = (date, granularity) => {
     const shifted = new Date(date.getTime() + FARM_TZ_OFFSET_MS);
@@ -531,7 +514,7 @@ const getStatistics = async (accountId, seasonId, query = {}, scope = 'ktv') => 
         throw ApiError.badRequest(messages.SHRIMP_HEALTH_LOG.INVALID_DATE_RANGE);
     }
 
-    // Chỉ lấy bản ghi hợp lệ (isVoided = false)
+    // Voided observations are strictly excluded from growth curves and statistical summaries.
     const rows = await prisma.shrimpHealthLog.findMany({
         where: {
             seasonId,
@@ -562,7 +545,7 @@ const getStatistics = async (accountId, seasonId, query = {}, scope = 'ktv') => 
         const dateKey = bucketKeyOf(r.recordedAt, granularity);
         const doc = calculateDoc(season.stockingDate, r.recordedAt);
 
-        // Mỗi lần đo là một điểm dữ liệu trên chuỗi tăng trưởng
+        // Map valid observation to discrete growth time series point
         growthSeries.push({
             date: dateKey,
             recordedAt: r.recordedAt.toISOString(),
@@ -576,7 +559,7 @@ const getStatistics = async (accountId, seasonId, query = {}, scope = 'ktv') => 
         });
     }
 
-    // Bản ghi hợp lệ gần nhất trong vụ để hiển thị thẻ tóm tắt
+    // Resolve latest valid observation for summary metrics card
     const latestValidLog = await prisma.shrimpHealthLog.findFirst({
         where: { seasonId, isVoided: false },
         orderBy: { recordedAt: 'desc' },

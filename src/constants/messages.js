@@ -654,6 +654,11 @@ const messages = {
         INVALID_IDEMPOTENCY_KEY: 'Mã idempotency_key không hợp lệ',
     },
 
+    // Admin dashboard
+    ADMIN_DASHBOARD: {
+        FETCHED: 'Lấy tổng quan hệ thống thành công',
+    },
+
     // Owner dashboard
     OWNER_DASHBOARD: {
         FETCHED: 'Lấy tổng quan vận hành thành công',

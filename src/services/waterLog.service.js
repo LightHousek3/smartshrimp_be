@@ -16,14 +16,9 @@ const {
 const { emitNotification } = require('../realtime/notification.socket');
 
 /**
- * Service cho nhật ký đo nước (water_quality_logs).
- *
- * Business rules (smartshrimp.sql):
- * - BR-OPS-01: chỉ KTV đang được phân công được ghi nhật ký cho vụ ACTIVE.
- * - BR-WATER-01: bản ghi bất biến sau khi tạo; sai chỉ được void bởi KTV
- *   đương nhiệm kèm người/thời gian/lý do.
- * - BR-ARCH-01: kiểm tra quyền + ghi notification trong transaction tường minh.
- * - BR-ARCH-03: không SELECT FOR UPDATE cho các read thông thường.
+ * Manage water quality observations, threshold exceedance alerts and void lifecycles.
+ * Measurements are recorded by assigned technicians and evaluated against species-specific warning limits.
+ * Threshold alert notifications commit within the measurement transaction and dispatch after commit.
  */
 
 const RECORDED_AT_FUTURE_TOLERANCE_MS = WATER_RECORDED_AT_FUTURE_TOLERANCE_SECONDS * 1000;
@@ -83,9 +78,7 @@ const SEASON_WITH_FARM_SELECT = {
     },
 };
 
-// ---------------------------------------------------------------------------
-// Phạm vi truy cập (scope)
-// ---------------------------------------------------------------------------
+// Scope resolution -----------------------------------------------------------
 
 const findSeason = (seasonId, client = prisma) =>
     client.aquacultureSeason.findUnique({
@@ -99,10 +92,7 @@ const hasActiveAssignment = (accountId, seasonId, role, client = prisma) =>
         select: { id: true },
     });
 
-/**
- * KTV: phải có assignment technician đang hiệu lực trên vụ.
- * requireActiveSeason=true cho các thao tác ghi (BR-OPS-01).
- */
+/** Resolve technician assignment and ensure the season is ACTIVE for mutation paths. */
 const resolveKtvScope = async (accountId, seasonId, { requireActiveSeason = false, client = prisma } = {}) => {
     const season = await findSeason(seasonId, client);
     if (!season) {
@@ -118,7 +108,7 @@ const resolveKtvScope = async (accountId, seasonId, { requireActiveSeason = fals
     return season;
 };
 
-/** Chuyên gia: assignment expert đang hiệu lực (chỉ đọc). */
+/** Resolve active expert assignment scope for read-only access. */
 const resolveExpertScope = async (accountId, seasonId) => {
     const season = await findSeason(seasonId);
     if (!season) {
@@ -131,7 +121,7 @@ const resolveExpertScope = async (accountId, seasonId) => {
     return season;
 };
 
-/** Chủ trại: vụ thuộc trại mình sở hữu (chỉ đọc). */
+/** Resolve farm ownership scope for read-only access. */
 const resolveOwnerScope = async (accountId, seasonId) => {
     const season = await findSeason(seasonId);
     if (
@@ -171,9 +161,7 @@ const getMetadata = async (accountId, seasonId, scope = 'ktv') => {
     };
 };
 
-// ---------------------------------------------------------------------------
-// Chuẩn hóa output
-// ---------------------------------------------------------------------------
+// Output normalization -------------------------------------------------------
 
 const toNumberOrNull = (value) =>
     value === null || value === undefined ? null : Number(value);
@@ -204,9 +192,7 @@ const normalizeLog = (log, shrimpType) => {
     };
 };
 
-// ---------------------------------------------------------------------------
-// Cursor pagination (cùng pattern với assignedSeason.service.js)
-// ---------------------------------------------------------------------------
+// Cursor pagination ----------------------------------------------------------
 
 const encodeCursor = ({ recordedAt, id }) =>
     Buffer.from(
@@ -227,12 +213,7 @@ const decodeCursor = (cursor) => {
     }
 };
 
-// ---------------------------------------------------------------------------
-// Idempotency cho POST create (D4) — best-effort trên single instance.
-// accountId + seasonId + key -> { status, fingerprint, logId, expiresAt }.
-// Triển khai đa instance nên thay bằng Redis; unique constraint
-// (season_id, recorded_at, recorded_by) ở DB là tuyến cuối cùng.
-// ---------------------------------------------------------------------------
+// In-memory idempotency store with database unique constraint as the final guard --
 
 const IDEMPOTENCY_TTL_MS = 10 * 60 * 1000;
 const idempotencyStore = new Map();
@@ -259,9 +240,7 @@ const idempotencySet = (key, entry) => {
     idempotencyStore.set(key, { ...entry, expiresAt: Date.now() + IDEMPOTENCY_TTL_MS });
 };
 
-// ---------------------------------------------------------------------------
-// F1 — Nhập nhật ký đo nước
-// ---------------------------------------------------------------------------
+
 
 const buildThresholdAlertContent = (season, exceeded) => {
     const parts = exceeded.map((e) => {
@@ -336,7 +315,7 @@ const createWaterLog = async (accountId, seasonId, payload, idempotencyKey) => {
             const exceededParams = checkWaterThresholds(season.shrimpType, created);
             const notifications = [];
             if (exceededParams.length > 0) {
-                // BR-74: alert the owner and current technician/expert atomically with the log.
+                // Alert the farm owner and active technician/expert atomically with the observation.
                 const assignments = await tx.seasonPersonnelAssignment.findMany({
                     where: { seasonId, unassignedAt: null },
                     select: { role: true, accountId: true },
@@ -371,7 +350,7 @@ const createWaterLog = async (accountId, seasonId, payload, idempotencyKey) => {
             };
         });
 
-        // Emit socket SAU khi transaction đã commit (tránh báo tin chưa chắc chắn).
+        // Dispatch real-time socket events only after the transaction has successfully committed.
         for (const notification of notifications) {
             emitNotification(notification.accountId, 'notification:new', { id: notification.notificationId });
         }
@@ -380,7 +359,7 @@ const createWaterLog = async (accountId, seasonId, payload, idempotencyKey) => {
         return { log: normalizeLog(log, season.shrimpType), duplicate: false, exceeded };
     } catch (error) {
         idempotencyStore.delete(key);
-        // Tuyến cuối chống double-submit: unique(season_id, recorded_at, recorded_by).
+        // Final guard against concurrent duplicate submissions: unique(season_id, recorded_at, recorded_by).
         if (error?.code === 'P2002') {
             throw ApiError.conflict(messages.WATER_LOG.DUPLICATE_LOG);
         }
@@ -392,9 +371,7 @@ const createWaterLog = async (accountId, seasonId, payload, idempotencyKey) => {
     }
 };
 
- // ---------------------------------------------------------------------------
-// F2 — Danh sách nhật ký đo nước
-// ---------------------------------------------------------------------------
+ 
 
 /**
  * List season water logs after resolving technician, expert or owner access.
@@ -496,9 +473,7 @@ const listWaterLogs = async (accountId, seasonId, query = {}, scope = 'ktv') => 
     };
 };
 
-// ---------------------------------------------------------------------------
-// F3 — Hủy hiệu lực nhật ký đo nước
-// ---------------------------------------------------------------------------
+
 
 /**
  * Void an existing log with an audit reason while the assigned season is active.
@@ -506,7 +481,7 @@ const listWaterLogs = async (accountId, seasonId, query = {}, scope = 'ktv') => 
  * unchanged, and a concurrent or repeated void is reported as a conflict.
  */
 const voidWaterLog = async (accountId, seasonId, logId, voidReason) => {
-    // BR-WATER-01: chỉ KTV đương nhiệm (assignment đang hiệu lực) được void.
+    // Only currently assigned technicians are authorized to void water observations.
     const season = await resolveKtvScope(accountId, seasonId);
 
     const log = await prisma.waterQualityLog.findFirst({
@@ -518,7 +493,7 @@ const voidWaterLog = async (accountId, seasonId, logId, voidReason) => {
     if (log.isVoided) {
         throw ApiError.conflict(messages.WATER_LOG.ALREADY_VOIDED);
     }
-    // D2: chỉ vụ ACTIVE mới được void (khóa sổ khi planning/completed/cancelled).
+    // Voiding is restricted to active seasons; completed or cancelled seasons remain locked.
     if (season.status !== SEASON_STATUS.ACTIVE) {
         throw ApiError.conflict(messages.WATER_LOG.VOID_FORBIDDEN_STATE);
     }
@@ -547,18 +522,16 @@ const voidWaterLog = async (accountId, seasonId, logId, voidReason) => {
     return normalizeLog(updated, season.shrimpType);
 };
 
-// ---------------------------------------------------------------------------
-// F4 — Thống kê chất lượng nước (chỉ bản ghi hợp lệ: is_voided = FALSE)
-// ---------------------------------------------------------------------------
+
 
 const bucketKeyOf = (date, granularity) => {
-    // Bucket theo giờ trại (Asia/Saigon, UTC+7, không DST).
+    // Calendar date bucketing follows farm local time (Asia/Ho_Chi_Minh, UTC+7).
     const shifted = new Date(date.getTime() + FARM_TZ_OFFSET_MS);
     const y = shifted.getUTCFullYear();
     const m = String(shifted.getUTCMonth() + 1).padStart(2, '0');
     const d = shifted.getUTCDate();
     if (granularity === 'week') {
-        // Đầu tuần = thứ Hai.
+        // Weekly grouping anchors to Monday as the start of the week.
         const dow = (shifted.getUTCDay() + 6) % 7;
         const monday = new Date(Date.UTC(y, shifted.getUTCMonth(), d - dow));
         return monday.toISOString().slice(0, 10);
@@ -708,7 +681,7 @@ module.exports = {
     listWaterLogs,
     voidWaterLog,
     getStatistics,
-    // export cho test
+    // Internal exports for test isolation
     _bucketKeyOf: bucketKeyOf,
     _checkWaterThresholds: checkWaterThresholds,
 };

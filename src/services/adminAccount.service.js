@@ -333,9 +333,17 @@ const findPendingActivationAccount = async (accountId) => {
     return account;
 };
 
+/**
+ * Reissue an activation invitation link for an account still awaiting activation.
+ * Enforces cooldown timers and revokes pending challenge tokens before resending.
+ */
 const resendActivation = async (accountId) =>
     sendActivationEmail(await findPendingActivationAccount(accountId));
 
+/**
+ * Correct the contact email address of an account in PENDING_ACTIVATION status.
+ * Reissues an updated invitation link and preserves unactivated challenge integrity.
+ */
 const updatePendingAccount = async (accountId, { email }) => {
     const account = await prisma.account.findUnique({
         where: { id: accountId },
@@ -436,6 +444,10 @@ const validateDeactivationEligibility = async (database, account) => {
     }
 };
 
+/**
+ * Transition an account status with mandatory audit logging and assignment deactivation validation.
+ * Deactivating an account revokes active refresh tokens and prevents access to managed farm resources.
+ */
 const updateAccountStatus = async (accountId, { status, reason }, adminId) =>
     prisma.$transaction(async (transaction) => {
         const account = await transaction.account.findUnique({
