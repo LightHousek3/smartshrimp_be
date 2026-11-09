@@ -2,10 +2,14 @@ const Joi = require('joi');
 const path = require('node:path');
 const { RAG_DOCUMENT_STATUS, RAG_DOCUMENT_CATEGORIES, RAG_DOCUMENT_EXTENSIONS, RAG_DOCUMENT_MAX_FILE_BYTES, messages } = require('../constants');
 const params = Joi.object({ id: Joi.string().uuid().required() });
+const category = Joi.string().trim().replace(/^khác$/, 'Khác').valid(...RAG_DOCUMENT_CATEGORIES);
+const requiredCategory = category.empty(Joi.valid('', null)).required().messages({
+    'any.required': messages.RAG_DOCUMENT.CATEGORY_REQUIRED,
+});
 const fields = {
     title: Joi.string().trim().min(1).max(255),
     description: Joi.string().trim().max(1000).allow('', null),
-    category: Joi.string().trim().replace(/^khác$/, 'Khác').valid(...RAG_DOCUMENT_CATEGORIES).allow('', null),
+    category: category.allow('', null),
 };
 const fileFields = {
     originalFilename: Joi.string().required().custom((name, helpers) => {
@@ -20,7 +24,7 @@ const fileFields = {
     fileHash: Joi.string().pattern(/^[a-f0-9]{64}$/).required(),
 };
 module.exports = {
-    createUploadIntent: { body: Joi.object({ ...fields, ...fileFields, title: fields.title.required() }) },
+    createUploadIntent: { body: Joi.object({ ...fields, ...fileFields, title: fields.title.required(), category: requiredCategory }) },
     createReuploadIntent: { params, body: Joi.object(fileFields) },
     completeUpload: { params, body: Joi.object({
         publicId: Joi.string().max(500).required(),
