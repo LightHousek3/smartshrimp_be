@@ -19,7 +19,6 @@ const checkHarvest = async (tx, seasonId, harvestedAt) => {
     const [state] = await tx.$queryRaw(Prisma.sql`SELECT
         coalesce(bool_or((e.withdrawal_days_snapshot IS NULL OR c.withdrawal_days IS NULL) AND
             (p.category = 'medicine' OR c.regulatory_type = 'medicine' OR s.operation_type = 'medicine')), false) AS unknown,
-        coalesce(bool_or(p.id IS NULL OR c.product_id IS NULL OR c.compliance_status <> 'reviewed'), false) AS unsafe,
         coalesce(bool_or(${harvestedAt}::timestamptz <
             e.executed_at + GREATEST(e.withdrawal_days_snapshot, c.withdrawal_days) * INTERVAL '24 hours'), false) AS blocked
         FROM operation_executions e JOIN operation_schedules s ON s.id = e.schedule_id
@@ -27,7 +26,6 @@ const checkHarvest = async (tx, seasonId, harvestedAt) => {
         LEFT JOIN product_compliance c ON c.product_id = p.id
         WHERE s.season_id = ${seasonId}::uuid`);
     if (!state || state.unknown) throw withdrawalError(M.WITHDRAWAL_UNKNOWN, HARVEST_ERROR_CODE.WITHDRAWAL_UNKNOWN);
-    if (state.unsafe) throw withdrawalError(M.WITHDRAWAL_PRODUCT_NOT_READY, HARVEST_ERROR_CODE.WITHDRAWAL_UNKNOWN);
     if (state.blocked) throw withdrawalError(M.WITHDRAWAL_ACTIVE, HARVEST_ERROR_CODE.WITHDRAWAL_ACTIVE);
     return null;
 };
