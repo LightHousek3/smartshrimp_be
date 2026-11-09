@@ -190,7 +190,8 @@ const updateDocument = async (id, input) => {
     if ([RAG_DOCUMENT_STATUS.UPLOADING, RAG_DOCUMENT_STATUS.DELETING, RAG_DOCUMENT_STATUS.DELETE_FAILED].includes(row.status)) throw ApiError.conflict('Tài liệu đang tải lên hoặc chờ xóa.');
     if (input.isActive !== undefined && row.status !== RAG_DOCUMENT_STATUS.READY) throw ApiError.conflict('Chỉ bật/tắt tài liệu đã sẵn sàng.');
     const data = { ...input };
-    for (const key of ['category', 'description']) if (data[key] === '') data[key] = null;
+    if (data.category === '' || data.category == null) delete data.category;
+    if (data.description === '') data.description = null;
     const changed = await prisma.ragDocument.updateMany({ where: { id, status: row.status, updatedAt: row.updatedAt }, data });
     if (!changed.count) throw ApiError.conflict('Tài liệu vừa thay đổi. Vui lòng làm mới.');
     return getDocument(id);
