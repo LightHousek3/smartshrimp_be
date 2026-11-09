@@ -1,6 +1,10 @@
 const prisma = require('../config/prisma');
 const { ApiError } = require('../utils');
-const { messages, PERSONNEL_ROLE } = require('../constants');
+const { messages, PERSONNEL_ROLE, SEASON_STATUS, ASSIGNED_SEASON_LIMITS } = require('../constants');
+
+// Prisma Decimal serializes as a string by default; the app contract expects number|null.
+const number = (value) => value == null ? null : Number(value);
+const dateOnly = (value) => value?.toISOString().slice(0, 10) ?? null;
 
 /**
  * Apply the current technician assignment before optional list filters.
@@ -57,7 +61,14 @@ const listSelect = {
     season: {
         select: {
             id: true, name: true, status: true, shrimpType: true,
-            stockingDate: true, expectedEndDate: true,
+            stockingDate: true, expectedEndDate: true, initialDensityPerM2: true,
+            // Show the latest recorded assessment, not a biomass-derived status.
+            healthLogs: {
+                where: { isVoided: false },
+                select: { healthStatus: true },
+                orderBy: [{ recordedAt: 'desc' }, { id: 'desc' }],
+                take: 1,
+            },
             pond: { select: {
                 id: true, name: true, status: true,
                 farm: { select: { id: true, name: true } },
@@ -66,17 +77,19 @@ const listSelect = {
     },
 };
 
-const normalizeListItem = (assignment) => ({
-    ...assignment.season,
-    stockingDate: assignment.season.stockingDate?.toISOString().slice(0, 10) ?? null,
-    expectedEndDate: assignment.season.expectedEndDate?.toISOString().slice(0, 10) ?? null,
+const normalizeListItem = ({ season: { healthLogs = [], pond, ...season }, assignedAt }) => ({
+    ...season,
+    stockingDate: dateOnly(season.stockingDate),
+    expectedEndDate: dateOnly(season.expectedEndDate),
+    initialDensityPerM2: number(season.initialDensityPerM2),
+    currentHealthStatus: healthLogs[0]?.healthStatus ?? null,
     pond: {
-        id: assignment.season.pond.id,
-        name: assignment.season.pond.name,
-        status: assignment.season.pond.status,
+        id: pond.id,
+        name: pond.name,
+        status: pond.status,
     },
-    farm: assignment.season.pond.farm,
-    assignment: { assignedAt: assignment.assignedAt },
+    farm: pond.farm,
+    assignment: { assignedAt },
 });
 
 /**
@@ -86,32 +99,35 @@ const normalizeListItem = (assignment) => ({
  * Resolve the supplied cursor inside that scope before applying its time/ID boundary.
  */
 const getAssignedSeasons = async (accountId, query = {}) => {
-    const { limit = 20, cursor } = query;
+    const { limit = ASSIGNED_SEASON_LIMITS.DEFAULT_PAGE_SIZE, cursor } = query;
     const where = assignmentWhere(accountId, query);
     const countQuery = { ...query };
     delete countQuery.status;
     const allWhere = assignmentWhere(accountId, countQuery);
-    const activeWhere = assignmentWhere(accountId, { ...countQuery, status: 'ACTIVE' });
-    let cursorFilter = {};
+    const activeWhere = assignmentWhere(accountId, { ...countQuery, status: SEASON_STATUS.ACTIVE });
+    let pagination = {};
     if (cursor) {
         const decoded = decodeCursor(cursor);
-        const exists = await prisma.seasonPersonnelAssignment.findFirst({
-            where: { ...where, id: decoded.assignmentId, assignedAt: decoded.assignedAt },
-            select: { id: true },
+        const assignment = await prisma.seasonPersonnelAssignment.findFirst({
+            where: { ...where, id: decoded.assignmentId },
+            select: { id: true, assignedAt: true },
         });
-        if (!exists) throw ApiError.badRequest(messages.ASSIGNED_SEASON.INVALID_CURSOR);
-        cursorFilter = { OR: [
-            { assignedAt: { lt: decoded.assignedAt } },
-            { assignedAt: decoded.assignedAt, id: { lt: decoded.assignmentId } },
-        ] };
+        // Validate the existing wire timestamp at JavaScript precision only.
+        // Prisma's ID cursor resolves the real ordering values inside the DB,
+        // preserving microseconds and the ID tie-break without rounding SQL filters.
+        if (!assignment || assignment.assignedAt.getTime() !== decoded.assignedAt.getTime()) {
+            throw ApiError.badRequest(messages.ASSIGNED_SEASON.INVALID_CURSOR);
+        }
+        pagination = { cursor: { id: assignment.id }, skip: 1 };
     }
 
     const [rows, totalResults, activeResults, allResults] = await Promise.all([
         prisma.seasonPersonnelAssignment.findMany({
-            where: { AND: [where, cursorFilter] },
+            where,
             select: listSelect,
             orderBy: [{ assignedAt: 'desc' }, { id: 'desc' }],
             take: limit + 1,
+            ...pagination,
         }),
         prisma.seasonPersonnelAssignment.count({ where }),
         prisma.seasonPersonnelAssignment.count({ where: activeWhere }),
@@ -130,8 +146,9 @@ const getAssignedSeasons = async (accountId, query = {}) => {
 
 /**
  * Get details of a season currently assigned to the technician.
- * Include current personnel, the latest valid biomass estimate and other
- * currently assigned seasons in the same farm.
+ * Include current personnel and other currently assigned seasons in the same farm.
+ * Biomass comes from the latest non-voided health log, even if its estimate is null;
+ * this display value does not establish freshness or authorize an operation dose.
  */
 const getAssignedSeason = async (accountId, seasonId) => {
     const assignment = await prisma.seasonPersonnelAssignment.findFirst({
@@ -203,11 +220,10 @@ const getAssignedSeason = async (accountId, seasonId) => {
         },
         orderBy: [{ assignedAt: 'desc' }, { id: 'desc' }],
     });
-    const number = (value) => value == null ? null : Number(value);
     return {
         ...season,
-        stockingDate: season.stockingDate?.toISOString().slice(0, 10) ?? null,
-        expectedEndDate: season.expectedEndDate?.toISOString().slice(0, 10) ?? null,
+        stockingDate: dateOnly(season.stockingDate),
+        expectedEndDate: dateOnly(season.expectedEndDate),
         initialQuantity: season.initialQuantity == null ? null : Number(season.initialQuantity),
         initialDensityPerM2: number(season.initialDensityPerM2),
         currentBiomassKg: number(healthLogs[0]?.estimatedBiomassKg),
@@ -234,4 +250,23 @@ const getAssignedSeason = async (accountId, seasonId) => {
     };
 };
 
-module.exports = { getAssignedSeasons, getAssignedSeason };
+/**
+ * Return distinct farm choices across all current technician assignments.
+ * Farm-level querying avoids duplicates and never depends on list pagination,
+ * search text, season status or a farm's operational status.
+ */
+const getAssignedSeasonFarms = async (accountId) => prisma.farm.findMany({
+    where: {
+        ponds: { some: {
+            seasons: { some: {
+                personnelAssignments: { some: {
+                    accountId, role: PERSONNEL_ROLE.TECHNICIAN, unassignedAt: null,
+                } },
+            } },
+        } },
+    },
+    select: { id: true, name: true },
+    orderBy: [{ name: 'asc' }, { id: 'asc' }],
+});
+
+module.exports = { getAssignedSeasons, getAssignedSeason, getAssignedSeasonFarms };

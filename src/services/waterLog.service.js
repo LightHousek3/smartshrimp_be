@@ -16,18 +16,12 @@ const {
 const { emitNotification } = require('../realtime/notification.socket');
 
 /**
- * Service cho nhật ký đo nước (water_quality_logs).
- *
- * Business rules (smartshrimp.sql):
- * - BR-OPS-01: chỉ KTV đang được phân công được ghi nhật ký cho vụ ACTIVE.
- * - BR-WATER-01: bản ghi bất biến sau khi tạo; sai chỉ được void bởi KTV
- *   đương nhiệm kèm người/thời gian/lý do.
- * - BR-ARCH-01: kiểm tra quyền + ghi notification trong transaction tường minh.
- * - BR-ARCH-03: không SELECT FOR UPDATE cho các read thông thường.
+ * Manage water quality observations, threshold exceedance alerts and void lifecycles.
+ * Measurements are recorded by assigned technicians and evaluated against species-specific warning limits.
+ * Threshold alert notifications commit within the measurement transaction and dispatch after commit.
  */
 
 const RECORDED_AT_FUTURE_TOLERANCE_MS = WATER_RECORDED_AT_FUTURE_TOLERANCE_SECONDS * 1000;
-const STATISTICS_MAX_RANGE_DAYS = 90;
 const FARM_TZ_OFFSET_MS = 7 * 60 * 60 * 1000; // Asia/Saigon, không DST
 
 const METRIC_FIELDS = [
@@ -84,9 +78,7 @@ const SEASON_WITH_FARM_SELECT = {
     },
 };
 
-// ---------------------------------------------------------------------------
-// Phạm vi truy cập (scope)
-// ---------------------------------------------------------------------------
+// Scope resolution -----------------------------------------------------------
 
 const findSeason = (seasonId, client = prisma) =>
     client.aquacultureSeason.findUnique({
@@ -100,10 +92,7 @@ const hasActiveAssignment = (accountId, seasonId, role, client = prisma) =>
         select: { id: true },
     });
 
-/**
- * KTV: phải có assignment technician đang hiệu lực trên vụ.
- * requireActiveSeason=true cho các thao tác ghi (BR-OPS-01).
- */
+/** Resolve technician assignment and ensure the season is ACTIVE for mutation paths. */
 const resolveKtvScope = async (accountId, seasonId, { requireActiveSeason = false, client = prisma } = {}) => {
     const season = await findSeason(seasonId, client);
     if (!season) {
@@ -119,7 +108,7 @@ const resolveKtvScope = async (accountId, seasonId, { requireActiveSeason = fals
     return season;
 };
 
-/** Chuyên gia: assignment expert đang hiệu lực (chỉ đọc). */
+/** Resolve active expert assignment scope for read-only access. */
 const resolveExpertScope = async (accountId, seasonId) => {
     const season = await findSeason(seasonId);
     if (!season) {
@@ -132,7 +121,7 @@ const resolveExpertScope = async (accountId, seasonId) => {
     return season;
 };
 
-/** Chủ trại: vụ thuộc trại mình sở hữu (chỉ đọc). */
+/** Resolve farm ownership scope for read-only access. */
 const resolveOwnerScope = async (accountId, seasonId) => {
     const season = await findSeason(seasonId);
     if (
@@ -172,9 +161,7 @@ const getMetadata = async (accountId, seasonId, scope = 'ktv') => {
     };
 };
 
-// ---------------------------------------------------------------------------
-// Chuẩn hóa output
-// ---------------------------------------------------------------------------
+// Output normalization -------------------------------------------------------
 
 const toNumberOrNull = (value) =>
     value === null || value === undefined ? null : Number(value);
@@ -205,9 +192,7 @@ const normalizeLog = (log, shrimpType) => {
     };
 };
 
-// ---------------------------------------------------------------------------
-// Cursor pagination (cùng pattern với assignedSeason.service.js)
-// ---------------------------------------------------------------------------
+// Cursor pagination ----------------------------------------------------------
 
 const encodeCursor = ({ recordedAt, id }) =>
     Buffer.from(
@@ -228,12 +213,7 @@ const decodeCursor = (cursor) => {
     }
 };
 
-// ---------------------------------------------------------------------------
-// Idempotency cho POST create (D4) — best-effort trên single instance.
-// accountId + seasonId + key -> { status, fingerprint, logId, expiresAt }.
-// Triển khai đa instance nên thay bằng Redis; unique constraint
-// (season_id, recorded_at, recorded_by) ở DB là tuyến cuối cùng.
-// ---------------------------------------------------------------------------
+// In-memory idempotency store with database unique constraint as the final guard --
 
 const IDEMPOTENCY_TTL_MS = 10 * 60 * 1000;
 const idempotencyStore = new Map();
@@ -260,9 +240,7 @@ const idempotencySet = (key, entry) => {
     idempotencyStore.set(key, { ...entry, expiresAt: Date.now() + IDEMPOTENCY_TTL_MS });
 };
 
-// ---------------------------------------------------------------------------
-// F1 — Nhập nhật ký đo nước
-// ---------------------------------------------------------------------------
+
 
 const buildThresholdAlertContent = (season, exceeded) => {
     const parts = exceeded.map((e) => {
@@ -318,7 +296,7 @@ const createWaterLog = async (accountId, seasonId, payload, idempotencyKey) => {
     idempotencySet(key, { status: 'processing', fingerprint });
 
     try {
-        const { log, exceeded, ownerId, notificationId } = await prisma.$transaction(async (tx) => {
+        const { log, exceeded, notifications } = await prisma.$transaction(async (tx) => {
             // Final harvest holds this same aggregate lock until completion commits.
             // Re-read state and assignment after waiting; the earlier scope is only a fast rejection.
             await tx.$queryRaw`SELECT id FROM aquaculture_seasons WHERE id = ${seasonId}::uuid FOR UPDATE`;
@@ -335,40 +313,53 @@ const createWaterLog = async (accountId, seasonId, payload, idempotencyKey) => {
 
             // Use persisted NUMERIC values so the alert agrees with the response/statistics.
             const exceededParams = checkWaterThresholds(season.shrimpType, created);
-            let createdNotificationId = null;
+            const notifications = [];
             if (exceededParams.length > 0) {
-                // BR-NOTI-03: chủ trại nhận cảnh báo nước — cùng transaction với log.
-                const notification = await tx.notification.create({
-                    data: {
-                        accountId: season.pond.farm.ownerId,
-                        title: 'Cảnh báo chất lượng nước',
-                        content: buildThresholdAlertContent(season, exceededParams),
-                        type: NOTIFICATION_TYPE.WATER_THRESHOLD_EXCEEDED,
-                        referenceType: 'water_quality_log',
-                        referenceId: created.id,
-                    },
-                    select: { id: true },
+                // Alert the farm owner and active technician/expert atomically with the observation.
+                const assignments = await tx.seasonPersonnelAssignment.findMany({
+                    where: { seasonId, unassignedAt: null },
+                    select: { role: true, accountId: true },
                 });
-                createdNotificationId = notification.id;
+                const recipients = new Set([season.pond.farm.ownerId]);
+                for (const assignment of assignments) {
+                    if (assignment.role === PERSONNEL_ROLE.TECHNICIAN
+                        || assignment.role === PERSONNEL_ROLE.EXPERT) {
+                        recipients.add(assignment.accountId);
+                    }
+                }
+                const content = buildThresholdAlertContent(season, exceededParams);
+                for (const recipientId of recipients) {
+                    const notification = await tx.notification.create({
+                        data: {
+                            accountId: recipientId,
+                            title: 'Cảnh báo chất lượng nước',
+                            content,
+                            type: NOTIFICATION_TYPE.WATER_THRESHOLD_EXCEEDED,
+                            referenceType: 'water_quality_log',
+                            referenceId: created.id,
+                        },
+                        select: { id: true },
+                    });
+                    notifications.push({ accountId: recipientId, notificationId: notification.id });
+                }
             }
             return {
                 log: created,
                 exceeded: exceededParams,
-                ownerId: season.pond.farm.ownerId,
-                notificationId: createdNotificationId,
+                notifications,
             };
         });
 
-        // Emit socket SAU khi transaction đã commit (tránh báo tin chưa chắc chắn).
-        if (notificationId) {
-            emitNotification(ownerId, 'notification:new', { id: notificationId });
+        // Dispatch real-time socket events only after the transaction has successfully committed.
+        for (const notification of notifications) {
+            emitNotification(notification.accountId, 'notification:new', { id: notification.notificationId });
         }
 
         idempotencySet(key, { status: 'done', fingerprint, logId: log.id });
         return { log: normalizeLog(log, season.shrimpType), duplicate: false, exceeded };
     } catch (error) {
         idempotencyStore.delete(key);
-        // Tuyến cuối chống double-submit: unique(season_id, recorded_at, recorded_by).
+        // Final guard against concurrent duplicate submissions: unique(season_id, recorded_at, recorded_by).
         if (error?.code === 'P2002') {
             throw ApiError.conflict(messages.WATER_LOG.DUPLICATE_LOG);
         }
@@ -380,9 +371,7 @@ const createWaterLog = async (accountId, seasonId, payload, idempotencyKey) => {
     }
 };
 
- // ---------------------------------------------------------------------------
-// F2 — Danh sách nhật ký đo nước
-// ---------------------------------------------------------------------------
+ 
 
 /**
  * List season water logs after resolving technician, expert or owner access.
@@ -467,16 +456,24 @@ const listWaterLogs = async (accountId, seasonId, query = {}, scope = 'ktv') => 
     const nextCursor = hasNextPage
         ? encodeCursor({ recordedAt: logs[logs.length - 1].recordedAt, id: logs[logs.length - 1].id })
         : null;
+    // Resolve the original recorder, including replaced personnel, once per page.
+    const recorderIds = [...new Set(logs.map((log) => log.recordedBy).filter(Boolean))];
+    const recorders = recorderIds.length > 0 ? await prisma.account.findMany({
+        where: { id: { in: recorderIds } },
+        select: { id: true, fullName: true },
+    }) : [];
+    const recorderNames = new Map(recorders.map((account) => [account.id, account.fullName]));
 
     return {
-        logs: logs.map((log) => normalizeLog(log, season.shrimpType)),
+        logs: logs.map((log) => ({
+            ...normalizeLog(log, season.shrimpType),
+            recordedByName: recorderNames.get(log.recordedBy) ?? null,
+        })),
         meta: { totalResults, hasNextPage, nextCursor, ...(counts && { counts }) },
     };
 };
 
-// ---------------------------------------------------------------------------
-// F3 — Hủy hiệu lực nhật ký đo nước
-// ---------------------------------------------------------------------------
+
 
 /**
  * Void an existing log with an audit reason while the assigned season is active.
@@ -484,7 +481,7 @@ const listWaterLogs = async (accountId, seasonId, query = {}, scope = 'ktv') => 
  * unchanged, and a concurrent or repeated void is reported as a conflict.
  */
 const voidWaterLog = async (accountId, seasonId, logId, voidReason) => {
-    // BR-WATER-01: chỉ KTV đương nhiệm (assignment đang hiệu lực) được void.
+    // Only currently assigned technicians are authorized to void water observations.
     const season = await resolveKtvScope(accountId, seasonId);
 
     const log = await prisma.waterQualityLog.findFirst({
@@ -496,7 +493,7 @@ const voidWaterLog = async (accountId, seasonId, logId, voidReason) => {
     if (log.isVoided) {
         throw ApiError.conflict(messages.WATER_LOG.ALREADY_VOIDED);
     }
-    // D2: chỉ vụ ACTIVE mới được void (khóa sổ khi planning/completed/cancelled).
+    // Voiding is restricted to active seasons; completed or cancelled seasons remain locked.
     if (season.status !== SEASON_STATUS.ACTIVE) {
         throw ApiError.conflict(messages.WATER_LOG.VOID_FORBIDDEN_STATE);
     }
@@ -525,18 +522,16 @@ const voidWaterLog = async (accountId, seasonId, logId, voidReason) => {
     return normalizeLog(updated, season.shrimpType);
 };
 
-// ---------------------------------------------------------------------------
-// F4 — Thống kê chất lượng nước (chỉ bản ghi hợp lệ: is_voided = FALSE)
-// ---------------------------------------------------------------------------
+
 
 const bucketKeyOf = (date, granularity) => {
-    // Bucket theo giờ trại (Asia/Saigon, UTC+7, không DST).
+    // Calendar date bucketing follows farm local time (Asia/Ho_Chi_Minh, UTC+7).
     const shifted = new Date(date.getTime() + FARM_TZ_OFFSET_MS);
     const y = shifted.getUTCFullYear();
     const m = String(shifted.getUTCMonth() + 1).padStart(2, '0');
     const d = shifted.getUTCDate();
     if (granularity === 'week') {
-        // Đầu tuần = thứ Hai.
+        // Weekly grouping anchors to Monday as the start of the week.
         const dow = (shifted.getUTCDay() + 6) % 7;
         const monday = new Date(Date.UTC(y, shifted.getUTCMonth(), d - dow));
         return monday.toISOString().slice(0, 10);
@@ -546,7 +541,7 @@ const bucketKeyOf = (date, granularity) => {
 
 /**
  * Aggregate valid water logs after resolving technician, expert or owner access.
- * Limit the date range to 90 days and group daily or weekly series in farm time
+ * Default to all recorded history through now and group daily or weekly series in farm time
  * (UTC+7). Voided logs are counted separately and excluded from measurements
  * and threshold exceedance rates.
  */
@@ -557,11 +552,11 @@ const getStatistics = async (accountId, seasonId, query = {}, scope = 'ktv') => 
     }
     const season = await resolver(accountId, seasonId);
 
-    const from = new Date(query.from);
-    const to = new Date(query.to);
+    const requestedFrom = query.from === undefined ? null : new Date(query.from);
+    const to = query.to === undefined ? new Date() : new Date(query.to);
     const granularity = query.granularity || 'day';
-    const rangeDays = (to.getTime() - from.getTime()) / 86400000;
-    if (!Number.isFinite(rangeDays) || rangeDays < 0 || rangeDays > STATISTICS_MAX_RANGE_DAYS) {
+    if (!Number.isFinite(to.getTime())
+        || (requestedFrom && (!Number.isFinite(requestedFrom.getTime()) || requestedFrom > to))) {
         throw ApiError.badRequest(messages.WATER_LOG.INVALID_DATE_RANGE);
     }
 
@@ -569,14 +564,18 @@ const getStatistics = async (accountId, seasonId, query = {}, scope = 'ktv') => 
         where: {
             seasonId,
             isVoided: false,
-            recordedAt: { gte: from, lte: to },
+            recordedAt: { ...(requestedFrom ? { gte: requestedFrom } : {}), lte: to },
         },
         orderBy: { recordedAt: 'asc' },
     });
+    // Reuse the sorted valid rows instead of querying the earliest reading separately.
+    const from = requestedFrom ?? rows[0]?.recordedAt ?? to;
 
     const summary = {};
     for (const field of METRIC_FIELDS) {
-        summary[field] = { count: 0, min: null, max: null, sum: 0, exceedCount: 0 };
+        summary[field] = {
+            count: 0, min: null, max: null, sum: 0, exceedCount: 0, belowMinCount: 0, aboveMaxCount: 0,
+        };
     }
     const buckets = new Map();
 
@@ -593,12 +592,13 @@ const getStatistics = async (accountId, seasonId, query = {}, scope = 'ktv') => 
                 s.max = s.max === null ? v : Math.max(s.max, v);
             }
         }
-        const exceeded = new Set(
-            checkWaterThresholds(season.shrimpType, values).map((e) => e.field),
-        );
-        for (const field of METRIC_FIELDS) {
-            if (values[field] !== null && exceeded.has(field)) {
-                summary[field].exceedCount += 1;
+        for (const exceeded of checkWaterThresholds(season.shrimpType, values)) {
+            const stat = summary[exceeded.field];
+            stat.exceedCount += 1;
+            if (exceeded.direction === 'below_min') {
+                stat.belowMinCount += 1;
+            } else if (exceeded.direction === 'above_max') {
+                stat.aboveMaxCount += 1;
             }
         }
 
@@ -631,7 +631,12 @@ const getStatistics = async (accountId, seasonId, query = {}, scope = 'ktv') => 
             min: s.min,
             max: s.max,
             avg: s.sum / s.count,
+            exceedCount: s.exceedCount,
             exceedanceRate: s.exceedCount / s.count,
+            belowMinCount: s.belowMinCount,
+            aboveMaxCount: s.aboveMaxCount,
+            belowMinRate: s.belowMinCount / s.count,
+            aboveMaxRate: s.aboveMaxCount / s.count,
         };
     }
 
@@ -676,7 +681,7 @@ module.exports = {
     listWaterLogs,
     voidWaterLog,
     getStatistics,
-    // export cho test
+    // Internal exports for test isolation
     _bucketKeyOf: bucketKeyOf,
     _checkWaterThresholds: checkWaterThresholds,
 };

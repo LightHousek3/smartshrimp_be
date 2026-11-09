@@ -16,6 +16,14 @@ router.use(authenticate, authorize(ACCOUNT_ROLE.TECHNICIAN));
 router.get('/', validate(assignedSeasonValidator.getAssignedSeasons), assignedSeasonController.getAssignedSeasons);
 
 /**
+ * @route   GET /api/v1/me/seasons/farms
+ * @desc    List farm choices across the Technician's current assignments
+ * @access  Technician
+ */
+// Static paths must precede the season ID route.
+router.get('/farms', validate(assignedSeasonValidator.getAssignedSeasonFarms), assignedSeasonController.getAssignedSeasonFarms);
+
+/**
  * @route   GET /api/v1/me/seasons/:seasonId
  * @desc    Get details of a season currently assigned to the authenticated Technician
  * @access  Technician

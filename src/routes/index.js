@@ -1,5 +1,6 @@
 const express = require('express');
 const authRoute = require('./auth.route');
+const adminDashboardRoute = require('./adminDashboard.route');
 const adminAccountRoute = require('./adminAccount.route');
 const adminRagDocumentRoute = require('./adminRagDocument.route');
 const profileRoute = require('./profile.route');
@@ -11,6 +12,7 @@ const seasonRoute = require('./season.route');
 const assignedSeasonRoute = require('./assignedSeason.route');
 const expertDashboardRoute = require('./expertDashboard.route');
 const ownerDashboardRoute = require('./ownerDashboard.route');
+const technicianDashboardRoute = require('./technicianDashboard.route');
 const expertSeasonRoute = require('./expertSeason.route');
 const expertDiseaseCaseRoute = require('./expertDiseaseCase.route');
 const ragRoute = require('./rag.route');
@@ -35,6 +37,7 @@ const routes = [
     { path: '/owner/protocols', route: protocolRoute },
     { path: '/me/rag', route: ragRoute },
     { path: '/auth', route: authRoute },
+    { path: '/admin/dashboard', route: adminDashboardRoute },
     { path: '/admin/accounts', route: adminAccountRoute },
     { path: '/admin/inventory', route: adminInventoryRoute },
     { path: '/admin/rag/documents', route: adminRagDocumentRoute },
@@ -46,6 +49,7 @@ const routes = [
     { path: '/owner/seasons/:seasonId/harvests', route: harvestRoute },
     { path: '/owner/seasons', route: seasonRoute },
     { path: '/owner/dashboard', route: ownerDashboardRoute },
+    { path: '/technician/dashboard', route: technicianDashboardRoute },
     { path: '/me/seasons', route: assignedSeasonRoute },
     { path: '/me/seasons/:seasonId/water-logs', route: waterLogRoute },
     { path: '/technician/seasons/:seasonId/ai-diagnoses', route: aiDiagnosisRoute },

@@ -367,6 +367,7 @@ const messages = {
     },
 
     ASSIGNED_SEASON: {
+        FARMS_FETCHED: 'Lấy danh sách trại có vụ nuôi được phân công thành công',
         LIST_FETCHED: 'Lấy danh sách vụ nuôi được phân công thành công',
         FETCHED: 'Lấy chi tiết vụ nuôi được phân công thành công',
         NOT_FOUND: 'Không tìm thấy vụ nuôi được phân công',
@@ -501,13 +502,13 @@ const messages = {
         MATERIAL_RESOLUTION:
             'Vật tư thay thế phải thuộc cùng trang trại, đúng loại và tương thích đơn vị với đề xuất.',
         SCHEDULE_WAITING:
-            'Lịch được tạo theo cửa sổ cuốn chiếu khi vụ đang hoạt động và có đủ dữ liệu. Sinh khối hợp lệ tối đa 24 giờ tại thời điểm thao tác.',
+            'Lịch được tạo khi vụ đang hoạt động và có đủ dữ liệu. Nguồn sinh khối không quá 7 ngày (168 giờ) tại thời điểm dự kiến thực hiện.',
         SCHEDULE_BLOCKED: (reason) =>
             `Một phần lịch chưa thể tạo: ${reason}. Vui lòng bổ sung dữ liệu; hệ thống sẽ thử lại.`,
         SCHEDULE_BLOCKERS: {
             VOLUME_MISSING: 'thiếu thể tích ao hợp lệ',
             BASIS_OUT_OF_RANGE: 'sinh khối hoặc thể tích vượt giới hạn dữ liệu lịch',
-            BIOMASS_MISSING_OR_STALE: 'thiếu sinh khối hợp lệ trong 24 giờ trước thao tác',
+            BIOMASS_MISSING_OR_STALE: 'thiếu nguồn sinh khối hợp lệ trong 7 ngày (168 giờ) trước cữ dự kiến',
             DOSE_INVALID: 'quy tắc liều không hợp lệ',
             QUANTITY_OUT_OF_RANGE: 'lượng vật tư vượt giới hạn hoặc quá nhỏ',
             MATERIAL_UNRESOLVED: 'vật tư chưa được xác nhận',
@@ -515,7 +516,7 @@ const messages = {
                 'vật tư không còn đủ điều kiện hoặc hồ sơ đã đổi sau duyệt; cần kiểm tra và duyệt lại',
         },
         BIOMASS_WARNING:
-            'Chưa có sinh khối hợp lệ trong 24 giờ. Lịch theo sinh khối cần số liệu còn hạn tại thời điểm thao tác.',
+            'Chưa có nguồn sinh khối hợp lệ trong 7 ngày (168 giờ). Nguồn phải còn hạn tại thời điểm dự kiến thực hiện từng cữ.',
         SCHEDULE_FAILED: 'Chưa thể tạo lịch phác đồ; hệ thống sẽ kiểm tra lại.',
         BIOMASS_SOURCE_INVALID:
             'Nguồn sinh khối của lịch không còn hợp lệ. Vui lòng kiểm tra nhật ký sức khỏe và yêu cầu lập lại lịch.',
@@ -653,6 +654,11 @@ const messages = {
         INVALID_IDEMPOTENCY_KEY: 'Mã idempotency_key không hợp lệ',
     },
 
+    // Admin dashboard
+    ADMIN_DASHBOARD: {
+        FETCHED: 'Lấy tổng quan hệ thống thành công',
+    },
+
     // Owner dashboard
     OWNER_DASHBOARD: {
         FETCHED: 'Lấy tổng quan vận hành thành công',
@@ -672,6 +678,10 @@ const messages = {
         ALREADY_RESOLVED: 'Ca bệnh đã được giải quyết, không thể thực hiện thêm thao tác',
         RESOLUTION_SUMMARY_REQUIRED: 'Bắt buộc nhập nội dung tóm tắt giải quyết',
         PROTOCOL_ABORTED: 'Dừng khẩn cấp phác đồ điều trị thành công',
+    },
+
+    TECHNICIAN_DASHBOARD: {
+        FETCHED: 'Lấy tổng quan vận hành thành công',
     },
 
     // Server

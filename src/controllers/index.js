@@ -1,4 +1,5 @@
 const expertDiseaseCaseController = require('./expertDiseaseCase.controller');
+const adminDashboardController = require('./adminDashboard.controller');
 const authController = require('./auth.controller');
 const adminAccountController = require('./adminAccount.controller');
 const profileController = require('./profile.controller');
@@ -10,6 +11,7 @@ const seasonController = require('./season.controller');
 const assignedSeasonController = require('./assignedSeason.controller');
 const expertDashboardController = require('./expertDashboard.controller');
 const ownerDashboardController = require('./ownerDashboard.controller');
+const technicianDashboardController = require('./technicianDashboard.controller');
 const expertSeasonController = require('./expertSeason.controller');
 const expertProductionProtocolController = require('./expertProductionProtocol.controller');
 const expertProtocolTemplateController = require('./expertProtocolTemplate.controller');
@@ -44,6 +46,7 @@ module.exports = {
     assignedSeasonController,
     expertDashboardController,
     ownerDashboardController,
+    technicianDashboardController,
     expertSeasonController,
     expertProductionProtocolController,
     expertProtocolTemplateController,
@@ -55,4 +58,5 @@ module.exports = {
     taskController,
     harvestController,
     expertDiseaseCaseController,
+    adminDashboardController,
 };

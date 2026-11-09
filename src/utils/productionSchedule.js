@@ -40,7 +40,7 @@ const calculate = (item, doc, scheduledAt, { volumeM3, healthLogs, now, biomassM
     return { plannedQuantity: quantity, unit: item.doseUnit,
         doseBasisSnapshot: item.doseBasis, doseValueSnapshot: dose,
         basisQuantity, basisUnit, sourceHealthLogId,
-        calculationVersion: 'production-v2-biomass-24h', calculatedAt: now };
+        calculationVersion: 'production-v2-biomass-168h', calculatedAt: now };
 };
 
 /** Item anchors survive rolling windows; SQL DATE is a calendar anchor, not local midnight UTC. */

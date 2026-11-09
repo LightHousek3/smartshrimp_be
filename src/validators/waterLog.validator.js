@@ -69,8 +69,11 @@ const getStatistics = {
         seasonId: seasonIdParam,
     }),
     query: Joi.object().keys({
-        from: Joi.date().iso().required(),
-        to: Joi.date().iso().min(Joi.ref('from')).required(),
+        from: Joi.date().iso(),
+        to: Joi.date().iso().when('from', {
+            is: Joi.exist(),
+            then: Joi.date().min(Joi.ref('from')),
+        }),
         granularity: Joi.string().valid('day', 'week').default('day'),
     }),
 };
