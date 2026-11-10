@@ -1,6 +1,7 @@
 const Joi = require('joi');
 
 const uuid = () => Joi.string().uuid();
+const severities = ['LOW', 'MEDIUM', 'HIGH', 'CRITICAL'];
 
 const list = {
     query: Joi.object({
@@ -11,8 +12,12 @@ const list = {
             .allow('', null),
         severity: Joi.alternatives()
             .try(
-                Joi.string().valid('LOW', 'MEDIUM', 'HIGH', 'CRITICAL'),
-                Joi.array().items(Joi.string().valid('LOW', 'MEDIUM', 'HIGH', 'CRITICAL')),
+                Joi.string().max(32).custom((value, helpers) => {
+                    const values = value.split(',').map(entry => entry.trim());
+                    return values.every(entry => severities.includes(entry))
+                        ? [...new Set(values)] : helpers.error('any.invalid');
+                }),
+                Joi.array().min(1).max(4).unique().items(Joi.string().valid(...severities)),
             )
             .allow('', null),
         needsResponse: Joi.boolean().allow('', null),
@@ -38,6 +43,8 @@ const respond = {
             .required(),
         message: Joi.string().trim().min(1).max(500).required(),
         switchToMonitoring: Joi.boolean().default(false),
+        withdrawRequestId: uuid(),
+        releaseHoldIds: Joi.array().items(uuid().required()).unique().max(100),
         attachments: Joi.array().items(
             Joi.object({
                 fileUrl: Joi.string().uri().required(),
@@ -57,20 +64,9 @@ const resolve = {
     }),
 };
 
-const abortProtocol = {
-    params: Joi.object({
-        caseId: uuid().required(),
-        protocolId: uuid().required(),
-    }),
-    body: Joi.object({
-        reason: Joi.string().trim().min(5).max(500).required(),
-    }),
-};
-
 module.exports = {
     list,
     detail,
     respond,
     resolve,
-    abortProtocol,
 };

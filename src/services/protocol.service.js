@@ -3,6 +3,7 @@ const logger = require('../config/logger');
 const config = require('../config');
 const { ApiError, productionProtocolV2: v2 } = require('../utils');
 const productionReview = require('./productionProtocolReview.service');
+const lifecycle = require('./protocolLifecycle.service');
 const {
     PROTOCOL_TYPE: T,
     PROTOCOL_STATUS: S,
@@ -52,6 +53,7 @@ const DETAIL_SELECT = {
     supersededAt: true,
     supersedesProtocolId: true,
     allowedVariancePct: true,
+    treatmentStartAt: true,
     statusHistory: {
         orderBy: [{ changedAt: 'asc' }, { id: 'asc' }],
         select: {
@@ -118,8 +120,8 @@ const ownedWhere = (ownerId) => ({
 const anchorDate = (protocol) => {
     if (protocol.protocolType === T.PRODUCTION)
         return protocol.season.stockingDate?.toISOString().slice(0, 10) ?? null;
-    return protocol.reviewedAt && [S.APPROVED, S.SUPERSEDED, S.ABORTED].includes(protocol.status)
-        ? new Date(protocol.reviewedAt.getTime() + VIETNAM_OFFSET_MS).toISOString().slice(0, 10)
+    return protocol.treatmentStartAt
+        ? new Date(protocol.treatmentStartAt.getTime() + VIETNAM_OFFSET_MS).toISOString().slice(0, 10)
         : null;
 };
 const localDate = (timestamp) =>
@@ -235,7 +237,7 @@ const list = async (ownerId, { seasonId, protocolType, status, page = 1, limit =
 const findOwned = async (client, ownerId, id, select = DETAIL_SELECT) => {
     const protocol = await client.protocol.findFirst({
         where: { id, ...ownedWhere(ownerId) },
-        select: { ...select, contentVersion: true, sourceTemplateVersionNo: true },
+        select: { ...select, contentVersion: true, sourceTemplateVersionNo: true, treatmentStartAt: true },
     });
     if (!protocol) throw ApiError.notFound(messages.PROTOCOL.NOT_FOUND);
     return protocol;
@@ -305,6 +307,7 @@ const detail = async (ownerId, id) =>
                 anchorDate: anchor,
                 durationDays: duration._max.endDayOffset ?? 0,
                 reviewedAt: p.reviewedAt,
+                treatmentStartAt: p.treatmentStartAt,
                 contentVersion: p.contentVersion ?? 1,
                 sourceTemplateVersionNo: p.sourceTemplateVersionNo ?? null,
                 materialReviews: productionReview.isV2(p) ? await productionReview.reviews(client, p, ownerId) : [],
@@ -316,7 +319,7 @@ const detail = async (ownerId, id) =>
                 dayMarkers: [...days.values()].sort((a, b) => a.day - b.day),
                 history: p.statusHistory.map(({ changedBy, ...h }) => ({
                     ...h,
-                    changedByName: refs.accounts.get(changedBy),
+                    changedByName: changedBy ? refs.accounts.get(changedBy) ?? 'Tài khoản cũ' : 'Hệ thống',
                 })),
                 canReview:
                     p.status === S.PENDING_APPROVAL &&
@@ -488,10 +491,11 @@ const validateApproval = async (client, p) => {
     }
     if (p.protocolType === T.TREATMENT) {
         const diseaseCase = await client.diseaseCase.findFirst({
-            where: { id: p.diseaseCaseId, seasonId: p.seasonId, status: { not: 'RESOLVED' } },
+            where: { id: p.diseaseCaseId, seasonId: p.seasonId, status: { in: ['OPEN', 'MONITORING', 'IN_TREATMENT'] } },
             select: { id: true },
         });
         if (p.season.status !== 'ACTIVE' || !diseaseCase) throw ApiError.forbidden(messages.PROTOCOL.INVALID_CASE);
+        if (await lifecycle.pendingRequests(client, p.diseaseCaseId)) throw ApiError.conflict(messages.TREATMENT_PROTOCOL.INFORMATION_PENDING);
     }
 };
 
@@ -505,7 +509,8 @@ const supersede = async (client, p, ownerId, now) => {
         diseaseCaseId: p.diseaseCaseId,
     };
     const current = await client.protocol.findFirst({
-        where: { ...context, status: S.APPROVED },
+        where: { ...context, status: { in: [S.APPROVED, S.ACTIVE, S.PAUSED] } },
+        orderBy: { versionNo: 'desc' },
         select: { id: true, versionNo: true },
     });
     if (!p.supersedesProtocolId) {
@@ -528,7 +533,7 @@ const supersede = async (client, p, ownerId, now) => {
     }
     // Cancelled/rejected attempts remain in the version chain but own no active plan.
     // Follow contiguous scoped links to the actual approved ancestor, never skip a broken link.
-    while (previous.status !== S.APPROVED) {
+    while (![S.APPROVED, S.ACTIVE, S.PAUSED].includes(previous.status)) {
         if (![S.REJECTED, S.CANCELLED, S.ABORTED].includes(previous.status))
             throw ApiError.conflict(messages.PROTOCOL.PREDECESSOR);
         if (!previous.supersedesProtocolId) {
@@ -546,7 +551,7 @@ const supersede = async (client, p, ownerId, now) => {
     if ((p.protocolType === T.PRODUCTION && !current) || (current && current.id !== previous.id))
         throw ApiError.conflict(messages.PROTOCOL.PREDECESSOR);
     const changed = await client.protocol.updateMany({
-        where: { id: previous.id, status: S.APPROVED },
+        where: { id: previous.id, status: previous.status },
         data: { status: S.SUPERSEDED, supersededAt: now, updatedAt: now },
     });
     if (changed.count !== 1) throw ApiError.conflict(messages.PROTOCOL.CONFLICT);
@@ -554,7 +559,7 @@ const supersede = async (client, p, ownerId, now) => {
     await client.protocolStatusHistory.create({
         data: {
             protocolId: previous.id,
-            fromStatus: S.APPROVED,
+            fromStatus: previous.status,
             toStatus: S.SUPERSEDED,
             changedBy: ownerId,
             changedAt: now,
@@ -655,7 +660,10 @@ const review = async (ownerId, id, { updatedAt, reason, materialSelections = [],
                         await productionReview.resolveForApproval(client, p, ownerId, materialSelections);
                     } else if (materialSelections.length) throw ApiError.badRequest(messages.PRODUCTION_PROTOCOL.MATERIAL_RESOLUTION);
                     await validateApproval(client, p);
-                    await supersede(client, p, ownerId, now);
+                    if (p.protocolType === T.PRODUCTION) await supersede(client, p, ownerId, now);
+                    else if (!p.treatmentStartAt || p.treatmentStartAt <= now || !p.season.stockingDate) {
+                        throw ApiError.conflict(messages.TREATMENT_PROTOCOL.START_REQUIRED);
+                    }
                 }
                 const status = approved ? S.APPROVED : S.REJECTED;
                 const changed = await client.protocol.updateMany({
@@ -683,16 +691,7 @@ const review = async (ownerId, id, { updatedAt, reason, materialSelections = [],
                         reason: approved ? null : reason,
                     },
                 });
-                if (approved && p.protocolType === T.TREATMENT) {
-                    await client.diseaseCase.updateMany({
-                        where: {
-                            id: p.diseaseCaseId,
-                            seasonId: p.seasonId,
-                            status: { not: 'RESOLVED' },
-                        },
-                        data: { status: 'IN_TREATMENT', updatedAt: now },
-                    });
-                }
+                if (approved) await lifecycle.reconcile(client, p.seasonId, now);
                 const notices = await notifyReview(
                     client,
                     { ...p, rejectionReason: reason },

@@ -51,27 +51,9 @@ const resolve = asyncHandler(async (req, res) => {
     });
 });
 
-/**
- * POST /api/v1/expert/disease-cases/:caseId/protocols/:protocolId/abort
- * Emergency abort protocol for a disease case (BR-TRT-01, 02, 03).
- */
-const abortProtocol = asyncHandler(async (req, res) => {
-    const data = await service.abortProtocol(
-        req.account.id,
-        req.params.caseId,
-        req.params.protocolId,
-        req.body,
-    );
-    return ResponseHandler.success(res, {
-        message: messages.DISEASE_CASE.PROTOCOL_ABORTED,
-        data,
-    });
-});
-
 module.exports = {
     list,
     detail,
     respond,
     resolve,
-    abortProtocol,
 };

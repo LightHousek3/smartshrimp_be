@@ -140,6 +140,9 @@ enum ProtocolStatus {
   SUPERSEDED       @map("superseded")
   CANCELLED        @map("cancelled")
   ABORTED          @map("aborted")
+  ACTIVE           @map("active")
+  PAUSED           @map("paused")
+  COMPLETED        @map("completed")
 
   @@map("protocol_status")
 }
@@ -222,6 +225,8 @@ enum ScheduleCancellationType {
   SEASON_CANCELLED    @map("season_cancelled")
   SEASON_COMPLETED    @map("season_completed")
   MANUAL_CORRECTION   @map("manual_correction")
+  TREATMENT_OVERRIDE @map("treatment_override")
+  TREATMENT_COMPLETED @map("treatment_completed")
 
   @@map("schedule_cancellation_type")
 }
@@ -553,6 +558,7 @@ model DiseaseCase {
   status            DiseaseCaseStatus           @default(OPEN)
   caseSnapshot      Json                        @map("case_snapshot")
   resolutionSummary String?                     @map("resolution_summary") @db.VarChar(500)
+  resolutionReason  String?                     @map("resolution_reason") @db.VarChar(40)
   resolvedBy        String?                     @map("resolved_by") @db.Uuid
   resolvedAt        DateTime?                   @map("resolved_at") @db.Timestamptz(6)
   createdAt         DateTime                    @default(now()) @map("created_at") @db.Timestamptz(6)
@@ -588,6 +594,10 @@ model DiseaseCaseAttachment {
 }
 
 model DiseaseCaseResponse {
+  replyToResponseId String? @map("reply_to_response_id") @db.Uuid
+  requestStatus String? @map("request_status") @db.VarChar(16)
+  replyTo DiseaseCaseResponse? @relation("CaseResponseReplies", fields: [replyToResponseId, caseId], references: [id, caseId], onDelete: Restrict, onUpdate: NoAction)
+  replies DiseaseCaseResponse[] @relation("CaseResponseReplies")
   id           String           @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
   caseId       String           @map("case_id") @db.Uuid
   authorId     String           @map("author_id") @db.Uuid
@@ -599,6 +609,8 @@ model DiseaseCaseResponse {
   case         DiseaseCase      @relation(fields: [caseId], references: [id], onDelete: Restrict)
   author       Account          @relation(fields: [authorId], references: [id], onDelete: Restrict)
 
+  @@unique([id, caseId], map: "uq_case_response_identity")
+
   @@map("disease_case_responses")
 }
 
@@ -607,17 +619,18 @@ model DiseaseCaseStatusHistory {
   caseId     String             @map("case_id") @db.Uuid
   fromStatus DiseaseCaseStatus? @map("from_status")
   toStatus   DiseaseCaseStatus  @map("to_status")
-  changedBy  String             @map("changed_by") @db.Uuid
+  changedBy  String?            @map("changed_by") @db.Uuid
   reason     String?            @db.VarChar(500)
   changedAt  DateTime           @default(now()) @map("changed_at") @db.Timestamptz(6)
 
   case       DiseaseCase        @relation(fields: [caseId], references: [id], onDelete: Restrict)
-  changer    Account            @relation(fields: [changedBy], references: [id], onDelete: Restrict)
+  changer    Account?           @relation(fields: [changedBy], references: [id], onDelete: Restrict)
 
   @@map("disease_case_status_history")
 }
 
 model Protocol {
+  treatmentStartAt DateTime? @map("treatment_start_at") @db.Timestamptz(6)
   contentVersion          Int   @default(1) @map("content_version") @db.SmallInt
   sourceTemplateVersionNo Int?  @map("source_template_version_no")
   sourceTemplateSnapshot  Json? @map("source_template_snapshot") @db.JsonB
@@ -657,11 +670,13 @@ model Protocol {
 
 /// Maps the existing protocol_status_history table; no database DDL is required.
 model ProtocolStatusHistory {
+  eventType String @default("STATUS_CHANGED") @map("event_type") @db.VarChar(40)
+  eventData Json? @map("event_data") @db.JsonB
   id         String          @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
   protocolId String          @map("protocol_id") @db.Uuid
   fromStatus ProtocolStatus? @map("from_status")
   toStatus   ProtocolStatus  @map("to_status")
-  changedBy  String          @map("changed_by") @db.Uuid
+  changedBy  String?         @map("changed_by") @db.Uuid
   reason     String?
   changedAt  DateTime        @default(now()) @map("changed_at") @db.Timestamptz(6)
   protocol   Protocol        @relation(fields: [protocolId], references: [id], onDelete: Restrict)
@@ -671,6 +686,7 @@ model ProtocolStatusHistory {
 }
 
 model ProtocolItem {
+  dueAtMinutes Int? @map("due_at_minutes")
   productionMealId          String?  @map("production_meal_id") @db.Uuid
   dailyDoseIncrement        Decimal? @map("daily_dose_increment") @db.Decimal(14, 4)
   recurrenceAnchorDay       Int?     @map("recurrence_anchor_day")
@@ -736,7 +752,7 @@ model OperationSchedule {
   sourceHealthLog    ShrimpHealthLog?    @relation(fields: [sourceHealthLogId], references: [id], onDelete: Restrict)
   execution          OperationExecution?
 
-  @@unique([protocolItemId, scheduledAt])
+  // SQL migration owns the partial UNIQUE for non-cancelled occurrences.
   @@index([seasonId, scheduledAt, status], map: "idx_operation_schedules_season_time")
   @@index([protocolItemId, scheduledAt, status], map: "idx_operation_schedules_protocol_item_time")
   @@index([productId, status], map: "idx_operation_schedules_product_status")
@@ -910,6 +926,7 @@ model ProductionProtocolTemplate {
 }
 
 model ProductionProtocolTemplateItem {
+  dueAtMinutes Int? @map("due_at_minutes")
   recommendedManufacturerId String?                    @map("recommended_manufacturer_id") @db.Uuid
   recommendedManufacturer   Supplier?                  @relation("TemplateManufacturer", fields: [recommendedManufacturerId], references: [id], onDelete: Restrict)
   id                        String                     @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid

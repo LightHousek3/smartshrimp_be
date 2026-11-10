@@ -1,3 +1,4 @@
+<<<<<<< HEAD
 const {
     Prisma,
     ProductionProtocolTemplateStatus: TemplateStatus,
@@ -1000,3 +1001,6 @@ module.exports = {
     update: (accountId, seasonId, protocolId, body) => mutate(accountId, seasonId, protocolId, body, false),
     cancel: (accountId, seasonId, protocolId, body) => mutate(accountId, seasonId, protocolId, body, true),
 };
+=======
+module.exports = require('./protocolAuthoring.service').production;
+>>>>>>> 3587535 (feat: implement expert treatment workflow on existing tables)

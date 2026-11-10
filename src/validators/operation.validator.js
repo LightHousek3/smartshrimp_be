@@ -25,13 +25,15 @@ const executeSchedule = {
         scheduleId: Joi.string().uuid({ version: 'uuidv4' }).required(),
     }),
     body: Joi.object().keys({
-        actualQuantity: Joi.number().positive().required().messages({
-            'number.base': 'Số lượng thực tế phải là số',
-            'number.positive': 'Số lượng thực tế phải lớn hơn 0',
+        actualQuantity: Joi.alternatives().try(
+            Joi.string().pattern(/^(?:0|[1-9]\d{0,10})(?:\.\d{1,9})?$/),
+            Joi.number().positive().max(99999999999).strict(),
+        ).required().messages({
+            'alternatives.match': 'Số lượng thực tế phải dương, tối đa 9 chữ số thập phân',
             'any.required': 'Số lượng thực tế là bắt buộc',
         }),
         actualProductId: Joi.string().uuid({ version: 'uuidv4' }).allow(null),
-        executedAt: Joi.date().iso(),
+        executedAt: Joi.date().iso().max('now'),
         note: Joi.string().trim().max(500).allow('', null),
         varianceReason: Joi.string().trim().max(500).allow('', null),
         idempotencyKey: Joi.string().uuid({ version: 'uuidv4' }).required().messages({

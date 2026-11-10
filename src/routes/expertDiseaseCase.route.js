@@ -6,6 +6,7 @@ const { expertDiseaseCaseValidator: validator } = require('../validators');
 
 const router = express.Router();
 router.use(authenticate, authorize(ACCOUNT_ROLE.EXPERT));
+router.use('/:caseId/protocols', require('./expertTreatmentProtocol.route'));
 
 /**
  * @route   GET /api/v1/expert/disease-cases
@@ -34,16 +35,5 @@ router.post('/:caseId/responses', validate(validator.respond), controller.respon
  * @access  Private (EXPERT)
  */
 router.post('/:caseId/resolve', validate(validator.resolve), controller.resolve);
-
-/**
- * @route   POST /api/v1/expert/disease-cases/:caseId/protocols/:protocolId/abort
- * @desc    Emergency abort treatment protocol (BR-TRT-01/02/03)
- * @access  Private (EXPERT)
- */
-router.post(
-    '/:caseId/protocols/:protocolId/abort',
-    validate(validator.abortProtocol),
-    controller.abortProtocol,
-);
 
 module.exports = router;

@@ -70,7 +70,7 @@ const itemWindow = (item, stage) => {
     const finalDose = new Prisma.Decimal(item.doseValue).plus(increment.times(last - doseAnchor));
     if (increment.lt(0) || finalDose.gt('9999999999') || (increment.gt(0)
         && (item.operationType !== 'FEEDING' || item.doseBasis !== 'FIXED_QUANTITY'
-            || item.repeatIntervalDays !== 1 || last > 28 || !['G', 'KG'].includes(item.doseUnit)))) {
+            || item.repeatIntervalDays !== 1 || !['G', 'KG'].includes(item.doseUnit)))) {
         throw ApiError.badRequest(messages.PRODUCTION_PROTOCOL.DAILY_INCREMENT);
     }
     return { first, last, recurrence, doseAnchor, increment };
@@ -176,6 +176,7 @@ const templateGroups = (items) => {
                 recommendedManufacturerId: item.recommendedManufacturerId ?? null,
                 doseBasis: item.doseBasis, doseValue: String(item.doseValue), doseUnit: item.doseUnit,
                 dailyDoseIncrement: String(item.dailyDoseIncrement ?? 0), repeatIntervalDays: item.repeatIntervalDays,
+                dueAtMinutes: item.dueAtMinutes ?? null,
                 firstDayOffset: item.startDayOfCulture - 1, lastDayOffset: item.endDayOfCulture - 1,
                 recurrenceAnchorOffset: item.startDayOfCulture - 1, doseAnchorOffset: item.startDayOfCulture - 1,
                 instructions: item.instructions,

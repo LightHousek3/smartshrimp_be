@@ -81,6 +81,7 @@ const material = Joi.object({
         .strict()
         .default(0),
     doseUnit: Joi.string().valid('KG', 'G', 'L', 'ML', 'PCS').required(),
+    dueAtMinutes: Joi.number().integer().min(0).max(2147483647).allow(null),
     instructions: Joi.string().trim().max(500).allow('', null).default(null),
 })
     .xor('productId', 'recommendation')

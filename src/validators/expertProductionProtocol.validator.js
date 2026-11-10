@@ -44,6 +44,7 @@ const item = Joi.object({
         review: Joi.any().strip(),
     }).allow(null).custom((value, helpers) => JSON.stringify(value).length <= 100000 ? value : helpers.error('any.invalid')),
     dailyDoseIncrement: decimal(10, 4, true),
+    dueAtMinutes: Joi.number().integer().min(0).max(2147483647).allow(null),
     firstDayOffset: Joi.number().integer().min(0).max(2147483646),
     lastDayOffset: Joi.number().integer().min(0).max(2147483646),
     recurrenceAnchorOffset: Joi.number().integer().min(0).max(2147483646),

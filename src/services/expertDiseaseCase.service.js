@@ -6,72 +6,40 @@ const SEVERITY_WEIGHT = {
 };
 
 const prisma = require('../config/prisma');
+const lifecycle = require('./protocolLifecycle.service');
 const { ApiError } = require('../utils');
 const {
     messages,
     NOTIFICATION_TYPE,
     PROTOCOL_STATUS,
-    SCHEDULE_CANCELLATION_TYPE,
+    WATER_THRESHOLDS,
 } = require('../constants');
 const { emitNotification } = require('../realtime/notification.socket');
-const { createHash } = require('crypto');
+const { protocolStages } = require('../utils/protocolPresentation');
 
-const timeText = (value) => (value == null ? null : value.toISOString().slice(11, 23));
-
-const viewId = (kind, itemId) => {
-    const hash = createHash('sha256').update(`${kind}:${itemId}`).digest('hex');
-    return `${hash.slice(0, 8)}-${hash.slice(8, 12)}-4${hash.slice(13, 16)}-8${hash.slice(17, 20)}-${hash.slice(20, 32)}`;
+/** Lock the season before its case, matching approval and operation lock order. */
+const findCaseForMutation = async (tx, expertId, caseId) => {
+    const context = await tx.diseaseCase.findUnique({ where: { id: caseId }, select: { seasonId: true } });
+    if (!context) throw ApiError.notFound(messages.DISEASE_CASE.NOT_FOUND);
+    await tx.$queryRaw`SELECT id FROM aquaculture_seasons WHERE id = ${context.seasonId}::uuid FOR UPDATE`;
+    await tx.$queryRaw`SELECT id FROM disease_cases WHERE id = ${caseId}::uuid FOR UPDATE`;
+    const diseaseCase = await tx.diseaseCase.findUnique({
+        where: { id: caseId },
+        include: { season: { include: { pond: { include: { farm: true } } } } },
+    });
+    if (!diseaseCase) throw ApiError.notFound(messages.DISEASE_CASE.NOT_FOUND);
+    if (diseaseCase.expertId !== expertId) throw ApiError.forbidden(messages.DISEASE_CASE.NOT_ASSIGNED);
+    if (diseaseCase.status === 'RESOLVED') throw ApiError.badRequest(messages.DISEASE_CASE.ALREADY_RESOLVED);
+    return diseaseCase;
 };
 
-const wireItem = (entry) => ({
-    id: entry.id,
-    operationType: entry.operationType,
-    productId: entry.productId,
-    recommendedProductName: entry.recommendedProductName,
-    recommendedCategory: entry.recommendedCategory,
-    repeatIntervalDays: entry.repeatIntervalDays,
-    doseBasis: entry.doseBasis,
-    doseValue: String(entry.doseValue),
-    doseUnit: entry.doseUnit,
-    instructions: entry.instructions,
-    product: entry.product && {
-        id: entry.product.id,
-        name: entry.product.name,
-        category: entry.product.category,
-        unit: entry.product.unit,
-    },
-});
-
-const groupItems = (items) => {
-    const stages = [];
-    for (const entry of items) {
-        let stage = stages.at(-1);
-        const startDayOffset = entry.startDayOffset - 1;
-        const endDayOffset = entry.endDayOffset - 1;
-        if (!stage || stage.startDayOffset !== startDayOffset || stage.endDayOffset !== endDayOffset) {
-            stage = {
-                id: viewId('stage', entry.id),
-                title: `DOC ${entry.startDayOffset}–${entry.endDayOffset}`,
-                startDayOffset,
-                endDayOffset,
-                meals: [],
-            };
-            stages.push(stage);
-        }
-        let meal = stage.meals.at(-1);
-        const planned = timeText(entry.plannedTime);
-        if (!meal || meal.mealNumber !== entry.mealNumber || meal.plannedTime !== planned) {
-            meal = {
-                id: viewId('meal', entry.id),
-                mealNumber: entry.mealNumber,
-                plannedTime: planned,
-                items: [],
-            };
-            stage.meals.push(meal);
-        }
-        meal.items.push(entry);
-    }
-    return stages;
+/** Authorship is historical; operational notices follow the current assignment. */
+const currentRecipients = async (tx, seasonId, ownerId) => {
+    const technicians = await tx.seasonPersonnelAssignment.findMany({
+        where: { seasonId, role: 'TECHNICIAN', unassignedAt: null, account: { status: 'ACTIVE' } },
+        select: { accountId: true },
+    });
+    return [...new Set([ownerId, ...technicians.map(entry => entry.accountId)].filter(Boolean))];
 };
 
 /**
@@ -116,14 +84,14 @@ const list = async (expertId, query = {}) => {
         const matchingCases = await prisma.$queryRaw`
             SELECT c.id FROM disease_cases c
             WHERE c.expert_id = ${expertId}::uuid
-              AND c.status <> 'RESOLVED'
+              AND c.status <> 'resolved'::disease_case_status
               AND (
                 NOT EXISTS (SELECT 1 FROM disease_case_responses r WHERE r.case_id = c.id)
                 OR (
                   SELECT a.role FROM disease_case_responses r
                   JOIN accounts a ON a.id = r.author_id
                   WHERE r.case_id = c.id
-                  ORDER BY r.created_at DESC LIMIT 1
+                  ORDER BY r.created_at DESC, r.id DESC LIMIT 1
                 ) <> 'expert'::account_role
               )
         `;
@@ -305,9 +273,8 @@ const detail = async (expertId, caseId) => {
         include: {
             items: {
                 orderBy: [
-                    { startDayOffset: 'asc' },
-                    { mealNumber: 'asc' },
-                    { plannedTime: 'asc' },
+                    { sequenceOrder: 'asc' },
+                    { id: 'asc' },
                 ],
                 include: {
                     product: {
@@ -376,8 +343,7 @@ const detail = async (expertId, caseId) => {
                 cancelledCount = canc;
             }
 
-            const rawItems = proto.items.map(wireItem);
-            const stages = groupItems(rawItems);
+            const stages = protocolStages(proto);
 
             const statusHistoryWithChanger = (proto.statusHistory || []).map((h) => ({
                 ...h,
@@ -427,7 +393,9 @@ const detail = async (expertId, caseId) => {
 
     return {
         ...diseaseCase,
+        waterThresholds: WATER_THRESHOLDS[diseaseCase.season.shrimpType] ?? null,
         protocols: protocolsWithMetrics,
+        productionHolds: await lifecycle.activeHolds(prisma, diseaseCase.seasonId),
         latestWaterLog: latestWater,
         latestMetrics: {
             health: latestHealth
@@ -468,29 +436,7 @@ const respond = async (expertId, caseId, data) => {
     const pendingNotifications = [];
 
     const result = await prisma.$transaction(async (tx) => {
-        // Verify ownership and lifecycle validity within the transaction.
-        const diseaseCase = await tx.diseaseCase.findUnique({
-            where: { id: caseId },
-            include: {
-                season: {
-                    include: {
-                        pond: { include: { farm: true } },
-                    },
-                },
-            },
-        });
-
-        if (!diseaseCase) {
-            throw ApiError.notFound(messages.DISEASE_CASE.NOT_FOUND);
-        }
-
-        if (diseaseCase.expertId !== expertId) {
-            throw ApiError.forbidden(messages.DISEASE_CASE.NOT_ASSIGNED);
-        }
-
-        if (diseaseCase.status === 'RESOLVED') {
-            throw ApiError.badRequest(messages.DISEASE_CASE.ALREADY_RESOLVED);
-        }
+        const diseaseCase = await findCaseForMutation(tx, expertId, caseId);
 
         // Align case lifecycle with response intent while preserving active treatments.
         const isRequestInfo = data.responseType === 'REQUEST_INFO';
@@ -498,6 +444,34 @@ const respond = async (expertId, caseId, data) => {
         const isMonitoring = isInstruction && data.switchToMonitoring === true;
         let nextStatus = null;
         let statusReason = null;
+        if (diseaseCase.status === 'WAITING_FOR_INFO' && isMonitoring) {
+            throw ApiError.conflict(messages.TREATMENT_PROTOCOL.INFORMATION_PENDING);
+        }
+        if (data.withdrawRequestId) {
+            if (isRequestInfo) throw ApiError.badRequest(messages.TREATMENT_PROTOCOL.INFORMATION_PENDING);
+            const withdrawn = await tx.diseaseCaseResponse.updateMany({ where: {
+                id: data.withdrawRequestId, caseId, responseType: 'REQUEST_INFO',
+                OR: [{ requestStatus: 'OPEN' }, { requestStatus: null }],
+            }, data: { requestStatus: 'CANCELLED' } });
+            if (withdrawn.count !== 1) throw ApiError.conflict(messages.TREATMENT_PROTOCOL.INFORMATION_PENDING);
+            if (diseaseCase.status === 'WAITING_FOR_INFO'
+                && !await lifecycle.pendingRequests(tx, caseId)) {
+                const prior = await tx.diseaseCaseStatusHistory.findFirst({ where: { caseId, toStatus: 'WAITING_FOR_INFO' },
+                    orderBy: [{ changedAt: 'desc' }, { id: 'desc' }] });
+                if (!['OPEN', 'MONITORING'].includes(prior?.fromStatus)) throw ApiError.conflict(messages.TREATMENT_PROTOCOL.INFORMATION_PENDING);
+                nextStatus = prior.fromStatus;
+                statusReason = 'Expert thu hồi yêu cầu thông tin có lý do; trở về trạng thái trước khi chờ.';
+            }
+        }
+        if (data.releaseHoldIds?.length) {
+            if (!isInstruction) throw ApiError.badRequest(messages.TREATMENT_PROTOCOL.STATE);
+            const holds = await lifecycle.activeHolds(tx, diseaseCase.seasonId);
+            const selected = holds.filter(hold => data.releaseHoldIds.includes(hold.id));
+            if (selected.length !== data.releaseHoldIds.length) throw ApiError.conflict(messages.TREATMENT_PROTOCOL.STATE);
+            const protocol = await tx.protocol.findUnique({ where: { id: selected[0].protocolId } });
+            await lifecycle.release(tx, protocol, expertId, data.message.trim(), selected, now);
+            await lifecycle.resumeProduction(tx, diseaseCase.seasonId, now);
+        }
 
         // Never downgrade IN_TREATMENT status via basic info request or instruction switch
         if (diseaseCase.status !== 'IN_TREATMENT') {
@@ -550,6 +524,8 @@ const respond = async (expertId, caseId, data) => {
                 responseType: data.responseType,
                 message: data.message.trim(),
                 attachments: data.attachments || [],
+                requestStatus: isRequestInfo ? 'OPEN' : null,
+                replyToResponseId: data.withdrawRequestId ?? null,
                 createdAt: now,
             },
             include: {
@@ -559,9 +535,9 @@ const respond = async (expertId, caseId, data) => {
             },
         });
 
-        // Create notifications for KTV reporter and Owner
+        // Notify the Owner and currently assigned technician.
         const ownerId = diseaseCase.season?.pond?.farm?.ownerId;
-        const recipients = [diseaseCase.reportedBy, ownerId].filter(Boolean);
+        const recipients = await currentRecipients(tx, diseaseCase.seasonId, ownerId);
 
         const typeLabelMap = {
             REQUEST_INFO: 'Yêu cầu bổ sung thông tin ca bệnh',
@@ -621,58 +597,41 @@ const resolve = async (expertId, caseId, data) => {
     const pendingNotifications = [];
 
     const result = await prisma.$transaction(async (tx) => {
-        // Verify ownership and lifecycle validity within the transaction.
-        const diseaseCase = await tx.diseaseCase.findUnique({
-            where: { id: caseId },
-            include: {
-                season: {
-                    include: {
-                        pond: { include: { farm: true } },
-                    },
-                },
-            },
-        });
+        const diseaseCase = await findCaseForMutation(tx, expertId, caseId);
 
-        if (!diseaseCase) {
-            throw ApiError.notFound(messages.DISEASE_CASE.NOT_FOUND);
+        if (diseaseCase.status === 'IN_TREATMENT') {
+            throw ApiError.badRequest(messages.DISEASE_CASE.PROTOCOL_RUNNING_BLOCK);
         }
-
-        if (diseaseCase.expertId !== expertId) {
-            throw ApiError.forbidden(messages.DISEASE_CASE.NOT_ASSIGNED);
+        if ((await lifecycle.activeHolds(tx, diseaseCase.seasonId)).length) {
+            throw ApiError.conflict(messages.TREATMENT_PROTOCOL.HOLD_RELEASE_REQUIRED);
         }
-
-        if (diseaseCase.status === 'RESOLVED') {
-            throw ApiError.badRequest(messages.DISEASE_CASE.ALREADY_RESOLVED);
+        if (!['OPEN', 'MONITORING'].includes(diseaseCase.status)
+            || await lifecycle.pendingRequests(tx, caseId)) {
+            throw ApiError.conflict(messages.TREATMENT_PROTOCOL.INFORMATION_PENDING);
         }
 
         // Resolve requires all linked treatment schedules to be completed or stopped.
         const activeProtocols = await tx.protocol.findMany({
             where: {
                 diseaseCaseId: caseId,
-                status: { in: [PROTOCOL_STATUS.PENDING_APPROVAL, PROTOCOL_STATUS.APPROVED] },
+                status: { in: [PROTOCOL_STATUS.DRAFT, PROTOCOL_STATUS.REJECTED, PROTOCOL_STATUS.PENDING_APPROVAL,
+                    PROTOCOL_STATUS.APPROVED, PROTOCOL_STATUS.ACTIVE] },
             },
             include: {
                 items: { select: { id: true } },
             },
         });
 
-        const pendingProto = activeProtocols.find((p) => p.status === PROTOCOL_STATUS.PENDING_APPROVAL);
+        const pendingProto = activeProtocols.find((p) => ['DRAFT', 'REJECTED', 'PENDING_APPROVAL'].includes(p.status));
         if (pendingProto) {
             throw ApiError.badRequest(messages.DISEASE_CASE.PROTOCOL_PENDING_APPROVAL_BLOCK);
         }
 
-        const approvedProto = activeProtocols.find((p) => p.status === PROTOCOL_STATUS.APPROVED);
-        if (approvedProto) {
-            const itemIds = approvedProto.items.map((i) => i.id);
-            const remainingPlanned = await tx.operationSchedule.count({
-                where: {
-                    protocolItemId: { in: itemIds },
-                    status: 'PLANNED',
-                },
-            });
-            if (remainingPlanned > 0) {
-                throw ApiError.badRequest(messages.DISEASE_CASE.PROTOCOL_RUNNING_BLOCK);
-            }
+        // An empty rolling window is not evidence that the entire course ended.
+        // Approval remains a blocker until an explicit terminal application outcome is stored.
+        if (diseaseCase.status === 'IN_TREATMENT'
+            || activeProtocols.some(p => ['APPROVED', 'ACTIVE'].includes(p.status))) {
+            throw ApiError.badRequest(messages.DISEASE_CASE.PROTOCOL_RUNNING_BLOCK);
         }
 
         // Atomic conditional state transition guarded by expected current status.
@@ -681,6 +640,7 @@ const resolve = async (expertId, caseId, data) => {
             data: {
                 status: 'RESOLVED',
                 resolutionSummary: summary,
+                resolutionReason: 'EXPERT_CONCLUDED',
                 resolvedBy: expertId,
                 resolvedAt: now,
                 updatedAt: now,
@@ -715,7 +675,7 @@ const resolve = async (expertId, caseId, data) => {
         });
 
         const ownerId = diseaseCase.season?.pond?.farm?.ownerId;
-        const recipients = [diseaseCase.reportedBy, ownerId].filter(Boolean);
+        const recipients = await currentRecipients(tx, diseaseCase.seasonId, ownerId);
 
         for (const recipientId of recipients) {
             if (recipientId !== expertId) {
@@ -756,172 +716,9 @@ const resolve = async (expertId, caseId, data) => {
     return result;
 };
 
-/**
- * Emergency Treatment Abort (BR-TRT-01, BR-TRT-02, BR-TRT-03).
- */
-const abortProtocol = async (expertId, caseId, protocolId, data) => {
-    const now = new Date();
-    const reason = data.reason.trim();
-    const pendingNotifications = [];
-
-    const result = await prisma.$transaction(async (tx) => {
-        // Verify ownership and lifecycle validity within the transaction.
-        const diseaseCase = await tx.diseaseCase.findUnique({
-            where: { id: caseId },
-            include: {
-                season: {
-                    include: {
-                        pond: { include: { farm: true } },
-                    },
-                },
-            },
-        });
-
-        if (!diseaseCase) {
-            throw ApiError.notFound(messages.DISEASE_CASE.NOT_FOUND);
-        }
-
-        if (diseaseCase.expertId !== expertId) {
-            throw ApiError.forbidden(messages.DISEASE_CASE.NOT_ASSIGNED);
-        }
-
-        const protocol = await tx.protocol.findUnique({
-            where: { id: protocolId },
-            include: { items: true },
-        });
-
-        if (!protocol || protocol.diseaseCaseId !== caseId) {
-            throw ApiError.notFound(messages.DISEASE_CASE.PROTOCOL_NOT_FOUND);
-        }
-
-        if (protocol.status !== PROTOCOL_STATUS.APPROVED) {
-            throw ApiError.badRequest(messages.DISEASE_CASE.PROTOCOL_NOT_APPROVED);
-        }
-
-        const itemIds = protocol.items.map((i) => i.id);
-
-        // Atomic protocol transition to ABORTED with mandatory clinical rationale.
-        const updateProtocolCount = await tx.protocol.updateMany({
-            where: { id: protocolId, diseaseCaseId: caseId, status: PROTOCOL_STATUS.APPROVED },
-            data: {
-                status: PROTOCOL_STATUS.ABORTED,
-                abortReason: reason.slice(0, 500),
-                abortedBy: expertId,
-                abortedAt: now,
-                updatedAt: now,
-            },
-        });
-
-        if (updateProtocolCount.count === 0) {
-            throw ApiError.conflict(messages.DISEASE_CASE.PROTOCOL_STATUS_CONFLICT);
-        }
-
-        // Append protocol status history
-        await tx.protocolStatusHistory.create({
-            data: {
-                protocolId,
-                fromStatus: PROTOCOL_STATUS.APPROVED,
-                toStatus: PROTOCOL_STATUS.ABORTED,
-                changedBy: expertId,
-                reason: reason.slice(0, 500),
-                changedAt: now,
-            },
-        });
-
-        // Cancel remaining unexecuted PLANNED treatment schedules.
-        const cancelResult = await tx.operationSchedule.updateMany({
-            where: {
-                protocolItemId: { in: itemIds },
-                status: 'PLANNED',
-            },
-            data: {
-                status: 'CANCELLED',
-                cancellationType: SCHEDULE_CANCELLATION_TYPE.TREATMENT_ABORTED,
-                cancellationReason: reason.slice(0, 500),
-                cancelledBy: expertId,
-                cancelledAt: now,
-                updatedAt: now,
-            },
-        });
-
-        // Move Disease Case to MONITORING if not already resolved
-        if (diseaseCase.status !== 'MONITORING' && diseaseCase.status !== 'RESOLVED') {
-            await tx.diseaseCase.updateMany({
-                where: { id: caseId, status: { notIn: ['MONITORING', 'RESOLVED'] } },
-                data: {
-                    status: 'MONITORING',
-                    updatedAt: now,
-                },
-            });
-
-            await tx.diseaseCaseStatusHistory.create({
-                data: {
-                    caseId,
-                    fromStatus: diseaseCase.status,
-                    toStatus: 'MONITORING',
-                    changedBy: expertId,
-                    reason: reason.slice(0, 500),
-                    changedAt: now,
-                },
-            });
-        }
-
-        // Record emergency response event to document early protocol termination.
-        await tx.diseaseCaseResponse.create({
-            data: {
-                caseId,
-                authorId: expertId,
-                responseType: 'EMERGENCY_ALERT',
-                message: reason.slice(0, 500),
-                attachments: [],
-                createdAt: now,
-            },
-        });
-
-        // Notify KTV and Owner
-        const ownerId = diseaseCase.season?.pond?.farm?.ownerId;
-        const recipients = [diseaseCase.reportedBy, ownerId].filter(Boolean);
-
-        for (const recipientId of recipients) {
-            if (recipientId !== expertId) {
-                const notif = await tx.notification.create({
-                    data: {
-                        accountId: recipientId,
-                        title: `Dừng khẩn cấp phác đồ điều trị: ${protocol.title}`.slice(0, 255),
-                        content: `Chuyên gia đã dừng khẩn cấp phác đồ cho ca bệnh "${diseaseCase.title}". Lý do: ${reason.slice(0, 200)}`,
-                        type: NOTIFICATION_TYPE.TREATMENT_PROTOCOL_ABORTED,
-                        referenceType: 'disease_case',
-                        referenceId: caseId,
-                    },
-                });
-                // Buffer notifications for dispatch only after the transaction successfully commits.
-                pendingNotifications.push({ recipientId, event: 'notification:new', payload: notif });
-            }
-        }
-
-        return {
-            protocolId,
-            abortedAt: now,
-            cancelledSchedulesCount: cancelResult.count,
-        };
-    });
-
-    // Dispatch buffered notifications outside the database transaction.
-    for (const item of pendingNotifications) {
-        try {
-            emitNotification(item.recipientId, item.event, item.payload);
-        } catch {
-            // Ignore socket delivery error
-        }
-    }
-
-    return result;
-};
-
 module.exports = {
     list,
     detail,
     respond,
     resolve,
-    abortProtocol,
 };

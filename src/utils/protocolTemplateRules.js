@@ -43,7 +43,6 @@ const assertTemplateDose = (item, product, startDay, environment) => {
             environment ||
             item.doseBasis !== DoseBasis.FIXED_QUANTITY ||
             (item.repeatIntervalDays ?? 1) !== 1 ||
-            (item.endDay ?? startDay) > 29 ||
             !['KG', 'G'].includes(item.doseUnit))
     ) {
         throw ApiError.badRequest(

@@ -573,25 +573,25 @@ const messages = {
             'Dữ liệu cấu trúc hoặc liều của phác đồ V2 không đầy đủ. Vui lòng kiểm tra dữ liệu trước khi tiếp tục.',
         PENDING_NOTIFICATION_CONTENT: (title, versionNo, seasonName, pondName, farmName) =>
             `Phác đồ "${title}" (v${versionNo}) của vụ ${seasonName}, ao ${pondName}, trang trại ${farmName} đang chờ chủ trại duyệt.`,
-        PENDING_NOTIFICATION_TITLE: 'Phác đồ nuôi đang chờ duyệt',
+        PENDING_NOTIFICATION_TITLE: 'Phác đồ đang chờ duyệt',
         STAGE_OVERLAP:
-            'Các giai đoạn không được trùng ngày DOC. Ngày kết thúc cũng thuộc giai đoạn.',
-        SUBMITTED: 'Đã gửi phác đồ nuôi để chủ trại duyệt.',
+            'Các giai đoạn không được trùng ngày áp dụng. Ngày kết thúc cũng thuộc giai đoạn.',
+        SUBMITTED: 'Đã gửi phác đồ để chủ trại duyệt.',
         SUBMIT_INCOMPLETE:
             'Cần có ít nhất một hạng mục và giờ thực hiện cho mọi cữ trước khi gửi duyệt.',
         TEMPLATE_NOT_FOUND: 'Không tìm thấy phác đồ mẫu phù hợp trong trang trại.',
         TEMPLATE_V2_APPLICATION_UNAVAILABLE:
             'Chức năng áp dụng mẫu vào vụ nuôi hiện chưa khả dụng. Anh/chị vẫn có thể tạo, xem và chỉnh sửa mẫu; hồ sơ vật tư, liều và lịch chỉ được chuyển sang vụ khi luồng áp dụng hỗ trợ đầy đủ.',
-        CREATED: 'Đã lưu bản nháp phác đồ nuôi.',
-        UPDATED: 'Đã lưu phác đồ nuôi.',
-        CANCELLED: 'Đã hủy bản nháp phác đồ nuôi.',
+        CREATED: 'Đã lưu bản nháp phác đồ.',
+        UPDATED: 'Đã lưu phác đồ.',
+        CANCELLED: 'Đã hủy hoặc thu hồi phác đồ chưa áp dụng.',
         EXPERT_INACTIVE: 'Tài khoản chuyên gia không còn hoạt động.',
         TIME_PRECISION:
             'Giờ thực hiện có độ chính xác cao hơn form hỗ trợ; không thể ghi lại các hạng mục này.',
         NOT_FOUND: 'Không tìm thấy vụ nuôi hoặc phác đồ trong phạm vi được phân công.',
         CONFLICT: 'Dữ liệu đã thay đổi. Vui lòng tải lại trước khi tiếp tục.',
         STATE: 'Trạng thái hiện tại không cho phép thao tác này.',
-        IN_PROGRESS: 'Vụ nuôi đã có phác đồ đang soạn, bị từ chối hoặc chờ duyệt.',
+        IN_PROGRESS: 'Đã có bản đang soạn, bị từ chối hoặc chờ duyệt cần xử lý trước.',
         DEPENDENCY: 'Phác đồ đã có phiên bản kế tiếp hoặc lịch vận hành, không thể sửa/hủy.',
         PRODUCT: 'Vật tư phải đang hoạt động và thuộc cùng trang trại.',
         UNIT: 'Đơn vị liều không tương thích với đơn vị vật tư.',
@@ -730,11 +730,25 @@ const messages = {
         RESOLVED: 'Đánh dấu ca bệnh đã giải quyết thành công',
         ALREADY_RESOLVED: 'Ca bệnh đã được giải quyết, không thể thực hiện thêm thao tác',
         RESOLUTION_SUMMARY_REQUIRED: 'Bắt buộc nhập nội dung tóm tắt giải quyết',
-        PROTOCOL_ABORTED: 'Dừng khẩn cấp phác đồ điều trị thành công',
+        CASE_OR_ROLE_CONFLICT: 'Ca bệnh hoặc phân công đã thay đổi. Vui lòng tải lại.',
+        PROTOCOL_PENDING_APPROVAL_BLOCK: 'Còn phác đồ nháp, bị từ chối hoặc đang chờ duyệt. Cần xử lý trước khi khép ca.',
+        PROTOCOL_RUNNING_BLOCK: 'Còn phác đồ điều trị chưa có kết quả kết thúc. Không thể đóng ca chỉ dựa vào số lịch đã sinh.',
+        PROTOCOL_ABORTED: 'Dừng phác đồ điều trị thành công',
     },
 
     TECHNICIAN_DASHBOARD: {
         FETCHED: 'Lấy tổng quan vận hành thành công',
+    },
+
+    TREATMENT_PROTOCOL: {
+        INSTRUCTIONS_REQUIRED: 'Cần ghi chỉ định và hướng theo dõi sau điều trị trước khi gửi duyệt.',
+        INFORMATION_PENDING: 'Ca hoặc yêu cầu thông tin chưa cho phép chuyển bước; cần xử lý yêu cầu còn mở trước.',
+        START_REQUIRED: 'Cần mốc bắt đầu điều trị hợp lệ trong tương lai, vụ đang hoạt động và đầy đủ khoảng giờ thực hiện trước khi gửi/duyệt.',
+        FIRST_OCCURRENCE: 'Cữ ngày điều trị đầu tiên không được trước giờ bắt đầu Expert chỉ định.',
+        STATE: 'Trạng thái ca hoặc phác đồ không cho phép thao tác này.',
+        REASON_REQUIRED: 'Cần ghi lý do và quyết định cho phác đồ nuôi tiếp tục hoặc tạm giữ.',
+        COMPLETED: 'Đã hoàn tất toàn bộ liệu trình theo kế hoạch được duyệt.',
+        HOLD_RELEASE_REQUIRED: 'Ca còn giữ phác đồ nuôi. Expert cần gỡ giữ bằng chỉ dẫn trong ca trước khi khép chuyên môn.',
     },
 
     // Server
