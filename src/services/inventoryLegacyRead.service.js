@@ -64,7 +64,9 @@ const flags = {
  */
 const requireFarm = async (farmId, ownerId) => {
     const [farm] =
-        await prisma.$queryRaw`SELECT id, name FROM farms f WHERE id=${farmId}::uuid AND owner_id=${ownerId}::uuid`;
+        await prisma.$queryRaw`SELECT id, name FROM farms f
+            WHERE id=${farmId}::uuid AND owner_id=${ownerId}::uuid
+                AND NOT COALESCE((to_jsonb(f)->>'is_deleted')::boolean, false)`;
     if (!farm) {
         throw new ApiError(httpStatus.NOT_FOUND, messages.INVENTORY.FARM_NOT_FOUND);
     }
@@ -135,6 +137,7 @@ const productRows = (farmId, ownerId, productId) =>
             ORDER BY b.received_at,b.id) FROM inventory_balances b WHERE b.product_id=p.id), '[]'::jsonb) AS balances
     FROM products p JOIN farms f ON f.id=p.farm_id
     WHERE p.farm_id=${farmId}::uuid AND f.owner_id=${ownerId}::uuid
+        AND NOT COALESCE((to_jsonb(p)->>'is_deleted')::boolean, false)
         ${productId ? Prisma.sql`AND p.id=${productId}::uuid` : Prisma.empty}
     ORDER BY p.created_at DESC,p.id DESC`);
 /**

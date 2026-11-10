@@ -4,6 +4,7 @@ const {
     PRODUCT_CATEGORY,
     PRODUCT_UNIT,
     CONVERSION_UNIT,
+    BOTTLE_CONVERSION_UNITS,
     OWNER_INVENTORY_TRANSACTION_TYPES,
     INVENTORY_TRANSACTION_TYPE,
     PRODUCT_STOCK_STATUS,
@@ -101,10 +102,9 @@ const productFields = {
     }).min(1),
     imageUrls: Joi.array().items(Joi.string().trim().uri({ scheme: ['https'] })
         .max(2048)).unique()
-        .max(3),
+        .min(1).max(3),
     imageUrl: Joi.string().trim().uri({ scheme: ['https'] })
-        .max(2048)
-        .allow(null),
+        .max(2048),
 };
 
 /**
@@ -125,6 +125,9 @@ const validateConversion = (value, helpers) => {
         return helpers.message({
             custom: messages.INVENTORY.CONVERSION_NOT_ALLOWED,
         });
+    }
+    if (value.unit === PRODUCT_UNIT.BOTTLE && !BOTTLE_CONVERSION_UNITS.includes(value.conversionUnit)) {
+        return helpers.message({ custom: messages.INVENTORY.BOTTLE_CONVERSION_UNIT });
     }
     return value;
 };
@@ -155,7 +158,7 @@ const getProducts = {
 
 /**
  * Require catalog identity and essential label facts before creation.
- * Photos and evidence are optional; packaged units require both conversion fields.
+ * Require at least one label photo; packaged units require both conversion fields.
  */
 const createProduct = {
     params: farmParams,
@@ -175,7 +178,7 @@ const createProduct = {
             containsAntibiotic: Joi.boolean().required(),
             withdrawalDays: Joi.number().min(0).max(9999.999).precision(3).strict().required(),
         }).required(),
-    }).custom(validateConversion),
+    }).xor('imageUrl', 'imageUrls').custom(validateConversion),
 };
 
 /**
@@ -186,11 +189,11 @@ const updateProduct = {
     body: Joi.object({
         ...productFields,
         expectedUpdatedAt: Joi.date().iso().required(),
-    }).or(...Object.keys(productFields)),
+    }).or(...Object.keys(productFields)).without('imageUrl', 'imageUrls'),
 };
 
 /**
- * A receipt creates a lot and identifies its supplier by either directory ID or name.
+ * New receipts reference the Owner's supplier directory; the server records the name snapshot.
  */
 const stockInBody = Joi.object({
     transactionType: Joi.string().valid(INVENTORY_TRANSACTION_TYPE.STOCK_IN).required(),
@@ -199,12 +202,13 @@ const stockInBody = Joi.object({
         .required(),
     quantity: quantity.required(),
     unitPrice: unitPrice.required(),
+    // Older clients may send a display name; the service snapshots the selected supplier.
     supplierName: normalizedText(255),
-    supplierId: uuid,
+    supplierId: uuid.required(),
     expiryDate: expiryDate.required(),
     reason: Joi.string().trim().max(255)
         .allow('', null),
-}).or('supplierId', 'supplierName');
+});
 
 /**
  * Require a reason for every adjustment so manual corrections remain traceable.
@@ -309,7 +313,7 @@ module.exports = {
      */
     archiveProduct: { params: productParams },
     restoreProduct: { params: productParams },
-    deleteProduct: { params: productParams },
+    deleteProduct: { params: productParams, body: Joi.object({ confirmationToken: Joi.string().pattern(/^[a-f0-9]{64}$/) }) },
     /**
      * Require a valid calendar date and version token before filling unknown lot expiry.
      */

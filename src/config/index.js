@@ -119,6 +119,13 @@ const config = {
     goong: {
         apiKey: process.env.GOONG_API_KEY,
     },
+    ocr: {
+        apiKey: (process.env.OCR_GEMINI_API_KEY || '').trim(),
+        model: (process.env.GEMINI_MODEL || 'gemini-3.5-flash-lite').trim(),
+        timeoutMs: Math.min(60000, Math.max(5000, parseInt(process.env.OCR_TIMEOUT_MS, 10) || 45000)),
+        dailyLimit: Math.max(1, parseInt(process.env.OCR_DAILY_LIMIT, 10) || 100),
+        imageCloudName: (process.env.OCR_CLOUDINARY_CLOUD_NAME || process.env.CLOUDINARY_CLOUD_NAME || '').trim(),
+    },
     rag: {
         serviceUrl: (process.env.RAG_SERVICE_URL || '').replace(/\/+$/, ''),
         internalApiKey: process.env.RAG_INTERNAL_API_KEY,

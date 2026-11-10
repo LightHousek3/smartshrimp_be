@@ -18,6 +18,8 @@ const waterLogValidator = require('./waterLog.validator');
 const shrimpHealthValidator = require('./shrimpHealth.validator');
 const operationValidator = require('./operation.validator');
 const inventoryValidator = require('./inventory.validator');
+const inventoryLabelValidator = require('./inventoryLabel.validator');
+const inventorySubstanceValidator = require('./inventorySubstance.validator');
 const supplierValidator = require('./supplier.validator');
 const taskValidator = require('./task.validator');
 const harvestValidator = require('./harvest.validator');
@@ -53,6 +55,8 @@ module.exports = {
     shrimpHealthValidator,
     operationValidator,
     inventoryValidator,
+    inventoryLabelValidator,
+    inventorySubstanceValidator,
     supplierValidator,
     taskValidator,
     harvestValidator,

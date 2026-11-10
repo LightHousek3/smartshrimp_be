@@ -1,6 +1,11 @@
-const { inventoryService } = require('../services');
+const { inventoryService, inventoryLabelService } = require('../services');
 const { asyncHandler, ResponseHandler } = require('../utils');
 const { messages } = require('../constants');
+
+const scanLabel = asyncHandler(async (req, res) => {
+    const result = await inventoryLabelService.scanLabel(req.params.farmId, req.account.id, req.body.images);
+    ResponseHandler.success(res, { message: messages.INVENTORY_LABEL.SCANNED, data: result });
+});
 
 const getProductsForReview = asyncHandler(async (req, res) => {
     const { products, meta } = await inventoryService.getProductsForReview(req.query);
@@ -89,7 +94,7 @@ const updateProduct = asyncHandler(async (req, res) => {
 
 /**
  * POST /owner/farms/:farmId/products/:productId/archive
- * Stop new use while retaining existing stock, schedules and historical records.
+ * Stop new use and cancel pending schedules while retaining stock and historical records.
  */
 const archiveProduct = asyncHandler(async (req, res) => {
     const product = await inventoryService.archiveProduct(
@@ -160,10 +165,10 @@ const getInventoryHistory = asyncHandler(async (req, res) => {
 
 /**
  * DELETE /owner/farms/:farmId/products/:productId
- * Delete only an unreferenced product and its owned compliance record.
+ * Confirm affected plans before deleting a product without stock or operational history.
  */
 const deleteProduct = asyncHandler(async (req, res) => {
-    await inventoryService.deleteProduct(req.params.farmId, req.params.productId, req.account.id);
+    await inventoryService.deleteProduct(req.params.farmId, req.params.productId, req.account.id, req.body);
 
     ResponseHandler.noContent(res);
 });
@@ -188,6 +193,7 @@ const updateLotExpiry = asyncHandler(async (req, res) => {
 });
 
 module.exports = {
+    scanLabel,
     getProductsForReview,
     getProductForReview,
     reviewProductCompliance,

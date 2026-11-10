@@ -1,5 +1,7 @@
 const httpStatus = require('./httpStatus');
 const messages = require('./messages');
+const INVENTORY_LABEL_LIMITS = require('./inventoryLabel');
+const INVENTORY_LABEL_PROMPT = require('./inventoryLabelPrompt');
 const NOTIFICATION_TYPE = require('./notificationType');
 // Re-export Prisma enums directly: aliases preserve the existing public imports.
 const {
@@ -138,6 +140,7 @@ const CONVERSION_UNIT = Object.freeze({
     ML: 'ML',
     L: 'L',
 });
+const BOTTLE_CONVERSION_UNITS = Object.freeze([CONVERSION_UNIT.ML, CONVERSION_UNIT.L]);
 
 const INVENTORY_TRANSACTION_TYPE = Object.freeze({
     STOCK_IN: 'STOCK_IN',
@@ -387,6 +390,8 @@ module.exports = {
     ...require('./technicianDashboard'),
     ...require('./aiDiagnosis'),
     FARM_STATUS,
+    INVENTORY_LABEL_LIMITS,
+    INVENTORY_LABEL_PROMPT,
     HARVEST_POLICY,
     HARVEST_LIMITS,
     HARVEST_ERROR_CODE,
@@ -444,6 +449,7 @@ module.exports = {
     PRODUCT_CATEGORY,
     PRODUCT_UNIT,
     CONVERSION_UNIT,
+    BOTTLE_CONVERSION_UNITS,
     INVENTORY_TRANSACTION_TYPE,
     OWNER_INVENTORY_TRANSACTION_TYPES,
     PRODUCT_STOCK_STATUS,

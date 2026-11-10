@@ -1,11 +1,17 @@
-const { randomUUID } = require('crypto');
+const { randomUUID, createHash } = require('crypto');
 const { Prisma } = require('@prisma/client');
 const prisma = require('../config/prisma');
-const { ApiError, requireCompleteInventoryProduct, isInventoryProductReviewable } = require('../utils');
+const {
+    ApiError,
+    requireCompleteInventoryProduct,
+    isInventoryProductReviewable,
+    checkIngredients,
+} = require('../utils');
 const {
     httpStatus,
     messages,
     PRODUCT_UNIT,
+    BOTTLE_CONVERSION_UNITS,
     PRODUCT_STOCK_STATUS,
     PRODUCT_ARCHIVE_STATUS,
     PRODUCT_STATUS,
@@ -16,6 +22,10 @@ const {
     NOTIFICATION_TYPE,
     INVENTORY_LIMITS,
     PRODUCT_COMPLIANCE_STATUS,
+    ACCOUNT_STATUS,
+    PERSONNEL_ROLE,
+    SEASON_STATUS,
+    SCHEDULE_CANCELLATION_TYPE,
 } = require('../constants');
 const { emitNotification } = require('../realtime');
 const { requireSelectableSupplier } = require('./supplier.service');
@@ -51,6 +61,15 @@ const PRODUCT_SELECT = {
         },
     },
     compliance: true,
+    _count: {
+        select: {
+            inventoryTransactions: true,
+            inventoryBalances: true,
+            schedules: true,
+            executions: true,
+            protocolItems: { where: { protocol: { status: { not: PROTOCOL_STATUS.DRAFT } } } },
+        },
+    },
     imageUrls: true,
     createdAt: true,
     updatedAt: true,
@@ -160,7 +179,7 @@ const calculateStockMetrics = (balances = []) => {
  * status is authoritative; isArchived is the compatibility alias for INACTIVE.
  */
 const normalizeProduct = (product, { includeLots = false } = {}) => {
-    const { inventoryBalances = [], ...baseProduct } = product;
+    const { inventoryBalances = [], _count, ...baseProduct } = product;
     const metrics = calculateStockMetrics(inventoryBalances);
     const normalized = {
         ...baseProduct,
@@ -169,11 +188,13 @@ const normalizeProduct = (product, { includeLots = false } = {}) => {
         readOnly: false,
         imageUrls: baseProduct.imageUrls || [],
         imageUrl: baseProduct.imageUrls?.[0] || null,
-        metadataLocked: baseProduct.metadataLocked === true,
+        metadataLocked: baseProduct.metadataLocked
+            ?? Object.values(_count || {}).some((count) => count > 0),
         compliance: baseProduct.compliance && {
             ...baseProduct.compliance,
             withdrawalDays: baseProduct.compliance.withdrawalDays == null ? null : Number(baseProduct.compliance.withdrawalDays),
         },
+        substanceCheck: checkIngredients(baseProduct.compliance?.ingredientsText),
         conversionQuantity:
             baseProduct.conversionQuantity == null
                 ? null
@@ -301,7 +322,7 @@ const requireActiveProduct = (product) => {
  */
 const validateConversion = ({
     unit, conversionQuantity, conversionUnit,
-}) => {
+}, { enforceBottleUnit = true } = {}) => {
     const packaged = PACKAGED_UNITS.has(unit);
     const hasQuantity = conversionQuantity != null;
     const hasUnit = conversionUnit != null;
@@ -316,6 +337,9 @@ const validateConversion = ({
             httpStatus.BAD_REQUEST,
             messages.INVENTORY.CONVERSION_NOT_ALLOWED,
         );
+    }
+    if (enforceBottleUnit && unit === PRODUCT_UNIT.BOTTLE && !BOTTLE_CONVERSION_UNITS.includes(conversionUnit)) {
+        throw ApiError.badRequest(messages.INVENTORY.BOTTLE_CONVERSION_UNIT);
     }
 };
 
@@ -346,7 +370,7 @@ const mapWriteError = (error) => {
     if (error.code === 'P2003') {
         throw new ApiError(httpStatus.CONFLICT, messages.INVENTORY.HAS_REFERENCES);
     }
-    if (error.code === 'P2034') {
+    if (error.code === 'P2034' || (error.code === 'P2010' && ['40001', '40P01'].includes(error.meta?.code))) {
         throw new ApiError(httpStatus.CONFLICT, messages.INVENTORY.CHANGE_CONFLICT);
     }
     throw error;
@@ -467,7 +491,7 @@ const getProduct = async (farmId, productId, ownerId) => {
             },
         },
     });
-    const [plannedUseCount, used, deletable] = await Promise.all([
+    const [plannedUseCount, used, deletion] = await Promise.all([
         prisma.operationSchedule.count({
             where: {
                 productId,
@@ -475,7 +499,7 @@ const getProduct = async (farmId, productId, ownerId) => {
             },
         }),
         hasProductUsage(prisma, productId),
-        canDeleteProduct(prisma, productId),
+        productDeletionImpact(prisma, product),
     ]);
     return {
         ...normalizeProduct({
@@ -484,7 +508,9 @@ const getProduct = async (farmId, productId, ownerId) => {
         }, { includeLots: true }),
         plannedUseCount,
         canArchive: product.status === PRODUCT_STATUS.ACTIVE,
-        canDelete: deletable,
+        canDelete: deletion.allowed,
+        deletionConfirmationToken: deletion.token,
+        deletionConfirmationMessage: deletion.message,
     };
 };
 
@@ -503,7 +529,7 @@ const prepareProductData = ({ imageUrl, ...productData }, { fillDefaults = false
 });
 
 /**
- * Owner saves derive readiness from label facts, never a client status; photos are optional.
+ * Owner saves require complete label facts and photos, never a client-supplied status.
  * A manual block survives ordinary edits until an Admin explicitly lifts it.
  */
 const prepareOwnerCompliance = (product, requested, ownerId, checkedAt, current = null, photosChanged = false) => {
@@ -518,7 +544,10 @@ const prepareOwnerCompliance = (product, requested, ownerId, checkedAt, current 
     } else if (!facts.evidenceUrls?.length) {
         facts.evidenceUrls = product.imageUrls || [];
     }
-    if (current?.complianceStatus === PRODUCT_COMPLIANCE_STATUS.BLOCKED) {
+    requireCompleteInventoryProduct({ ...product, compliance: facts });
+    const manuallyBlocked = current?.complianceStatus === PRODUCT_COMPLIANCE_STATUS.BLOCKED
+        && !current.reviewNote?.startsWith('AUTO_SUBSTANCE_BLOCK:');
+    if (manuallyBlocked) {
         return {
             ...facts,
             complianceStatus: PRODUCT_COMPLIANCE_STATUS.BLOCKED,
@@ -579,9 +608,6 @@ const productFieldChanged = (current, next, field) => {
     if (field === 'imageUrls') {
         return JSON.stringify(current.imageUrls) !== JSON.stringify(next.imageUrls);
     }
-    if (field === 'imageUrl') {
-        return (current.imageUrls?.[0] || null) !== next.imageUrl;
-    }
     if (field === 'conversionQuantity') {
         return !decimalEqual(current[field], next[field]);
     }
@@ -595,8 +621,13 @@ const productFieldChanged = (current, next, field) => {
  */
 const updateProduct = async (farmId, productId, productData, ownerId) => {
     const {
-        expectedUpdatedAt, compliance, ...requestedData
+        expectedUpdatedAt, compliance, ...fields
     } = productData;
+    if (Object.hasOwn(fields, 'imageUrl') && Object.hasOwn(fields, 'imageUrls')) {
+        throw ApiError.badRequest(messages.INVENTORY.IMAGE_FIELDS_CONFLICT);
+    }
+    // Normalize aliases before merging so validation and both writes see the same label.
+    const requestedData = prepareProductData(fields);
     try {
         const product = await prisma.$transaction(
             async (transaction) => {
@@ -609,16 +640,22 @@ const updateProduct = async (farmId, productId, productData, ownerId) => {
                     ownerId,
                 );
                 requireActiveProduct(current);
-                const merged = prepareProductData({
+                const merged = {
                     ...current,
                     ...requestedData,
+                };
+                // Unrelated edits must not reinterpret a legacy product's stored conversion.
+                validateConversion(merged, {
+                    enforceBottleUnit: UNIT_LOCKED_FIELDS.some((field) => Object.hasOwn(requestedData, field)),
                 });
-                validateConversion(merged);
 
                 const used = await hasProductUsage(transaction, productId);
-                const identityFields = ['name', 'category', 'manufacturerId', 'imageUrls', 'imageUrl', 'recommendationReason', ...UNIT_LOCKED_FIELDS];
-                const lockedIdentityFields = identityFields;
-                if (used && (compliance !== undefined || lockedIdentityFields.some((field) => productFieldChanged(current, requestedData, field)))) {
+                const identityFields = [
+                    'name', 'category', 'manufacturerId', 'imageUrls',
+                    'recommendationReason', ...UNIT_LOCKED_FIELDS,
+                ];
+                const identityChanged = identityFields.some((field) => productFieldChanged(current, requestedData, field));
+                if (used && (compliance !== undefined || identityChanged)) {
                     throw new ApiError(httpStatus.CONFLICT, messages.INVENTORY.METADATA_LOCKED);
                 }
                 if (requestedData.manufacturerId && requestedData.manufacturerId !== current.manufacturerId) {
@@ -649,8 +686,13 @@ const updateProduct = async (farmId, productId, productData, ownerId) => {
                     );
                 }
 
-                const updateData = prepareProductData(requestedData);
                 const updatedAt = new Date(Math.max(Date.now(), current.updatedAt.getTime() + 1));
+                // Validate the merged label before either product or compliance writes.
+                const complianceData = compliance !== undefined || identityChanged
+                    ? prepareOwnerCompliance(
+                        merged, compliance, ownerId, updatedAt, current.compliance,
+                        productFieldChanged(current, requestedData, 'imageUrls'),
+                    ) : null;
                 const result = await transaction.product.updateMany({
                     where: {
                         id: productId,
@@ -658,19 +700,14 @@ const updateProduct = async (farmId, productId, productData, ownerId) => {
                         updatedAt: versionRange(expectedUpdatedAt),
                     },
                     data: {
-                        ...updateData,
+                        ...requestedData,
                         updatedAt,
                     },
                 });
                 if (result.count !== 1) {
                     throw new ApiError(httpStatus.CONFLICT, messages.INVENTORY.CHANGE_CONFLICT);
                 }
-                if (compliance !== undefined || identityFields.some((field) => productFieldChanged(current, requestedData, field))) {
-                    const complianceData = prepareOwnerCompliance(
-                        merged, compliance, ownerId, updatedAt, current.compliance,
-                        productFieldChanged(current, requestedData, 'imageUrls')
-                            || productFieldChanged(current, requestedData, 'imageUrl'),
-                    );
+                if (complianceData) {
                     await transaction.productCompliance.upsert({
                         where: { productId },
                         create: {
@@ -680,10 +717,11 @@ const updateProduct = async (farmId, productId, productData, ownerId) => {
                         update: complianceData,
                     });
                 }
-                return transaction.product.findUnique({
+                const updated = await transaction.product.findUnique({
                     where: { id: productId },
                     select: productWithBalancesSelect,
                 });
+                return { ...updated, metadataLocked: used };
             },
             { isolationLevel: 'Serializable' },
         );
@@ -763,9 +801,45 @@ const reviewProductCompliance = async (productId, input, reviewerId) => {
     }
 };
 
-/**
- * Set an owned product inactive without removing stock or cancelling existing schedules.
- */
+/** Notify only current staff of open seasons that actually reference the material. */
+const inventoryRecipients = async (client, farmId, productId, ownerId, seasonIds) => {
+    const assignments = await client.seasonPersonnelAssignment.findMany({
+        where: {
+            unassignedAt: null,
+            role: { in: [PERSONNEL_ROLE.TECHNICIAN, PERSONNEL_ROLE.EXPERT] },
+            account: { status: ACCOUNT_STATUS.ACTIVE, managedByOwnerId: ownerId },
+            ...(seasonIds && { seasonId: { in: seasonIds } }),
+            season: {
+                pond: { farmId, farm: { ownerId } },
+                status: { in: [SEASON_STATUS.PLANNING, SEASON_STATUS.ACTIVE] },
+                ...(!seasonIds && { OR: [
+                    { schedules: { some: { productId, status: OPERATION_STATUS.PLANNED } } },
+                    { protocols: { some: {
+                        status: { in: [PROTOCOL_STATUS.APPROVED, PROTOCOL_STATUS.DRAFT, PROTOCOL_STATUS.PENDING_APPROVAL] },
+                        items: { some: { productId } },
+                    } } },
+                ] }),
+            },
+        },
+        select: { accountId: true },
+    });
+    return [...new Set([ownerId, ...assignments.map((assignment) => assignment.accountId)])];
+};
+
+const saveInventoryNotifications = async (client, recipients, data) => Promise.all(
+    recipients.map((accountId) => client.notification.create({
+        data: { ...data, accountId },
+        select: { id: true, accountId: true },
+    })),
+);
+
+const emitInventoryNotifications = (notifications) => {
+    for (const notification of notifications) {
+        emitNotification(notification.accountId, 'notification:new', { id: notification.id });
+    }
+};
+
+/** Stop new use and cancel unexecuted schedules while retaining stock and history. */
 const archiveProduct = (farmId, productId, ownerId) => changeStatus(farmId, productId, ownerId, PRODUCT_STATUS.INACTIVE);
 
 /**
@@ -777,10 +851,23 @@ const restoreProduct = (farmId, productId, ownerId) => changeStatus(farmId, prod
  * V2 status changes never erase stock, references or historical evidence.
  */
 const changeStatus = async (farmId, productId, ownerId, status) => {
+    let notifications = [];
     try {
         const product = await prisma.$transaction(async (tx) => {
+            await findOwnedProduct(tx, farmId, productId, ownerId, { id: true });
+            // Match execution's season -> product lock order before cancelling schedules.
+            const schedules = status === PRODUCT_STATUS.INACTIVE
+                ? await tx.operationSchedule.findMany({
+                    where: { productId, status: OPERATION_STATUS.PLANNED, execution: null },
+                    select: { id: true, seasonId: true },
+                }) : [];
+            const seasonIds = [...new Set(schedules.map((schedule) => schedule.seasonId))].sort();
+            for (const seasonId of seasonIds) {
+                await tx.$queryRaw`SELECT id FROM aquaculture_seasons WHERE id = ${seasonId}::uuid FOR UPDATE`;
+            }
             await tx.$queryRaw`SELECT id FROM products WHERE id = ${productId}::uuid FOR UPDATE`;
             const current = await findOwnedProduct(tx, farmId, productId, ownerId);
+            const changedAt = new Date(Math.max(Date.now(), current.updatedAt.getTime() + 1));
             const changed = await tx.product.updateMany({
                 where: {
                     id: productId,
@@ -789,17 +876,41 @@ const changeStatus = async (farmId, productId, ownerId, status) => {
                 },
                 data: {
                     status,
-                    updatedAt: new Date(),
+                    updatedAt: changedAt,
                 },
             });
             if (changed.count !== 1) {
                 throw new ApiError(httpStatus.CONFLICT, messages.INVENTORY.CHANGE_CONFLICT);
+            }
+            if (schedules.length) {
+                const cancelled = await tx.operationSchedule.updateMany({
+                    where: { productId, status: OPERATION_STATUS.PLANNED, execution: null },
+                    data: {
+                        status: OPERATION_STATUS.CANCELLED,
+                        cancellationType: SCHEDULE_CANCELLATION_TYPE.MANUAL_CORRECTION,
+                        cancellationReason: messages.INVENTORY.PRODUCT_ARCHIVE_REASON(current.name),
+                        cancelledBy: ownerId,
+                        cancelledAt: changedAt,
+                        updatedAt: changedAt,
+                    },
+                });
+                if (cancelled.count) {
+                    const recipients = await inventoryRecipients(tx, farmId, productId, ownerId, seasonIds);
+                    notifications = await saveInventoryNotifications(tx, recipients, {
+                        title: messages.INVENTORY.SCHEDULES_CANCELLED_TITLE,
+                        content: messages.INVENTORY.SCHEDULES_CANCELLED_CONTENT(current.name, cancelled.count),
+                        type: NOTIFICATION_TYPE.OPERATION_CANCELLED,
+                        referenceType: 'product',
+                        referenceId: productId,
+                    });
+                }
             }
             return tx.product.findUnique({
                 where: { id: productId },
                 select: productWithBalancesSelect,
             });
         }, { isolationLevel: 'Serializable' });
+        emitInventoryNotifications(notifications);
         return normalizeProduct(product);
     } catch (error) {
         return mapWriteError(error);
@@ -807,18 +918,50 @@ const changeStatus = async (farmId, productId, ownerId, status) => {
 };
 
 /**
- * Check every V2 reference, including template items that have no Prisma delegate yet.
+ * Planning references can be detached after confirmation; stock and operational history cannot.
  */
 const canDeleteProduct = async (client, productId) => {
     const [result] = await client.$queryRaw(Prisma.sql`SELECT NOT (
         EXISTS(SELECT 1 FROM inventory_balances WHERE product_id = ${productId}::uuid)
         OR EXISTS(SELECT 1 FROM inventory_transactions WHERE product_id = ${productId}::uuid)
-        OR EXISTS(SELECT 1 FROM production_protocol_template_items WHERE product_id = ${productId}::uuid)
-        OR EXISTS(SELECT 1 FROM protocol_items WHERE product_id = ${productId}::uuid)
+        OR EXISTS(SELECT 1 FROM protocol_items i JOIN protocols p ON p.id = i.protocol_id
+            WHERE i.product_id = ${productId}::uuid AND p.status <> 'draft')
         OR EXISTS(SELECT 1 FROM operation_schedules WHERE product_id = ${productId}::uuid)
         OR EXISTS(SELECT 1 FROM operation_executions WHERE actual_product_id = ${productId}::uuid)
     ) AS allowed`);
     return result.allowed;
+};
+
+const productDeletionImpact = async (client, product) => {
+    if (!await canDeleteProduct(client, product.id)) return { allowed: false, token: null, message: null };
+    // Keep the database timestamp precision in the confirmation fingerprint.
+    const templates = await client.$queryRaw`SELECT t.id, t.title, t.version_no AS "versionNo", t.updated_at::text AS revision
+        FROM production_protocol_templates t
+        WHERE EXISTS(SELECT 1 FROM production_protocol_template_items i WHERE i.template_id = t.id AND i.product_id = ${product.id}::uuid)
+        ORDER BY t.id`;
+    const protocols = await client.$queryRaw`SELECT p.id, p.title, p.updated_at::text AS revision
+        FROM protocols p WHERE EXISTS(SELECT 1 FROM protocol_items i WHERE i.protocol_id = p.id AND i.product_id = ${product.id}::uuid)
+        ORDER BY p.id`;
+    if (!templates.length && !protocols.length) return { allowed: true, templates, protocols, token: null, message: null };
+    const token = createHash('sha256').update(JSON.stringify({
+        productId: product.id, updatedAt: product.updatedAt, templates, protocols,
+    })).digest('hex');
+    return { allowed: true, templates, protocols, token,
+        message: messages.INVENTORY.DELETE_CONFIRMATION(product.name, templates.map(row => row.title), protocols.map(row => row.title)) };
+};
+
+/** Retain names, doses and dossier snapshots so the editor can replace a deleted selection. */
+const deletedMaterialDetails = (product, details, ownerId, now) => {
+    const proposed = details?.proposed ?? {
+        name: product.name, description: product.description, category: product.category.toLowerCase(),
+        unit: product.unit.toLowerCase(), conversionUnit: product.conversionUnit?.toLowerCase() ?? null,
+        conversionQuantity: product.conversionQuantity == null ? null : String(product.conversionQuantity),
+        manufacturer: product.manufacturer, productCompliance: product.compliance, imageUrls: product.imageUrls,
+        recommendationReason: product.recommendationReason || messages.INVENTORY.DELETED_MATERIAL_REPLACEMENT,
+    };
+    return JSON.parse(JSON.stringify({ proposed, ownerOverrides: details?.ownerOverrides ?? null, review: {
+        ...details?.review, deletedProductId: product.id, deletedAt: now.toISOString(), deletedBy: ownerId,
+    } }));
 };
 
 /**
@@ -844,15 +987,53 @@ const hasProductUsage = async (client, productId) => {
 };
 
 /**
- * Hard-delete only masters without references; the 1-1 compliance row cascades.
+ * Delete unused stock masters after confirming affected plans; retain their material snapshots.
  */
-const deleteProduct = async (farmId, productId, ownerId) => {
+const deleteProduct = async (farmId, productId, ownerId, input = {}) => {
     try {
-        return await prisma.$transaction(async (tx) => {
+        const notifications = await prisma.$transaction(async (tx) => {
             await tx.$queryRaw`SELECT id FROM products WHERE id = ${productId}::uuid FOR UPDATE`;
-            await findOwnedProduct(tx, farmId, productId, ownerId);
-            if (!await canDeleteProduct(tx, productId)) {
+            const product = await findOwnedProduct(tx, farmId, productId, ownerId);
+            const impact = await productDeletionImpact(tx, product);
+            if (!impact.allowed) {
                 throw new ApiError(httpStatus.CONFLICT, messages.INVENTORY.HAS_REFERENCES);
+            }
+            if (impact.token && input.confirmationToken !== impact.token) {
+                throw ApiError.conflict(input.confirmationToken
+                    ? messages.INVENTORY.CHANGE_CONFLICT : impact.message);
+            }
+            const now = new Date();
+            const templateItems = await tx.productionProtocolTemplateItem.findMany({
+                where: { productId }, select: { id: true, recommendedProductDetails: true },
+            });
+            for (const item of templateItems) await tx.productionProtocolTemplateItem.update({
+                where: { id: item.id }, data: { productId: null,
+                    recommendedProductDetails: deletedMaterialDetails(product, item.recommendedProductDetails, ownerId, now) },
+                select: { id: true },
+            });
+            for (const template of impact.templates) {
+                // The standalone V2 schema stores this status as VARCHAR; the application schema uses an enum.
+                // An SQL literal is accepted by both, unlike Prisma's enum-typed bind parameter.
+                const updated = await tx.$executeRaw`UPDATE production_protocol_templates
+                    SET status = 'inactive', version_no = version_no + 1, updated_at = ${now}
+                    WHERE id = ${template.id}::uuid AND version_no = ${template.versionNo}`;
+                if (updated !== 1) throw ApiError.conflict(messages.INVENTORY.CHANGE_CONFLICT);
+            }
+            const protocolItems = await tx.protocolItem.findMany({
+                where: { productId }, select: { id: true, recommendedProductDetails: true },
+            });
+            for (const item of protocolItems) {
+                const updated = await tx.protocolItem.updateMany({
+                    where: { id: item.id, productId }, data: { productId: null, materialSnapshot: Prisma.DbNull,
+                        recommendedProductDetails: deletedMaterialDetails(product, item.recommendedProductDetails, ownerId, now) },
+                });
+                if (updated.count !== 1) throw ApiError.conflict(messages.INVENTORY.CHANGE_CONFLICT);
+            }
+            if (impact.protocols.length) {
+                const updated = await tx.protocol.updateMany({
+                    where: { id: { in: impact.protocols.map(row => row.id) }, status: PROTOCOL_STATUS.DRAFT }, data: { updatedAt: now },
+                });
+                if (updated.count !== impact.protocols.length) throw ApiError.conflict(messages.INVENTORY.CHANGE_CONFLICT);
             }
             const changed = await tx.product.deleteMany({
                 where: {
@@ -863,7 +1044,13 @@ const deleteProduct = async (farmId, productId, ownerId) => {
             if (changed.count !== 1) {
                 throw new ApiError(httpStatus.CONFLICT, messages.INVENTORY.CHANGE_CONFLICT);
             }
+            return saveInventoryNotifications(tx, [ownerId], {
+                type: NOTIFICATION_TYPE.SYSTEM, title: messages.INVENTORY.DELETED_NOTIFICATION_TITLE,
+                content: messages.INVENTORY.DELETED_NOTIFICATION_CONTENT(product.name, impact.templates.map(row => row.title), impact.protocols.map(row => row.title)),
+                referenceType: 'inventory_product', referenceId: productId,
+            });
         }, { isolationLevel: 'Serializable' });
+        emitInventoryNotifications(notifications);
     } catch (error) {
         return mapWriteError(error);
     }
@@ -1012,12 +1199,13 @@ const recordStockTransaction = async (
     ownerId,
     idempotencyKey,
 ) => {
-    let notificationToEmit = null;
+    let notifications = [];
     if (!OWNER_INVENTORY_TRANSACTION_TYPES.includes(transactionData.transactionType)) {
         throw new ApiError(httpStatus.FORBIDDEN, messages.AUTH.FORBIDDEN);
     }
     if (
-        [INVENTORY_TRANSACTION_TYPE.ADJUSTMENT_IN, INVENTORY_TRANSACTION_TYPE.ADJUSTMENT_OUT]
+        [INVENTORY_TRANSACTION_TYPE.ADJUSTMENT_IN, INVENTORY_TRANSACTION_TYPE.ADJUSTMENT_OUT,
+            INVENTORY_TRANSACTION_TYPE.STOCK_OUT]
             .includes(transactionData.transactionType)
         && !transactionData.reason?.trim()
     ) {
@@ -1057,18 +1245,18 @@ const recordStockTransaction = async (
                 if ([INVENTORY_TRANSACTION_TYPE.STOCK_IN, INVENTORY_TRANSACTION_TYPE.ADJUSTMENT_IN].includes(transactionData.transactionType)) {
                     requireActiveProduct(product);
                 }
+                // Manual issues may dispose of blocked/expired stock; pond use has its own eligibility gate.
                 const previousStock = await getProductStock(transaction, productId);
                 const movementQuantity = decimal(transactionData.quantity);
                 let balance;
                 let totalAmount;
 
                 if (transactionData.transactionType === INVENTORY_TRANSACTION_TYPE.STOCK_IN) {
-                    const supplierName = transactionData.supplierId
-                        ? (await requireSelectableSupplier(transaction, ownerId, transactionData.supplierId)).name
-                        : transactionData.supplierName;
-                    if (!supplierName?.trim()) {
+                    if (!transactionData.supplierId) {
                         throw new ApiError(httpStatus.BAD_REQUEST, messages.INVENTORY.SUPPLIER_NAME_REQUIRED);
                     }
+                    const supplier = await requireSelectableSupplier(transaction, ownerId, transactionData.supplierId);
+                    const supplierName = supplier.name;
                     totalAmount = calculateTransactionAmount(
                         movementQuantity,
                         transactionData.unitPrice,
@@ -1188,23 +1376,16 @@ const recordStockTransaction = async (
                     && previousAlertStock.gte(threshold)
                     && currentAlertStock.lt(threshold);
                 if (crossedLowStockThreshold) {
-                    const notification = await transaction.notification.create({
-                        data: {
-                            accountId: ownerId,
-                            title: messages.INVENTORY.LOW_STOCK_TITLE,
-                            content:
-                                `${product.name} còn ${currentAlertStock.toString()} ${alertUnit(product)}, `
-                                + `thấp hơn ngưỡng ${threshold.toString()} ${alertUnit(product)}.`,
-                            type: NOTIFICATION_TYPE.INVENTORY_LOW,
-                            referenceType: 'PRODUCT',
-                            referenceId: productId,
-                        },
-                        select: {
-                            id: true,
-                            accountId: true,
-                        },
+                    const recipients = await inventoryRecipients(transaction, farmId, productId, ownerId);
+                    notifications = await saveInventoryNotifications(transaction, recipients, {
+                        title: messages.INVENTORY.LOW_STOCK_TITLE,
+                        content:
+                            `${product.name} còn ${currentAlertStock.toString()} ${alertUnit(product)}, `
+                            + `thấp hơn ngưỡng ${threshold.toString()} ${alertUnit(product)}.`,
+                        type: NOTIFICATION_TYPE.INVENTORY_LOW,
+                        referenceType: 'PRODUCT',
+                        referenceId: productId,
                     });
-                    notificationToEmit = notification;
                 }
 
                 return {
@@ -1217,11 +1398,7 @@ const recordStockTransaction = async (
             { isolationLevel: 'Serializable' },
         );
 
-        if (notificationToEmit) {
-            emitNotification(notificationToEmit.accountId, 'notification:new', {
-                id: notificationToEmit.id,
-            });
-        }
+        emitInventoryNotifications(notifications);
         return result;
     } catch (error) {
         if (isIdempotencyUniqueError(error)) {

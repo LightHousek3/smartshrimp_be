@@ -28,6 +28,29 @@ const messages = {
         STORAGE_UNAVAILABLE: 'Chưa thể lưu hoặc mở ảnh nhận diện. Vui lòng thử lại sau.',
         CONFLICT: 'Phân công hoặc trạng thái vụ nuôi vừa thay đổi. Vui lòng tải lại.',
     },
+    INVENTORY_LABEL: {
+        SCANNED: 'Đã đọc nhãn. Vui lòng đối chiếu trước khi sử dụng.',
+        INVALID_IMAGE_TYPE: 'OCR chỉ nhận ảnh JPG, PNG hoặc WebP hợp lệ.',
+        INVALID_IMAGE_SOURCE: 'Ảnh đã lưu phải thuộc Cloudinary của ứng dụng. Hãy chọn lại ảnh từ thiết bị.',
+        IMAGE_DOWNLOAD_FAILED: 'Không tải được ảnh nhãn đã lưu. Hãy chọn lại ảnh từ thiết bị.',
+        INVALID_IMAGE_SIZE: 'Mỗi ảnh OCR phải có dung lượng từ 1 byte đến 5 MB.',
+        INCOMPLETE_RESULT: 'AI chưa đọc được nhãn đầy đủ. Hãy chụp rõ phần chữ hoặc nhập tay.',
+        INVALID_RESULT: 'Kết quả đọc nhãn không hợp lệ. Hãy thử lại hoặc nhập tay.',
+        NO_EVIDENCE: 'Không đọc được thông tin có bằng chứng. Hãy chụp rõ nhãn hoặc nhập tay.',
+        TOTAL_SIZE_EXCEEDED: 'Tổng ảnh OCR không được vượt quá 5 MB. Hãy chọn ít ảnh hơn hoặc giảm dung lượng.',
+        DAILY_LIMIT: 'Đã hết hạn mức OCR trong ngày của ứng dụng. Bạn có thể nhập tay hoặc thử lại ngày mai.',
+        PROVIDER_QUOTA: 'Gemini đã hết quota hoặc đang giới hạn lượt gọi. Hãy nhập tay và thử lại sau; không cần bấm quét liên tục.',
+        INVALID_CONFIG: 'OCR chưa sử dụng được API key hoặc model đã cấu hình. Vui lòng kiểm tra cấu hình Gemini ở backend.',
+        TIMEOUT: 'Đọc nhãn quá thời gian chờ. Bạn có thể thử lại hoặc nhập tay.',
+        PROVIDER_UNAVAILABLE: 'Dịch vụ đọc nhãn đang gián đoạn. Vui lòng thử lại sau hoặc nhập tay.',
+        MISSING_KEY: 'Chưa cấu hình OCR_GEMINI_API_KEY ở backend. Bạn vẫn có thể nhập thông tin nhãn bằng tay.',
+        COOLDOWN: 'Gemini đang giới hạn lượt gọi. Vui lòng chờ một phút hoặc nhập tay.',
+        BUSY: 'OCR đang bận. Vui lòng thử lại sau hoặc nhập tay.',
+        RATE_LIMIT: 'Bạn đã quét nhãn quá nhiều lần. Vui lòng chờ một phút hoặc nhập tay.',
+    },
+    INVENTORY_SUBSTANCE: {
+        FETCHED: 'Danh mục thành phần theo tài liệu đã đối chiếu.',
+    },
     EXPERT_PROTOCOL_TEMPLATE: {
         SPECIES_REQUIRED: 'Phác đồ mẫu phải chỉ định tôm thẻ chân trắng hoặc tôm sú.',
         INVALID_APPLICATION_DAYS:
@@ -74,11 +97,16 @@ const messages = {
     },
 
     MATERIAL_COMPLIANCE: {
+        DETECTED_SUBSTANCES: (names) => `Phát hiện chất cấm: ${names} trong sản phẩm.`,
+        NEGATED_SUBSTANCES: (names) => `Tên chất cần đối chiếu trong câu phủ định: ${names}.`,
         PROPOSAL_COMPLETENESS_NOTE:
             'Hệ thống kiểm tra tính đầy đủ và nhất quán của hồ sơ do Expert cung cấp khi lưu phác đồ. Kết quả này không xác thực mã lưu hành với cơ quan nhà nước; phải đối chiếu điều kiện sử dụng trước khi áp dụng cho vụ nuôi.',
-        PROHIBITED_PRODUCT: (productName, ingredients, legalBasis) =>
-            `${productName}: phát hiện ${ingredients} thuộc danh mục cấm (${legalBasis}).`,
-        MATERIAL: 'Vật tư',
+        PROHIBITED_WARNING:
+            'Phát hiện chất cấm trong sản phẩm.',
+        PROHIBITED_REVIEW_REQUIRED:
+            'Nội dung nhắc đến chất cấm trong câu phủ định. Cần đối chiếu nhãn và làm rõ thành phần trước khi sử dụng.',
+        NO_PROHIBITED_MATCH:
+            'Chưa phát hiện tên chất cấm trong nội dung đã nhập theo Phụ lục I. Hãy kiểm tra đủ thành phần trên nhãn.',
         REGULATORY_TYPE_REQUIRED: 'phân loại pháp lý',
         REGISTRATION_REQUIRED: 'mã tiếp nhận/số ĐKLH',
         INGREDIENTS_REQUIRED: 'thành phần',
@@ -89,9 +117,6 @@ const messages = {
         REGISTRATION_TYPE_MISMATCH: 'mã tiếp nhận không khớp phân loại pháp lý',
         ANTIBIOTIC_REQUIRES_MEDICINE: 'kháng sinh chỉ thuộc hồ sơ thuốc',
         WITHDRAWAL_REQUIRED: 'thời gian ngừng thuốc',
-        PROHIBITED_INGREDIENTS: (ingredients, legalBasis) =>
-            `Thành phần cấm: ${ingredients} (${legalBasis}).`,
-        PROFILE_BLOCKED: 'Hồ sơ đang bị chặn.',
         ANTIBIOTIC_TREATMENT_ONLY:
             'Vật tư chứa kháng sinh cần phác đồ điều trị gắn ca bệnh. Anh/chị chọn vật tư khác cho phác đồ mẫu.',
         DRAFT_PLAN_ONLY:
@@ -223,7 +248,7 @@ const messages = {
 
     SUPPLIER: {
         IDENTITY_LOCKED:
-            'Nhà cung cấp đã có đơn hoặc giao dịch. Không thể đổi tên hoặc vai trò cung ứng',
+            'Nhà cung cấp đã có tham chiếu nghiệp vụ. Không thể đổi tên hoặc vai trò cung ứng',
         NOT_SELECTABLE: 'Chọn đối tác đang hoạt động, đúng vai trò và thuộc danh bạ của bạn',
         HAS_REFERENCES: 'Nhà cung cấp đã có tham chiếu. Hãy chuyển sang tạm ngưng thay vì xóa',
         MANUFACTURER_REFERENCED:
@@ -248,6 +273,7 @@ const messages = {
         READ_ONLY: 'Kho hiện chỉ hỗ trợ xem dữ liệu. Cần đồng bộ dữ liệu kho trước khi cập nhật.',
         CONVERSION_REQUIRED: 'PACK và BOTTLE bắt buộc phải có số lượng và đơn vị quy đổi',
         CONVERSION_NOT_ALLOWED: 'Thông tin quy đổi chỉ áp dụng cho PACK và BOTTLE',
+        BOTTLE_CONVERSION_UNIT: 'Đơn vị chai chỉ được quy đổi sang lít hoặc ml.',
         EXPIRY_IN_PAST: 'Hạn sử dụng không được trong quá khứ',
         INVALID_EXECUTION_QUANTITY: 'Số lượng thực dùng không hợp lệ',
         INCOMPATIBLE_EXECUTION_UNIT:
@@ -255,12 +281,25 @@ const messages = {
         INVALID_CONVERSION: 'Vật tư chưa có quy cách quy đổi hợp lệ',
         CONVERTED_QUANTITY_LIMIT: 'Lượng quy đổi vượt giới hạn độ chính xác của kho',
         DELETED: 'Xóa vật tư chưa có phát sinh thành công',
-        HAS_REFERENCES: 'Vật tư đã có phát sinh hoặc tham chiếu nên không thể xóa',
+        HAS_REFERENCES: 'Không thể xóa vật tư đã có phát sinh kho, lịch vận hành hoặc phác đồ không còn ở trạng thái nháp',
+        DELETE_CONFIRMATION: (name, templates, protocols) =>
+            `Vật tư "${name}" đang được dùng trong ${[templates.length && `mẫu phác đồ: ${templates.join(', ')}`, protocols.length && `phác đồ nháp: ${protocols.join(', ')}`].filter(Boolean).join('; ')}. Xóa sẽ gỡ liên kết vật tư và tạm ngưng các mẫu bị ảnh hưởng. Bạn cần cập nhật vật tư thay thế trước khi sử dụng lại. Bạn có xác nhận xóa không?`,
+        DELETED_MATERIAL_REPLACEMENT: 'Vật tư đã bị xóa. Vui lòng cập nhật vật tư thay thế trong phác đồ.',
+        DELETED_NOTIFICATION_TITLE: 'Vật tư đã bị xóa',
+        DELETED_NOTIFICATION_CONTENT: (name, templates, protocols) =>
+            `Đã xóa vật tư "${name}".${templates.length ? ` Vui lòng cập nhật vật tư thay thế trong các mẫu phác đồ đã tạm ngưng: ${templates.join(', ')}.` : ''}${protocols.length ? ` Vui lòng cập nhật các phác đồ nháp: ${protocols.join(', ')}.` : ''}`,
         METADATA_LOCKED: 'Vật tư đã có đơn hoặc giao dịch. Chỉ được sửa ngưỡng cảnh báo và mô tả',
         LOT_EXPIRY_CONFLICT: 'Các lần nhập cùng vật tư và số lô phải có cùng hạn sử dụng',
         LOT_EXPIRY_LOCKED:
             'Lô đã được dùng. Cần đối chiếu chuyên môn, không tự thay đổi bằng chứng hạn dùng',
-        SUPPLIER_NAME_REQUIRED: 'Vui lòng chọn nhà cung cấp hoặc nhập tên bên bán thực tế',
+        SUPPLIER_NAME_REQUIRED: 'Vui lòng chọn nhà cung cấp trong danh bạ của chủ trại',
+        PRODUCT_BLOCKED: 'Sản phẩm đang bị chặn, không được sử dụng trong phác đồ.',
+        IMAGE_FIELDS_CONFLICT: 'Chỉ cung cấp imageUrl hoặc imageUrls trong một yêu cầu',
+        LABEL_IMAGE_REQUIRED: 'Mỗi vật tư phải có ít nhất 1 ảnh nhãn và tối đa 3 ảnh',
+        PRODUCT_ARCHIVE_REASON: (name) => `Ngừng sử dụng vật tư ${name}`,
+        SCHEDULES_CANCELLED_TITLE: 'Lịch vận hành đã bị hủy do ngừng vật tư',
+        SCHEDULES_CANCELLED_CONTENT: (name, count) =>
+            `${count} lịch chưa thực hiện đã bị hủy do ngừng sử dụng vật tư ${name}.`,
         LIST_FETCHED: 'Lấy danh sách vật tư và tồn kho thành công',
         FETCHED: 'Lấy chi tiết vật tư thành công',
         CREATED: 'Tạo vật tư thành công',
@@ -650,6 +689,9 @@ const messages = {
         SEASON_NOT_ACTIVE: 'Vụ nuôi không ở trạng thái đang hoạt động',
         NOT_ASSIGNED_TECHNICIAN: 'Bạn không phải là kỹ thuật viên phụ trách vụ nuôi này',
         INSUFFICIENT_INVENTORY: 'Số lượng vật tư trong kho không đủ để thực hiện',
+        INSUFFICIENT_INVENTORY_TITLE: 'Tồn kho hợp lệ không đủ để thực hiện vận hành',
+        INSUFFICIENT_INVENTORY_CONTENT:
+            'Kiểm tra số lượng, hạn sử dụng và hồ sơ của vật tư trước khi thực hiện lại.',
         VARIANCE_REASON_REQUIRED: 'Cần cung cấp lý do khi số lượng chênh lệch vượt mức cho phép',
         INVALID_ACTUAL_QUANTITY: 'Số lượng thực tế phải lớn hơn 0',
         INVALID_IDEMPOTENCY_KEY: 'Mã idempotency_key không hợp lệ',

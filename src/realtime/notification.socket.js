@@ -1,5 +1,6 @@
 const { Server } = require('socket.io');
 const config = require('../config');
+const logger = require('../config/logger');
 const { ACCOUNT_ROLE } = require('../constants');
 const { loadActiveAccount } = require('../middlewares');
 
@@ -42,7 +43,13 @@ const attachNotificationSocket = (httpServer) => {
 };
 
 const emitNotification = (accountId, event, payload) => {
-    if (io) io.to(accountRoom(accountId)).emit(event, payload);
+    if (!io) return;
+    try {
+        io.to(accountRoom(accountId)).emit(event, payload);
+    } catch (_) {
+        // The notification is already persisted; a transport failure must not fail the committed mutation.
+        logger.warn('Realtime notification delivery failed; notification remains available via API.');
+    }
 };
 
 module.exports = { attachNotificationSocket, emitNotification };

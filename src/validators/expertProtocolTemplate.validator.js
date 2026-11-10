@@ -19,13 +19,8 @@ const recommendation = Joi.object({
             complianceStatus: Joi.any().strip(),
             reviewNote: Joi.any().strip(),
         })
-        .default({
-            regulatoryType: 'unclassified',
-            complianceStatus: 'draft',
-            evidenceUrls: [],
-        }),
-    // Draft proposals may lack a manufacturer; normalize imported null values to missing input.
-    // The service derives completeness after resolving the Owner-scoped manufacturer.
+        .required(),
+    // A proposal must identify either an Owner-scoped manufacturer or a complete inline identity.
     manufacturerId: uuid.empty(null),
     manufacturer: require('./materialCompliance.validator').manufacturer.empty(
         null
@@ -54,12 +49,12 @@ const recommendation = Joi.object({
                 .uri({ scheme: ['https'] })
                 .max(2000)
         )
-        .max(3)
+        .min(1).max(3)
         .unique()
-        .default([]),
+        .required(),
     recommendationReason: Joi.string().trim().min(1).max(500).required(),
 })
-    .oxor('manufacturerId', 'manufacturer')
+    .xor('manufacturerId', 'manufacturer')
     .unknown(false);
 const material = Joi.object({
     operationType: Joi.string()
