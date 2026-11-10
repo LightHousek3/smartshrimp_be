@@ -31,6 +31,8 @@ const ragStorageService = require('./ragStorage.service');
 
 const protocolService = require('./protocol.service');
 const inventoryService = require('./inventory.service');
+const inventoryLabelService = require('./inventoryLabel.service');
+const inventorySubstanceService = require('./inventorySubstance.service');
 const inventoryHistoryOptionsService = require('./inventoryHistoryOptions.service');
 const inventoryLegacyReadService = require('./inventoryLegacyRead.service');
 const supplierService = require('./supplier.service');
@@ -65,6 +67,8 @@ module.exports = {
     shrimpHealthService,
     operationService,
     inventoryService,
+    inventoryLabelService,
+    inventorySubstanceService,
     inventoryHistoryOptionsService,
     inventoryLegacyReadService,
     supplierService,

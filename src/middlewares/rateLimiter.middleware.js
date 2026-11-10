@@ -61,7 +61,21 @@ const writeLimiter = rateLimit({
     legacyHeaders: false,
 });
 
+const inventoryLabelLimiter = rateLimit({
+    windowMs: 60 * 1000,
+    max: 5,
+    keyGenerator: (req) => req.account.id,
+    message: {
+        success: false,
+        statusCode: httpStatus.TOO_MANY_REQUESTS,
+        message: messages.INVENTORY_LABEL.RATE_LIMIT,
+    },
+    standardHeaders: true,
+    legacyHeaders: false,
+});
+
 module.exports = {
+    inventoryLabelLimiter,
     apiLimiter,
     authLimiter,
     otpRequestLimiter,

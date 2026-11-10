@@ -1,12 +1,13 @@
 const express = require('express');
-const { inventoryController, supplierController } = require('../controllers');
+const { inventoryController, supplierController, inventorySubstanceController } = require('../controllers');
 const {
     authenticate,
     authorize,
     validate,
     requireIdempotencyKey,
+    inventoryLabelLimiter,
 } = require('../middlewares');
-const { inventoryValidator, supplierValidator } = require('../validators');
+const { inventoryValidator, supplierValidator, inventoryLabelValidator, inventorySubstanceValidator } = require('../validators');
 const { ACCOUNT_ROLE } = require('../constants');
 
 const router = express.Router({ mergeParams: true });
@@ -15,6 +16,11 @@ const router = express.Router({ mergeParams: true });
  * Apply the active-account and Owner gate to every inventory and supplier endpoint.
  */
 router.use(authenticate, authorize(ACCOUNT_ROLE.FARM_OWNER));
+
+/** Read label suggestions without creating products or changing compliance status. */
+router.post('/products/scan-label', inventoryLabelLimiter, validate(inventoryLabelValidator.scanLabel), inventoryController.scanLabel);
+router.get('/inventory-substances', validate(inventorySubstanceValidator.search), inventorySubstanceController.search);
+router.post('/inventory-substances/check', validate(inventorySubstanceValidator.check), inventorySubstanceController.check);
 
 /**
  * @route   GET /api/v1/owner/farms/:farmId/suppliers
@@ -108,7 +114,7 @@ router.patch(
 
 /**
  * @route   POST /api/v1/owner/farms/:farmId/products/:productId/archive
- * @desc    Stop new use without deleting stock or cancelling existing schedules
+ * @desc    Stop new use and cancel unexecuted schedules while preserving stock and history
  * @access  Owner
  */
 router.post(
@@ -142,7 +148,7 @@ router.post(
 
 /**
  * @route   DELETE /api/v1/owner/farms/:farmId/products/:productId
- * @desc    Delete an unreferenced product and its owned compliance row
+ * @desc    Delete unused stock; confirm and invalidate affected planning references
  * @access  Owner
  */
 router.delete('/products/:productId', validate(inventoryValidator.deleteProduct), inventoryController.deleteProduct);

@@ -4,31 +4,29 @@ const Joi = require('joi');
 const productCompliance = Joi.object({
     regulatoryType: Joi.string()
         .valid(
-            'unclassified',
             'feed',
             'environment',
             'dual_purpose',
             'medicine'
         )
-        .default('unclassified'),
-    registrationNumber: Joi.string().trim().max(100).empty('').allow(null).default(null),
+        .required(),
+    registrationNumber: Joi.string().trim().min(1).max(100).required(),
     ingredientsText: Joi.string()
         .trim()
         .max(20000)
-        .allow('', null)
-        .default(null),
-    containsAntibiotic: Joi.boolean().strict().allow(null).default(null),
+        .min(1)
+        .required(),
+    containsAntibiotic: Joi.boolean().strict().required(),
     usageInstructions: Joi.string()
         .trim()
         .max(20000)
-        .allow('', null)
-        .default(null),
+        .min(1)
+        .required(),
     withdrawalDays: Joi.number()
         .min(0)
         .max(9999.999)
         .precision(3)
-        .allow(null)
-        .default(null),
+        .when('regulatoryType', { is: 'medicine', then: Joi.required(), otherwise: Joi.allow(null).default(null) }),
     evidenceUrls: Joi.array()
         .items(
             Joi.string()
@@ -38,8 +36,10 @@ const productCompliance = Joi.object({
         .max(6)
         .unique()
         .default([]),
-    complianceStatus: Joi.string().valid('draft', 'reviewed').default('draft'),
-    reviewNote: Joi.string().trim().max(20000).allow('', null).default(null),
+    complianceStatus: Joi.any().strip(),
+    reviewNote: Joi.any().strip(),
+    checkedBy: Joi.any().strip(),
+    checkedAt: Joi.any().strip(),
 }).unknown(false);
 
 const manufacturer = Joi.object({

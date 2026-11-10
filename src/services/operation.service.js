@@ -334,10 +334,41 @@ const getSchedule = async (technicianId, scheduleId) => {
     return formatSchedule(schedule);
 };
 
-/**
- * Execute a planned schedule atomically with inventory stock deduction and variance validation.
- * Deducts inventory using FEFO lot ordering under a serializable transaction.
- */
+/** Persist shortage alerts after the failed execution rolls back; serialize retries by schedule. */
+const notifyInsufficientInventory = async (technicianId, scheduleId) => {
+    const notices = await prisma.$transaction(async (tx) => {
+        await tx.$queryRaw`SELECT id FROM operation_schedules WHERE id = ${scheduleId}::uuid FOR UPDATE`;
+        const schedule = await tx.operationSchedule.findUnique({
+            where: { id: scheduleId },
+            select: { season: { select: { pond: { select: { farm: { select: { ownerId: true } } } } } } },
+        });
+        if (!schedule) return [];
+        const ownerId = schedule.season.pond.farm.ownerId;
+        const saved = [];
+        for (const accountId of new Set([ownerId, technicianId])) {
+            const where = {
+                accountId, type: NOTIFICATION_TYPE.INVENTORY_INSUFFICIENT,
+                referenceType: 'operation_schedule', referenceId: scheduleId,
+            };
+            // A planned occurrence needs one shortage alert per recipient, even when the request is retried.
+            if (await tx.notification.findFirst({ where, select: { id: true } })) continue;
+            saved.push(await tx.notification.create({
+                data: {
+                    ...where,
+                    title: messages.OPERATION.INSUFFICIENT_INVENTORY_TITLE,
+                    content: messages.OPERATION.INSUFFICIENT_INVENTORY_CONTENT,
+                },
+                select: { id: true, accountId: true },
+            }));
+        }
+        return saved;
+    });
+    for (const notice of notices) {
+        emitNotification(notice.accountId, 'notification:new', { id: notice.id, referenceId: scheduleId });
+    }
+};
+
+/** Execute a planned schedule with FEFO deductions in a serializable transaction. */
 const executeSchedule = async (technicianId, scheduleId, payload) => {
     const pointer = await prisma.operationSchedule.findUnique({ where: { id: scheduleId }, select: { seasonId: true } });
     if (!pointer) throw ApiError.notFound(messages.OPERATION.NOT_FOUND);
@@ -490,15 +521,7 @@ const executeSchedule = async (technicianId, scheduleId, payload) => {
             if (retryable && attempt < 2) continue;
             if (retryable || error.code === 'P2002') throw ApiError.conflict(messages.OPERATION.EXECUTION_CONFLICT);
             if (error instanceof ApiError && error.message === messages.OPERATION.INSUFFICIENT_INVENTORY) {
-                const notice = await prisma.notification.create({ data: {
-                    accountId: technicianId,
-                    title: 'Tồn kho hợp lệ không đủ để thực hiện vận hành',
-                    content: 'Kiểm tra số lượng, hạn sử dụng và hồ sơ của vật tư trước khi thực hiện lại.',
-                    type: NOTIFICATION_TYPE.INVENTORY_INSUFFICIENT,
-                    referenceType: 'operation_schedule',
-                    referenceId: scheduleId,
-                } });
-                emitNotification(technicianId, 'notification:new', { id: notice.id, referenceId: scheduleId });
+                await notifyInsufficientInventory(technicianId, scheduleId);
             }
             throw error;
         }

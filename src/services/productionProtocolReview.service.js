@@ -10,7 +10,7 @@ const materialSelect = { id: true, farmId: true, name: true, description: true, 
 const assertOperationalMaterial = (product, item, farmId, ownerId) => {
     if (!product || product.status !== PRODUCT_STATUS.ACTIVE || product.farmId !== farmId
         || !product.manufacturer || product.manufacturer.ownerId !== ownerId
-        || product.manufacturer.status !== 'active' || !['MANUFACTURER', 'BOTH'].includes(product.manufacturer.supplierType)) {
+        || !['MANUFACTURER', 'BOTH'].includes(product.manufacturer.supplierType)) {
         throw ApiError.badRequest(messages.PRODUCTION_PROTOCOL.MATERIAL_RESOLUTION);
     }
     assertMaterialSafety({ ...product, productCompliance: product.compliance }, item.mealNumber == null,
@@ -97,7 +97,7 @@ const options = async (client, ownerId, protocol, itemId, search = '') => {
     if (v2.isV2(protocol)) v2.assertItemMetadata(item);
     const where = { farmId: protocol.season.pond.farmId, status: PRODUCT_STATUS.ACTIVE,
         category: item.operationType === OPERATION_TYPE.FEEDING ? 'FEED' : item.operationType,
-        manufacturer: { is: { ownerId, status: 'active', supplierType: { in: ['MANUFACTURER', 'BOTH'] } } },
+        manufacturer: { is: { ownerId, supplierType: { in: ['MANUFACTURER', 'BOTH'] } } },
         compliance: { is: { complianceStatus: 'reviewed', containsAntibiotic: false, checkedBy: { not: null }, checkedAt: { not: null } } },
         ...(search && { name: { contains: search, mode: 'insensitive' } }) };
     const eligible = [];

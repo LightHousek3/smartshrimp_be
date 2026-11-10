@@ -178,9 +178,9 @@ const normalizeItem = (item, farmId) => {
                 id: undefined,
                 manufacturerId: item.recommendedManufacturerId ?? undefined,
             }),
-            isRecommendation: !owned && Boolean(product),
+            isRecommendation: !owned && Boolean(product) && !product.deletedProductId,
             unavailable: Boolean(
-                item.productId && (!owned || product.status !== 'ACTIVE')
+                product?.deletedProductId || (item.productId && (!owned || product.status !== 'ACTIVE'))
             ),
         },
     };
@@ -537,7 +537,10 @@ const saveTemplate = async (account, body, templateId = null) => {
                         ? assessTemplateProposal(product, account.id)
                         : null;
                     assertMaterialSafety(
-                        product,
+                        assessment ? {
+                            ...product,
+                            productCompliance: { ...assessment.productCompliance, ...assessment.review },
+                        } : product,
                         entry.environment,
                         entry.instructions
                     );
@@ -716,13 +719,16 @@ const updateStatus = async (account, templateId, body) => {
                 };
                 const row = await tx.productionProtocolTemplate.findFirst({
                     where,
-                    select: { versionNo: true },
+                    select: { versionNo: true, items: { select: { recommendedProductDetails: true } } },
                 });
                 if (!row) throw notFound();
                 if (row.versionNo !== body.expectedVersionNo)
                     throw ApiError.conflict(
                         messages.EXPERT_PROTOCOL_TEMPLATE.STALE_SAVE
                     );
+                if (body.status === TemplateStatus.active && row.items.some(item => item.recommendedProductDetails?.review?.deletedProductId)) {
+                    throw ApiError.conflict(messages.INVENTORY.DELETED_MATERIAL_REPLACEMENT);
+                }
                 const result = await tx.productionProtocolTemplate.updateMany({
                     where: { ...where, versionNo: body.expectedVersionNo },
                     data: {

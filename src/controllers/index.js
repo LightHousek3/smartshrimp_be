@@ -32,6 +32,7 @@ const aiDiagnosisController = require('./aiDiagnosis.controller');
 
 module.exports = {
     aiDiagnosisController,
+    inventorySubstanceController: require('./inventorySubstance.controller'),
     protocolController,
     ragDocumentController,
     ragController,

@@ -18,19 +18,19 @@ const proposal = Joi.object({
     unit: Joi.string().uppercase().valid('KG', 'G', 'L', 'ML', 'PACK', 'BOTTLE', 'PCS').required(),
     conversionUnit: Joi.string().uppercase().valid('KG', 'G', 'MG', 'L', 'ML', 'PCS').allow(null),
     conversionQuantity: Joi.alternatives().try(Joi.number().greater(0), Joi.string().pattern(/^(?:0|[1-9]\d{0,9})(?:\.\d{1,4})?$/)).allow(null),
-    manufacturerId: uuid().allow(null),
-    manufacturer: manufacturer.keys({ supplierType: Joi.string().lowercase().valid('manufacturer', 'both') }).unknown(true).allow(null),
+    manufacturerId: uuid().empty(null),
+    manufacturer: manufacturer.keys({ supplierType: Joi.string().lowercase().valid('manufacturer', 'both') }).unknown(true).empty(null),
     productCompliance: productCompliance.keys({ complianceStatus: Joi.any().strip(), reviewNote: Joi.any().strip(),
-        checkedBy: Joi.any().strip(), checkedAt: Joi.any().strip() }).unknown(true).allow(null),
+        checkedBy: Joi.any().strip(), checkedAt: Joi.any().strip() }).unknown(true).required(),
     recommendationReason: Joi.string().max(500).allow('', null),
-    imageUrls: Joi.array().max(3).items(Joi.string().uri({ scheme: ['https'] }).max(2000)),
-}).unknown(true);
+    imageUrls: Joi.array().min(1).max(3).unique().items(Joi.string().uri({ scheme: ['https'] }).max(2000)).required(),
+}).xor('manufacturerId', 'manufacturer').unknown(true);
 // Strings avoid silently rounding PostgreSQL NUMERIC input at the JSON boundary.
 const decimal = (integerDigits, scale, zero = false) => Joi.string().pattern(
     new RegExp(`^(?:0|[1-9][0-9]{0,${integerDigits - 1}})(?:\\.[0-9]{1,${scale}})?$`),
 ).custom((value, helpers) => (zero || Number(value) > 0 ? value : helpers.error('any.invalid')));
 
-/** An item needs a catalog product or a named suggestion; dose values fit NUMERIC(14,4). */
+/** An item needs a catalog product or a complete proposal; doses fit NUMERIC(14,4). */
 const item = Joi.object({
     id: uuid(),
     operationType: Joi.string().valid(...Object.values(OPERATION_TYPE)).required(),
@@ -54,7 +54,7 @@ const item = Joi.object({
     doseUnit: Joi.string().valid(...PRODUCTION_PROTOCOL_UNITS).required(),
     instructions: Joi.string().trim().max(4000).allow('', null).default(null),
 }).custom((value, helpers) => (
-    value.productId || value.recommendedProductName || value.recommendedProductDetails?.proposed?.name ? value : helpers.error('any.invalid')
+    value.productId || value.recommendedProductDetails?.proposed?.name ? value : helpers.error('any.invalid')
 )).unknown(false);
 /** Farm wall-clock time supports optional seconds and milliseconds, without a date or timezone. */
 const time = () => Joi.string().pattern(/^([01]\d|2[0-3]):[0-5]\d(?::[0-5]\d(?:\.\d{1,3})?)?$/).allow(null);

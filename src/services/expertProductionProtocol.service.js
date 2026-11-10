@@ -7,7 +7,7 @@ const prisma = require('../config/prisma');
 const logger = require('../config/logger');
 const config = require('../config');
 const { emitNotification } = require('../realtime/notification.socket');
-const { ApiError, productionProtocolV2: v2, assertMaterialSafety, assertTemplateDose, productFromRecommendation, assertProtocolHarvestCoverage } = require('../utils');
+const { ApiError, productionProtocolV2: v2, assertMaterialSafety, assertTemplateDose, productFromRecommendation, assertProtocolHarvestCoverage, requireCompleteInventoryProduct } = require('../utils');
 const { hasOverlappingStages, isProductionProtocolDoseValid } = require('../utils/productionProtocol');
 const {
     messages,
@@ -521,7 +521,7 @@ const unitFamily = (unit) => ({
  * Validate inclusive day ranges, existing identities, dose rules and product compatibility.
  * Retained inactive products may stay in a draft; submission revalidates them as new selections.
  */
-const validateGraph = async (tx, season, stages, current, contentVersion = 1) => {
+const validateGraph = async (tx, season, stages, current, contentVersion = 1, accountId) => {
     if (contentVersion === 2) await assertV2Ready(tx);
     else if (stages.some(stage => !stage.meals.length || stage.meals.some(meal => !meal.items.length || meal.items.some(item => item.dailyDoseIncrement != null || item.recommendedProductDetails != null || item.firstDayOffset != null)))) {
         throw ApiError.conflict(messages.PRODUCTION_PROTOCOL.V2_REQUIRED);
@@ -564,7 +564,7 @@ const validateGraph = async (tx, season, stages, current, contentVersion = 1) =>
                     throw ApiError.badRequest(messages.PRODUCTION_PROTOCOL.DOSE);
                 }
                 if (contentVersion === 2 && entry.recommendedProductDetails) {
-                    entry.recommendedProductDetails = v2.normalizeProposal(entry.recommendedProductDetails);
+                    entry.recommendedProductDetails = v2.normalizeProposal(entry.recommendedProductDetails, accountId);
                     const proposal = productFromRecommendation(entry.recommendedProductDetails);
                     const proposedManufacturerId = entry.recommendedProductDetails.proposed.manufacturerId;
                     if (entry.recommendedManufacturerId && proposedManufacturerId && entry.recommendedManufacturerId !== proposedManufacturerId) {
@@ -583,12 +583,7 @@ const validateGraph = async (tx, season, stages, current, contentVersion = 1) =>
                     }
                 }
                 if (!entry.productId) {
-                    if (contentVersion === 2 && !entry.recommendedProductDetails) {
-                        assertTemplateDose({ ...entry, endDay: window.last + 1, doseValue: Number(entry.doseValue),
-                            dailyDoseIncrement: Number(entry.dailyDoseIncrement ?? 0) },
-                        { category: entry.recommendedCategory ?? (entry.operationType === 'FEEDING' ? 'FEED' : entry.operationType), unit: entry.doseUnit },
-                        window.first + 1, meal.mealNumber == null);
-                    }
+                    if (!entry.recommendedProductDetails) throw ApiError.badRequest(messages.PRODUCTION_PROTOCOL.SUBMIT_INCOMPLETE);
                     continue;
                 }
                 const product = byId.get(entry.productId);
@@ -596,12 +591,16 @@ const validateGraph = async (tx, season, stages, current, contentVersion = 1) =>
                 if (!product || product.farmId !== season.pond.farm.id || (!unchanged && product.status !== 'ACTIVE')) {
                     throw ApiError.badRequest(messages.PRODUCTION_PROTOCOL.PRODUCT);
                 }
+                requireCompleteInventoryProduct(product);
+                if (product.compliance?.complianceStatus === 'blocked') {
+                    throw ApiError.forbidden(messages.INVENTORY.PRODUCT_BLOCKED);
+                }
                 const operationType = product.category === 'FEED' ? 'FEEDING' : product.category;
                 if (entry.operationType !== operationType) {
                     throw ApiError.badRequest(messages.PRODUCTION_PROTOCOL.PRODUCT);
                 }
+                assertMaterialSafety({ ...product, productCompliance: product.compliance }, meal.mealNumber == null, entry.instructions);
                 if (contentVersion === 2) {
-                    assertMaterialSafety({ ...product, productCompliance: product.compliance }, meal.mealNumber == null, entry.instructions);
                     assertTemplateDose({ ...entry, endDay: window.last + 1, doseValue: Number(entry.doseValue),
                         dailyDoseIncrement: Number(entry.dailyDoseIncrement ?? 0) }, product, window.first + 1, meal.mealNumber == null);
                     entry._materialSnapshot = JSON.parse(JSON.stringify(product));
@@ -703,6 +702,9 @@ const requireTemplate = async (tx, season, templateId) => {
     if (!template) {
         throw ApiError.notFound(messages.PRODUCTION_PROTOCOL.TEMPLATE_NOT_FOUND);
     }
+    if (template.items.some(item => item.recommendedProductDetails?.review?.deletedProductId)) {
+        throw ApiError.conflict(messages.INVENTORY.DELETED_MATERIAL_REPLACEMENT);
+    }
     if (!v2.templateApplyEnabled()) throw ApiError.conflict(messages.PRODUCTION_PROTOCOL.TEMPLATE_V2_APPLICATION_UNAVAILABLE);
     await assertV2Ready(tx);
     // Prisma Date keeps milliseconds only; reject imported microsecond times instead of rounding them.
@@ -798,7 +800,7 @@ const submitCurrent = async (tx, season, accountId, current, notifications) => {
     }
     // Revalidate all products as newly selected: inactive products can remain in
     // draft history, but cannot be submitted as operational recommendations.
-    await validateGraph(tx, season, groups, null, current.contentVersion ?? 1);
+    await validateGraph(tx, season, groups, null, current.contentVersion ?? 1, accountId);
     const result = await tx.protocol.updateMany({
         where: {
             id: current.id,
@@ -872,7 +874,7 @@ const create = (accountId, seasonId, body) => transaction(async (tx, notificatio
         orderBy: { versionNo: 'desc' },
     });
     const contentVersion = body.contentVersion ?? 1;
-    await validateGraph(tx, season, body.stages, null, contentVersion);
+    await validateGraph(tx, season, body.stages, null, contentVersion, accountId);
     const {
         stages, submitForApproval, templateId, templateVersionNo, ...header
     } = body;
@@ -952,7 +954,7 @@ const mutate = (accountId, seasonId, protocolId, body, cancelling) => transactio
         if (precise.length) {
             throw ApiError.conflict(messages.PRODUCTION_PROTOCOL.TIME_PRECISION);
         }
-        await validateGraph(tx, season, stages, current, version);
+        await validateGraph(tx, season, stages, current, version, accountId);
     }
     const result = await tx.protocol.updateMany({
         where: {

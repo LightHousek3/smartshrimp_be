@@ -1,6 +1,7 @@
 const { Prisma } = require('@prisma/client');
 const config = require('../config');
 const ApiError = require('./ApiError');
+const { assessTemplateProposal } = require('./materialCompliance');
 const { messages, httpStatus, PRODUCTION_PROTOCOL_LIMITS } = require('../constants');
 
 const v2Enabled = () => config.productionProtocol?.v2Enabled === true;
@@ -114,8 +115,12 @@ const protocolGroups = (row, legacyGroups) => {
             mealNumber: meal.mealNumber, plannedTime: meal.plannedTime, items: byMeal.get(meal.id.toLowerCase()).items })) }));
 };
 
-const normalizeProposal = (details) => {
+const normalizeProposal = (details, accountId) => {
     if (!details) return null;
+    if (details.review?.deletedProductId) throw ApiError.badRequest(messages.INVENTORY.DELETED_MATERIAL_REPLACEMENT);
+    if (!details.proposed || typeof details.proposed !== 'object' || Array.isArray(details.proposed)) {
+        throw ApiError.badRequest(messages.PRODUCTION_PROTOCOL.PRODUCT);
+    }
     const proposed = JSON.parse(JSON.stringify(details.proposed));
     if (typeof proposed?.name !== 'string' || !proposed.name.trim() || proposed.name.length > 255
         || typeof proposed.category !== 'string' || !['feed', 'medicine', 'mineral', 'chemical', 'other'].includes(proposed.category.toLowerCase())
@@ -139,8 +144,9 @@ const normalizeProposal = (details) => {
     }
     const compliance = proposed.productCompliance ?? {};
     for (const field of ['complianceStatus', 'checkedBy', 'checkedAt', 'reviewNote']) delete compliance[field];
-    proposed.productCompliance = compliance;
-    return { proposed, ownerOverrides: null, review: { complianceStatus: 'draft', checkedBy: null, checkedAt: null } };
+    const assessment = assessTemplateProposal({ ...proposed, productCompliance: compliance }, accountId);
+    proposed.productCompliance = assessment.productCompliance;
+    return { proposed, ownerOverrides: null, review: assessment.review };
 };
 
 /** Legacy template rows have no stage IDs: connected ranges preserve every rule without inventing dates. */

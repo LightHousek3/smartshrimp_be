@@ -17,6 +17,7 @@ const {
     assessTemplateProposal,
     productFromRecommendation,
 } = require('./materialCompliance');
+const { searchSubstances, checkIngredients, requireUsableIngredients } = require('./inventorySubstances');
 
 module.exports = {
     assertProtocolHarvestCoverage,
@@ -28,6 +29,9 @@ module.exports = {
     assertMaterialSafety,
     assessTemplateProposal,
     productFromRecommendation,
+    searchSubstances,
+    checkIngredients,
+    requireUsableIngredients,
     ApiError,
     asyncHandler,
     pick,
