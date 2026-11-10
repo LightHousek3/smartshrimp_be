@@ -585,6 +585,7 @@ const messages = {
     },
 
     RAG_DOCUMENT: {
+        CATEGORY_REQUIRED: 'Vui lòng chọn danh mục.',
         CREATED: 'Đã thêm tài liệu vào kho kiến thức chatbot.',
         NOT_FOUND: 'Không tìm thấy tài liệu.',
         RETRY_FAILED_ONLY: 'Chỉ thử lại tài liệu xử lý thất bại.',

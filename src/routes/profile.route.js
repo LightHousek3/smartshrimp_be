@@ -13,13 +13,13 @@ const PROFILE_ROLES = [
 
 /**
  * @route   GET /api/v1/profile
- * @desc    Get the authenticated Technician, Owner, or Expert profile
- * @access  Private (ACTIVE Technician, Farm Owner, or Expert)
+ * @desc    Get the authenticated account's own profile
+ * @access  Private (ACTIVE Admin, Technician, Farm Owner, or Expert)
  */
 router.get(
     '/',
     authenticate,
-    authorize(...PROFILE_ROLES),
+    authorize(...PROFILE_ROLES, ACCOUNT_ROLE.ADMIN),
     profileController.getProfile,
 );
 

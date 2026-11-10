@@ -51,10 +51,10 @@ const CHANGE_PASSWORD_SELECT = {
 /**
  * Recheck active status and supported profile roles at the database boundary.
  */
-const eligibleProfileWhere = (accountId) => ({
+const eligibleProfileWhere = (accountId, roles = PROFILE_ROLES) => ({
     id: accountId,
     status: ACCOUNT_STATUS.ACTIVE,
-    role: { in: PROFILE_ROLES },
+    role: { in: roles },
 });
 
 const numberOrZero = (value) => Number(value ?? 0);
@@ -100,7 +100,7 @@ const KPI_CONFIG_BY_ROLE = Object.freeze({
  */
 const withProfileDetails = async (database, profile) => {
     const config = KPI_CONFIG_BY_ROLE[profile.role];
-    // Only staff have KPI projections. Owners receive identity and personnel context.
+    // Only staff have KPI projections; Admin and Owner profiles need no KPI query.
     if (!config) return { ...profile, ...EMPTY_PROFILE_KPIS };
 
     const kpi = await database[config.delegate].findUnique({
@@ -115,12 +115,13 @@ const withProfileDetails = async (database, profile) => {
 };
 
 /**
- * Read an active Technician, Expert or Owner profile without selecting credentials.
+ * Read an active account's own profile without selecting credentials.
+ * Admin has read access only; profile and password mutations retain their existing roles.
  * Missing or no-longer-eligible accounts produce the same not-found response.
  */
 const getProfile = async (accountId) => {
     const profile = await prisma.account.findFirst({
-        where: eligibleProfileWhere(accountId),
+        where: eligibleProfileWhere(accountId, [...PROFILE_ROLES, ACCOUNT_ROLE.ADMIN]),
         select: PUBLIC_PROFILE_SELECT,
     });
 
