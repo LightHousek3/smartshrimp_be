@@ -27,10 +27,12 @@ const adminInventoryRoute = require('./adminInventory.route');
 const taskRoute = require('./task.route');
 const assignedTaskRoute = require('./assignedTask.route');
 const harvestRoute = require('./harvest.route');
+const diseaseCaseRoute = require('./diseaseCase.route');
 
 const router = express.Router();
 
 const routes = [
+    { path: '/me/seasons/:seasonId/disease-cases', route: diseaseCaseRoute },
     { path: '/expert/protocol-templates', route: expertProtocolTemplateRoute },
     { path: '/owner/tasks', route: taskRoute },
     { path: '/me/tasks', route: assignedTaskRoute },

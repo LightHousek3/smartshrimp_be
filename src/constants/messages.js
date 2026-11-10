@@ -712,6 +712,16 @@ const messages = {
 
     // Disease case
     DISEASE_CASE: {
+        EXISTING_CASE: 'Vụ đã có ca chưa giải quyết. Hãy mở ca hiện tại để bổ sung thông tin.',
+        CREATED: 'Tạo ca bệnh thành công.',
+        RESPONDED: 'Gửi phản hồi ca bệnh thành công.',
+        NO_ASSIGNMENT: 'Bạn không còn là kỹ thuật viên phụ trách vụ nuôi này.',
+        SEASON_NOT_ACTIVE: 'Chỉ được tạo hoặc phản hồi ca bệnh trong vụ nuôi đang hoạt động.',
+        NO_EXPERT: 'Vụ nuôi phải có đúng một chuyên gia đang hoạt động phụ trách.',
+        CONFLICT: 'Ca bệnh hoặc phân công đã thay đổi. Vui lòng tải lại.',
+        INVALID_RELATED_CASE: 'Ca bệnh liên quan phải thuộc cùng vụ nuôi.',
+        INVALID_AI: 'Kết quả AI phải thành công, thuộc lịch sử của bạn và cùng vụ.',
+        EMERGENCY: 'Kỹ thuật viên gửi cảnh báo khẩn cấp cho ca bệnh.',
         LIST_FETCHED: 'Lấy danh sách ca bệnh thành công',
         FETCHED: 'Lấy chi tiết ca bệnh thành công',
         NOT_FOUND: 'Không tìm thấy ca bệnh',

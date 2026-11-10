@@ -39,8 +39,10 @@ const supplierService = require('./supplier.service');
 
 const aiDiagnosisService = require('./aiDiagnosis.service');
 
+const diseaseCaseService= require('./diseaseCase.service');
 module.exports = {
     aiDiagnosisService,
+    diseaseCaseService,
     protocolService,
     ragDocumentService,
     ragService,
