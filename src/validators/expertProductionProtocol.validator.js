@@ -161,7 +161,7 @@ const create = {
         submitForApproval: Joi.boolean().default(false),
         title: header.title.required(),
         allowedVariancePct: header.allowedVariancePct.required(),
-        rollingWindowDays: header.rollingWindowDays.default(7),
+        rollingWindowDays: header.rollingWindowDays.default(3),
         stages: stages.default([]),
     }).custom(validateContentVersion).unknown(false),
 };

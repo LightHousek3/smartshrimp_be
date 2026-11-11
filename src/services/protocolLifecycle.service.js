@@ -1,6 +1,7 @@
 const { ApiError } = require('../utils');
 const { messages } = require('../constants');
 const { courseCoverage, cultureDay } = require('../utils/protocolTimeline');
+const { assertTreatmentCourse } = require('../utils/treatmentProtocolPolicy');
 const { materialSelect, assertOperationalMaterial, assertApprovedMaterial } = require('./productionProtocolReview.service');
 
 const OPEN_CASES = ['OPEN', 'MONITORING', 'IN_TREATMENT'];
@@ -48,6 +49,7 @@ const changeCase = async (tx, diseaseCase, status, actorId, reason, at) => {
 const eligibleItems = async (tx, protocol, season, items) => {
     if (!items.length) return false;
     try {
+        if (protocol.protocolType === 'TREATMENT' && protocol.contentVersion === 2) assertTreatmentCourse(protocol, season);
         for (const item of items) {
             assertOperationalMaterial(item.product, item, season.pond.farmId, season.pond.farm.ownerId, { ...protocol, season });
             assertApprovedMaterial(item.product, item.materialSnapshot);

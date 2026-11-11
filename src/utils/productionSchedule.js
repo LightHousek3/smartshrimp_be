@@ -49,7 +49,7 @@ const occurrences = (protocol, now) => {
     if (!protocol.season.stockingDate) return [];
     const anchor = protocol.season.stockingDate.toISOString().slice(0, 10);
     const today = Date.parse(dateInVietnam(now));
-    const windowDays = Math.min(14, Math.max(1, protocol.rollingWindowDays));
+    const windowDays = Math.min(3, Math.max(1, protocol.rollingWindowDays));
     const rows = [];
     for (let index = 0; index < windowDays; index++) {
         const calendarDay = today + index * DAY_MS;

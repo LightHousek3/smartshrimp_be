@@ -4,6 +4,7 @@ const config = require('../config');
 const { ApiError, productionProtocolV2: v2 } = require('../utils');
 const productionReview = require('./productionProtocolReview.service');
 const lifecycle = require('./protocolLifecycle.service');
+const { assertTreatmentCourse } = require('../utils/treatmentProtocolPolicy');
 const {
     PROTOCOL_TYPE: T,
     PROTOCOL_STATUS: S,
@@ -473,6 +474,11 @@ const validateApproval = async (client, p) => {
         where: { protocolId: p.id },
         select: {
             plannedTime: true,
+            startDayOffset: true,
+            endDayOffset: true,
+            repeatIntervalDays: true,
+            recurrenceAnchorDay: true,
+            dueAtMinutes: true,
             productId: true,
             product: { select: { farmId: true, status: true } },
         },
@@ -496,6 +502,7 @@ const validateApproval = async (client, p) => {
         });
         if (p.season.status !== 'ACTIVE' || !diseaseCase) throw ApiError.forbidden(messages.PROTOCOL.INVALID_CASE);
         if (await lifecycle.pendingRequests(client, p.diseaseCaseId)) throw ApiError.conflict(messages.TREATMENT_PROTOCOL.INFORMATION_PENDING);
+        if (productionReview.isV2(p)) assertTreatmentCourse({ ...p, items }, p.season, { future: true });
     }
 };
 
@@ -635,6 +642,7 @@ const review = async (ownerId, id, { updatedAt, reason, materialSelections = [],
                     ...CARD_SELECT,
                     updatedAt: true,
                     supersedesProtocolId: true,
+                    productionStructure: true,
                 });
                 if (p.status !== S.PENDING_APPROVAL) throw ApiError.conflict(messages.PROTOCOL.CONFLICT);
                 if (
@@ -666,6 +674,9 @@ const review = async (ownerId, id, { updatedAt, reason, materialSelections = [],
                     }
                 }
                 const status = approved ? S.APPROVED : S.REJECTED;
+                const decisionAt = new Date();
+                if (approved && p.protocolType === T.TREATMENT && p.treatmentStartAt <= decisionAt)
+                    throw ApiError.conflict(messages.TREATMENT_PROTOCOL.START_REQUIRED);
                 const changed = await client.protocol.updateMany({
                     where: {
                         id,
@@ -675,9 +686,9 @@ const review = async (ownerId, id, { updatedAt, reason, materialSelections = [],
                     data: {
                         status,
                         reviewedBy: ownerId,
-                        reviewedAt: now,
+                        reviewedAt: decisionAt,
                         rejectionReason: approved ? null : reason,
-                        updatedAt: now,
+                        updatedAt: decisionAt,
                     },
                 });
                 if (changed.count !== 1) throw ApiError.conflict(messages.PROTOCOL.CONFLICT);
@@ -687,17 +698,17 @@ const review = async (ownerId, id, { updatedAt, reason, materialSelections = [],
                         fromStatus: S.PENDING_APPROVAL,
                         toStatus: status,
                         changedBy: ownerId,
-                        changedAt: now,
+                        changedAt: decisionAt,
                         reason: approved ? null : reason,
                     },
                 });
-                if (approved) await lifecycle.reconcile(client, p.seasonId, now);
+                if (approved) await lifecycle.reconcile(client, p.seasonId, decisionAt);
                 const notices = await notifyReview(
                     client,
                     { ...p, rejectionReason: reason },
                     approved,
                 );
-                return { data: { id, status, updatedAt: now }, notices };
+                return { data: { id, status, updatedAt: decisionAt }, notices };
             },
             { isolationLevel: 'Serializable', timeout: config.productionProtocol.transactionTimeoutMs },
         );

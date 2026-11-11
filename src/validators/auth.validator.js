@@ -21,7 +21,8 @@ const login = {
     body: Joi.object().keys({
         email,
         password: passwordField({ minimumLength: 1 }),
-        deviceId: Joi.string().uuid({ version: 'uuidv4' }),
+        // Accept older clients without allowing them to choose the login session ID.
+        deviceId: Joi.string().uuid({ version: 'uuidv4' }).strip(),
     }),
 };
 

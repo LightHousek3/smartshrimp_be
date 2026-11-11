@@ -123,13 +123,10 @@ const options = async (client, ownerId, protocol, itemId, search = '') => {
     if (v2.isV2(protocol)) v2.assertItemMetadata(item);
     const where = { farmId: protocol.season.pond.farmId, status: PRODUCT_STATUS.ACTIVE,
         category: item.operationType === OPERATION_TYPE.FEEDING ? 'FEED' : item.operationType,
-<<<<<<< HEAD
-        manufacturer: { is: { ownerId, supplierType: { in: ['MANUFACTURER', 'BOTH'] } } },
-        compliance: { is: { complianceStatus: 'reviewed', containsAntibiotic: false, checkedBy: { not: null }, checkedAt: { not: null } } },
-=======
+
         manufacturer: { is: { ownerId, status: 'active', supplierType: { in: ['MANUFACTURER', 'BOTH'] } } },
         compliance: { is: { complianceStatus: 'reviewed', ...(protocol.protocolType !== 'TREATMENT' && { containsAntibiotic: false }), checkedBy: { not: null }, checkedAt: { not: null } } },
->>>>>>> 3587535 (feat: implement expert treatment workflow on existing tables)
+
         ...(search && { name: { contains: search, mode: 'insensitive' } }) };
     const eligible = [];
     let cursor;

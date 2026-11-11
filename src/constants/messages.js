@@ -169,6 +169,13 @@ const messages = {
 
     // Auth
     AUTH: {
+        LOGIN_ERRORS: {
+            INVALID_CREDENTIALS: 'Email or password is incorrect',
+            PENDING_ACTIVATION: 'Account has not been activated. Please activate your account first',
+            ACCOUNT_BLOCKED: 'Your account has been blocked. Please contact support',
+            ACCOUNT_INACTIVE: 'Your account is inactive. Please contact support',
+            FORBIDDEN: 'You do not have permission to perform this action',
+        },
         LOGIN_SUCCESS: 'Đăng nhập thành công',
         LOGOUT_SUCCESS: 'Đăng xuất thành công',
         TOKEN_REFRESHED: 'Làm mới token thành công',
@@ -741,10 +748,15 @@ const messages = {
     },
 
     TREATMENT_PROTOCOL: {
+        PRODUCTION_TEMPLATE_FORBIDDEN: 'Phác đồ điều trị phải được Expert lập riêng cho ca bệnh, không được áp dụng mẫu phác đồ nuôi.',
         INSTRUCTIONS_REQUIRED: 'Cần ghi chỉ định và hướng theo dõi sau điều trị trước khi gửi duyệt.',
         INFORMATION_PENDING: 'Ca hoặc yêu cầu thông tin chưa cho phép chuyển bước; cần xử lý yêu cầu còn mở trước.',
         START_REQUIRED: 'Cần mốc bắt đầu điều trị hợp lệ trong tương lai, vụ đang hoạt động và đầy đủ khoảng giờ thực hiện trước khi gửi/duyệt.',
         FIRST_OCCURRENCE: 'Cữ ngày điều trị đầu tiên không được trước giờ bắt đầu Expert chỉ định.',
+        FIRST_STAGE_DAY: 'Giai đoạn điều trị đầu tiên phải bắt đầu từ ngày điều trị 1.',
+        DAY_ONE_REQUIRED: 'Ngày điều trị 1 cần ít nhất một lần thực hiện từ mốc bắt đầu; hãy sửa lịch hoặc mốc bắt đầu trước khi gửi duyệt.',
+        START_BEFORE_STOCKING: 'Mốc điều trị phải là ngày giờ hợp lệ và không được trước ngày thả giống của vụ.',
+        START_TIMEZONE_REQUIRED: 'Mốc điều trị phải có cả ngày, giờ và múi giờ (Z hoặc ±HH:mm).',
         STATE: 'Trạng thái ca hoặc phác đồ không cho phép thao tác này.',
         REASON_REQUIRED: 'Cần ghi lý do và quyết định cho phác đồ nuôi tiếp tục hoặc tạm giữ.',
         COMPLETED: 'Đã hoàn tất toàn bộ liệu trình theo kế hoạch được duyệt.',

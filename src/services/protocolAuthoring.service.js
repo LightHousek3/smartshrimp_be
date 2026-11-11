@@ -11,7 +11,8 @@ const { executionRows } = require('../utils/protocolExecution');
 const logger = require('../config/logger');
 const config = require('../config');
 const { emitNotification } = require('../realtime/notification.socket');
-const { ApiError, productionProtocolV2: v2, assertMaterialSafety, assertTemplateDose, productFromRecommendation, assertProtocolHarvestCoverage } = require('../utils');
+const { ApiError, productionProtocolV2: v2, assertMaterialSafety, assertTemplateDose, productFromRecommendation, assertProtocolHarvestCoverage,
+    assessTemplateProposal, getMaterialSafety } = require('../utils');
 const { hasOverlappingStages, isProductionProtocolDoseValid } = require('../utils/productionProtocol');
 const {
     messages,
@@ -22,6 +23,8 @@ const {
     PRODUCTION_PROTOCOL_WRITABLE_SEASONS,
     httpStatus,
 } = require('../constants');
+
+const { assertTreatmentStart, assertTreatmentFirstStage, assertTreatmentCourse } = require('../utils/treatmentProtocolPolicy');
 
 /** Production and treatment share authoring/storage; only their context and day policy differ. */
 const createWorkflow = ({ protocolType = 'PRODUCTION', diseaseCaseId = null } = {}) => {
@@ -304,8 +307,7 @@ const createWorkflow = ({ protocolType = 'PRODUCTION', diseaseCaseId = null } = 
             submit: Boolean(isWritable(season) && PRODUCTION_PROTOCOL_EDITABLE_STATUSES.includes(row.status) && !blocked && row.items.length),
             update: Boolean(isWritable(season) && PRODUCTION_PROTOCOL_EDITABLE_STATUSES.includes(row.status) && !blocked),
             cancel: Boolean(isWritable(season) && row.status === 'DRAFT' && !blocked),
-            withdraw: Boolean(treatment && isWritable(season) && (['PENDING_APPROVAL', 'REJECTED'].includes(row.status)
-                || row.status === 'APPROVED' && row.treatmentStartAt > new Date())),
+            withdraw: Boolean(treatment && isWritable(season) && ['PENDING_APPROVAL', 'REJECTED', 'APPROVED'].includes(row.status)),
             stop: Boolean(treatment && isWritable(season) && (row.status === 'ACTIVE'
                 || row.contentVersion === 1 && row.status === 'APPROVED' && season.diseaseCase?.status === 'IN_TREATMENT')),
         },
@@ -475,7 +477,11 @@ const createWorkflow = ({ protocolType = 'PRODUCTION', diseaseCaseId = null } = 
      * Validate inclusive day ranges, existing identities, dose rules and product compatibility.
      * Retained inactive products may stay in a draft; submission revalidates them as new selections.
      */
-    const validateGraph = async (tx, season, stages, current, contentVersion = 1) => {
+    const validateGraph = async (tx, season, stages, current, contentVersion = 1, accountId) => {
+        if (treatment) {
+            assertTreatmentStart(season.treatmentStartAt, season);
+            assertTreatmentFirstStage(stages);
+        }
         const assertDose = (entry, window, product, environment, meal) => {
             let first = window.first + 1;
             let last = window.last + 1;
@@ -491,7 +497,9 @@ const createWorkflow = ({ protocolType = 'PRODUCTION', diseaseCaseId = null } = 
             } else if (treatment && ['PER_KG_BIOMASS', 'PERCENT_BIOMASS'].includes(entry.doseBasis)) {
                 throw ApiError.badRequest(messages.TREATMENT_PROTOCOL.START_REQUIRED);
             }
-            assertTemplateDose({ ...entry, endDay: last, doseValue: Number(entry.doseValue),
+            const firstDose = new Prisma.Decimal(entry.doseValue).plus(new Prisma.Decimal(entry.dailyDoseIncrement ?? 0)
+                .mul(window.first - (entry.doseAnchorOffset ?? window.first)));
+            assertTemplateDose({ ...entry, endDay: last, doseValue: Number(firstDose),
                 dailyDoseIncrement: Number(entry.dailyDoseIncrement ?? 0) }, product, first, environment);
         };
         if (contentVersion === 2) await assertV2Ready(tx);
@@ -538,6 +546,9 @@ const createWorkflow = ({ protocolType = 'PRODUCTION', diseaseCaseId = null } = 
                     if (contentVersion === 2 && entry.recommendedProductDetails) {
                         entry.recommendedProductDetails = v2.normalizeProposal(entry.recommendedProductDetails);
                         const proposal = productFromRecommendation(entry.recommendedProductDetails);
+                        const assessment = assessTemplateProposal(proposal, accountId);
+                        entry.recommendedProductDetails.proposed.productCompliance = assessment.productCompliance;
+                        entry.recommendedProductDetails.review = assessment.review;
                         const proposedManufacturerId = entry.recommendedProductDetails.proposed.manufacturerId;
                         if (entry.recommendedManufacturerId && proposedManufacturerId && entry.recommendedManufacturerId !== proposedManufacturerId) {
                             throw ApiError.badRequest(messages.PRODUCTION_PROTOCOL.MATERIAL_RESOLUTION);
@@ -662,12 +673,13 @@ const createWorkflow = ({ protocolType = 'PRODUCTION', diseaseCaseId = null } = 
 
     /** Scope and snapshot the selected version; rollout gates prevent unsupported clients from importing it. */
     const requireTemplate = async (tx, season, templateId) => {
+        if (treatment) throw ApiError.badRequest(messages.TREATMENT_PROTOCOL.PRODUCTION_TEMPLATE_FORBIDDEN);
         const template = await tx.productionProtocolTemplate.findFirst({
             where: {
                 id: templateId,
                 ...templateWhere(season),
             },
-            include: { items: { orderBy: { sequenceOrder: 'asc' } } },
+            include: { items: { orderBy: { sequenceOrder: 'asc' }, include: { product: { select: PRODUCT_SELECT } } } },
         });
         if (!template) {
             throw ApiError.notFound(messages.PRODUCTION_PROTOCOL.TEMPLATE_NOT_FOUND);
@@ -739,9 +751,20 @@ const createWorkflow = ({ protocolType = 'PRODUCTION', diseaseCaseId = null } = 
         const template = await requireTemplate(tx, season, templateId);
         const items = template.items;
         return { title: template.title, summary: template.description, contentVersion: 2,
-            allowedVariancePct: String(template.allowedVariancePct), rollingWindowDays: 7,
+            allowedVariancePct: String(template.allowedVariancePct), rollingWindowDays: 3,
             templateVersionNo: template.versionNo, referencePostCount: template.referencePostCount,
-            stages: v2.templateGroups(items) };
+            stages: v2.templateGroups(items),
+            editorItems: items.map(item => {
+                const product = item.product ? { ...item.product, productCompliance: item.product.compliance }
+                    : productFromRecommendation(item.recommendedProductDetails) || { name: item.recommendedProductName || 'Vật tư cũ',
+                        category: item.recommendedCategory || item.operationType, unit: item.doseUnit, unavailable: true };
+                return { id: item.id, startDay: item.startDayOfCulture, endDay: item.endDayOfCulture,
+                    plannedTime: item.plannedTime?.toISOString().slice(11, 23) ?? null, mealNumber: item.mealNumber,
+                    operationType: item.operationType, repeatIntervalDays: item.repeatIntervalDays,
+                    doseBasis: item.doseBasis, doseValue: Number(item.doseValue), doseUnit: item.doseUnit,
+                    dailyDoseIncrement: Number(item.dailyDoseIncrement ?? 0), dueAtMinutes: item.dueAtMinutes,
+                    instructions: item.instructions, product: { ...product, safety: getMaterialSafety(product) } };
+            }) };
 
     });
 
@@ -750,6 +773,7 @@ const createWorkflow = ({ protocolType = 'PRODUCTION', diseaseCaseId = null } = 
      * Clear previous review fields, retain audit history and leave schedule generation to approval.
      */
     const submitCurrent = async (tx, season, accountId, current, notifications) => {
+        if (treatment && current.sourceTemplateId) throw ApiError.badRequest(messages.TREATMENT_PROTOCOL.PRODUCTION_TEMPLATE_FORBIDDEN);
         const fromStatus = current.status;
         if (treatment) {
             if (await lifecycle.pendingRequests(tx, diseaseCaseId)) throw ApiError.conflict(messages.TREATMENT_PROTOCOL.INFORMATION_PENDING);
@@ -778,7 +802,8 @@ const createWorkflow = ({ protocolType = 'PRODUCTION', diseaseCaseId = null } = 
         }
         // Revalidate all products as newly selected: inactive products can remain in
         // draft history, but cannot be submitted as operational recommendations.
-        await validateGraph(tx, season, groups, null, current.contentVersion ?? 1);
+        await validateGraph(tx, season, groups, null, current.contentVersion ?? 1, accountId);
+        if (treatment) assertTreatmentCourse(current, season, { future: true });
         const result = await tx.protocol.updateMany({
             where: {
                 id: current.id,
@@ -835,6 +860,7 @@ const createWorkflow = ({ protocolType = 'PRODUCTION', diseaseCaseId = null } = 
      * Link the latest version, including cancelled ones; optional submission remains atomic.
      */
     const create = (accountId, seasonId, body) => transaction(async (tx, notifications) => {
+        if (treatment && (body.templateId || body.templateVersionNo != null)) throw ApiError.badRequest(messages.TREATMENT_PROTOCOL.PRODUCTION_TEMPLATE_FORBIDDEN);
         const season = await scope(tx, accountId, seasonId, true);
         if (await tx.protocol.count({
             where: {
@@ -856,11 +882,12 @@ const createWorkflow = ({ protocolType = 'PRODUCTION', diseaseCaseId = null } = 
         });
         const contentVersion = treatment ? 2 : body.contentVersion ?? 1;
         if (treatment) season.treatmentStartAt = body.treatmentStartAt ? new Date(body.treatmentStartAt) : null;
-        await validateGraph(tx, season, body.stages, null, contentVersion);
+        await validateGraph(tx, season, body.stages, null, contentVersion, accountId);
         const {
             stages, submitForApproval, templateId, templateVersionNo, ...header
         } = body;
         delete header.contentVersion;
+        header.rollingWindowDays = 3;
         let template;
         if (templateId) {
             await tx.$queryRaw`SELECT id FROM production_protocol_templates WHERE id = ${templateId}::uuid FOR SHARE`;
@@ -899,9 +926,10 @@ const createWorkflow = ({ protocolType = 'PRODUCTION', diseaseCaseId = null } = 
     const mutate = (accountId, seasonId, protocolId, body, cancelling) => transaction(async (tx, notifications) => {
         const season = await scope(tx, accountId, seasonId, true);
         await tx.$queryRaw`SELECT id FROM protocols WHERE id = ${protocolId}::uuid FOR UPDATE`;
+        // Resolve due activation under the same lock before allowing withdrawal of an expired approval.
+        if (treatment && cancelling) await lifecycle.reconcile(tx, seasonId);
         const current = await findProtocol(tx, seasonId, protocolId);
-        const canCancel = current.status === 'DRAFT' || treatment && ['REJECTED', 'PENDING_APPROVAL', 'APPROVED'].includes(current.status)
-            && (current.status !== 'APPROVED' || current.treatmentStartAt > new Date());
+        const canCancel = current.status === 'DRAFT' || treatment && ['REJECTED', 'PENDING_APPROVAL', 'APPROVED'].includes(current.status);
         if (!(cancelling ? canCancel : PRODUCTION_PROTOCOL_EDITABLE_STATUSES.includes(current.status))) {
             throw ApiError.conflict(messages.PRODUCTION_PROTOCOL.STATE);
         }
@@ -915,7 +943,14 @@ const createWorkflow = ({ protocolType = 'PRODUCTION', diseaseCaseId = null } = 
             stages, reason, submitForApproval, templateId, templateVersionNo, contentVersion, ...header
         } = body;
         delete header.revision;
+        if (treatment && (templateId || templateVersionNo != null)) throw ApiError.badRequest(messages.TREATMENT_PROTOCOL.PRODUCTION_TEMPLATE_FORBIDDEN);
+        header.rollingWindowDays = 3;
         const version = contentVersion ?? current.contentVersion ?? 1;
+        if (treatment) {
+            header.sourceTemplateId = null;
+            header.sourceTemplateVersionNo = null;
+            header.sourceTemplateSnapshot = Prisma.DbNull;
+        }
         if (treatment) season.treatmentStartAt = header.treatmentStartAt === undefined
             ? current.treatmentStartAt : header.treatmentStartAt ? new Date(header.treatmentStartAt) : null;
         if (v2.isV2(current) && version !== 2) throw ApiError.conflict(messages.PRODUCTION_PROTOCOL.V2_REQUIRED);
@@ -942,8 +977,10 @@ const createWorkflow = ({ protocolType = 'PRODUCTION', diseaseCaseId = null } = 
             if (precise.length) {
                 throw ApiError.conflict(messages.PRODUCTION_PROTOCOL.TIME_PRECISION);
             }
-            await validateGraph(tx, season, stages, current, version);
+            await validateGraph(tx, season, stages, current, version, accountId);
         }
+        if (treatment && !cancelling && !stages && header.treatmentStartAt !== undefined)
+            await validateGraph(tx, season, protocolStages(current), current, version, accountId);
         const result = await tx.protocol.updateMany({
             where: {
                 id: protocolId,

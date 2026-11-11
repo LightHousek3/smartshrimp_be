@@ -42,18 +42,3 @@ test/*
 docs/*
 docs/unit-tests/
 
-# Treatment workflow regression coverage and schema handoff
-!tests/expertDiseaseCase.test.js
-!tests/expertDiseaseCase.integration.test.js
-!tests/expertTreatmentProtocol.integration.test.js
-!tests/expertProtocolTemplate.rules.test.js
-!tests/protocolExecution.test.js
-!tests/protocolTimeline.test.js
-!tests/protocolMaterialSelection.test.js
-!docs/unit-tests/
-!docs/unit-tests/EXPERT_TREATMENT_20261110.md
-!docs/database/
-!docs/database/SMARTSHRIMP_SUPABASE_SCHEMA_20261110.sql
-!docs/database/TREATMENT_MIGRATION_RESULT_20261110.json
-!docs/database/TREATMENT_WORKFLOW_20261110.md
-

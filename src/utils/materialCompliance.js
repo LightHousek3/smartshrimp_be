@@ -149,6 +149,16 @@ const assessTemplateProposal = (product, accountId, now = new Date()) => {
         ),
         reviewNote: messages.MATERIAL_COMPLIANCE.PROPOSAL_COMPLETENESS_NOTE,
     };
+    const complete =
+        Boolean(product.manufacturerId || product.manufacturer?.name?.trim()) &&
+        Boolean(product.recommendationReason?.trim()) &&
+        complianceMissingFields(candidate).length === 0;
+    if (!complete) {
+        const missing = complianceMissingFields(candidate);
+        if (!product.manufacturerId && !product.manufacturer?.name?.trim()) missing.push(messages.MATERIAL_COMPLIANCE.MANUFACTURER_REVIEW_REQUIRED);
+        if (!product.recommendationReason?.trim()) missing.push('lý do đề xuất');
+        throw ApiError.badRequest(messages.MATERIAL_COMPLIANCE.MISSING_PROPOSAL_FIELDS(missing.join(', ')));
+    }
     const productCompliance = {
         ...candidate,
         complianceStatus: 'reviewed',
