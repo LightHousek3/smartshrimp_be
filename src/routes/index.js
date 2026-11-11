@@ -15,6 +15,7 @@ const ownerDashboardRoute = require('./ownerDashboard.route');
 const technicianDashboardRoute = require('./technicianDashboard.route');
 const expertSeasonRoute = require('./expertSeason.route');
 const expertDiseaseCaseRoute = require('./expertDiseaseCase.route');
+const ownerDiseaseCaseRoute = require('./ownerDiseaseCase.route');
 const ragRoute = require('./rag.route');
 const waterLogRoute = require('./waterLog.route');
 const aiDiagnosisRoute = require('./aiDiagnosis.route');
@@ -37,6 +38,7 @@ const routes = [
     { path: '/owner/tasks', route: taskRoute },
     { path: '/me/tasks', route: assignedTaskRoute },
     { path: '/owner/protocols', route: protocolRoute },
+    { path: '/owner/disease-cases', route: ownerDiseaseCaseRoute },
     { path: '/me/rag', route: ragRoute },
     { path: '/auth', route: authRoute },
     { path: '/admin/dashboard', route: adminDashboardRoute },
