@@ -19,7 +19,10 @@ const {
 } = require('./materialCompliance');
 const { searchSubstances, checkIngredients, requireUsableIngredients } = require('./inventorySubstances');
 
+const recognitionResult = require('./aiRecognition'); 
+
 module.exports = {
+    recognitionResult,
     assertProtocolHarvestCoverage,
     productionSchedule,
     productionProtocolV2,

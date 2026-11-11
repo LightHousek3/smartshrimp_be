@@ -30,9 +30,12 @@ const protocolController = require('./protocol.controller');
 
 const aiDiagnosisController = require('./aiDiagnosis.controller');
 
+const inventorySubstanceController = require('./inventorySubstance.controller');
+const diseaseCaseController = require('./diseaseCase.controller');
 module.exports = {
     aiDiagnosisController,
-    inventorySubstanceController: require('./inventorySubstance.controller'),
+    inventorySubstanceController,
+    diseaseCaseController,
     protocolController,
     ragDocumentController,
     ragController,

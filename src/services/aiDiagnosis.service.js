@@ -4,7 +4,7 @@ const Joi = require('joi');
 const config = require('../config');
 const prisma = require('../config/prisma');
 const logger = require('../config/logger');
-const { ApiError } = require('../utils');
+const { ApiError, recognitionResult } = require('../utils');
 const sign = require('../utils/cloudinarySignature');
 const {
     ACCOUNT_ROLE,
@@ -13,7 +13,6 @@ const {
     SEASON_STATUS,
     AI_RUN_STATUS,
     AI_RECOGNITION_STATUS,
-    AI_MIN_RECOGNITION_CONFIDENCE,
     AI_LABELS,
     AI_LABEL_NAMES,
     AI_LIMITS,
@@ -300,18 +299,6 @@ const classifyImages = async (files, requestId) => {
 };
 
 // History response mapping ---------------------------------------------------
-
-/** Apply the public recognition policy without changing the four stored model classes. */
-const recognitionResult = (row) => {
-    // NUMERIC(6,5) rounds confidence in SQL. Keep the original JSON probability at the 80% boundary.
-    const confidence = row.predictions[0].probability;
-    const recognized = confidence >= AI_MIN_RECOGNITION_CONFIDENCE;
-    return {
-        recognitionStatus: recognized ? AI_RECOGNITION_STATUS.RECOGNIZED : AI_RECOGNITION_STATUS.UNRECOGNIZED,
-        predictedLabel: recognized ? AI_LABEL_NAMES[row.predictedLabel] : null,
-        confidence,
-    };
-};
 
 /** Expand disease abbreviations in advice, including recommendations stored by older runs. */
 const recommendationText = (value) => value
