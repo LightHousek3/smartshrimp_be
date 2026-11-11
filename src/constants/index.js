@@ -14,6 +14,7 @@ const {
     PersonnelRole: PERSONNEL_ROLE,
     ShrimpType: SHRIMP_TYPE,
     HealthStatus: HEALTH_STATUS,
+    DiseaseCaseStatus: DISEASE_CASE_STATUS,
 } = require('@prisma/client');
 
 // Shared by the technician list validator and service; keep cursor bounds at the boundary.
@@ -430,6 +431,7 @@ module.exports = {
     TASK_LIMITS,
     PERSONNEL_ROLE,
     HEALTH_STATUS,
+    DISEASE_CASE_STATUS,
     OPERATION_TYPE,
     OPERATION_STATUS,
     DOSE_BASIS,
