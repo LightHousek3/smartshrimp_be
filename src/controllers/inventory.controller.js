@@ -7,21 +7,6 @@ const scanLabel = asyncHandler(async (req, res) => {
     ResponseHandler.success(res, { message: messages.INVENTORY_LABEL.SCANNED, data: result });
 });
 
-const getProductsForReview = asyncHandler(async (req, res) => {
-    const { products, meta } = await inventoryService.getProductsForReview(req.query);
-    ResponseHandler.paginated(res, { message: messages.INVENTORY.LIST_FETCHED, data: products, meta });
-});
-
-const getProductForReview = asyncHandler(async (req, res) => {
-    const product = await inventoryService.getProductForReview(req.params.productId);
-    ResponseHandler.success(res, { message: messages.INVENTORY.FETCHED, data: product });
-});
-
-const reviewProductCompliance = asyncHandler(async (req, res) => {
-    const product = await inventoryService.reviewProductCompliance(req.params.productId, req.body, req.account.id);
-    ResponseHandler.success(res, { message: messages.INVENTORY.COMPLIANCE_REVIEWED, data: product });
-});
-
 /**
  * GET /owner/farms/:farmId/products
  * Return the owned farm catalog with pagination and stock summaries.
@@ -194,9 +179,6 @@ const updateLotExpiry = asyncHandler(async (req, res) => {
 
 module.exports = {
     scanLabel,
-    getProductsForReview,
-    getProductForReview,
-    reviewProductCompliance,
     getProducts,
     getProduct,
     createProduct,

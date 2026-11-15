@@ -5,7 +5,7 @@ const {
     LEGAL_SOURCE,
 } = require('../constants/prohibitedAquacultureIngredients');
 const { checkIngredients } = require('./inventorySubstances');
-const { isInventoryProductReviewable, complianceConsistencyIssue, hasLabelImages } = require('./inventoryProductReadiness');
+const { complianceConsistencyIssue, hasLabelImages } = require('./inventoryProductReadiness');
 
 const complianceOf = (product) => product.productCompliance ?? product.compliance;
 const checkProductIngredients = (product) => checkIngredients(
@@ -22,6 +22,7 @@ const findProhibitedIngredients = (product) => {
     return checkProductIngredients(product).matches
         .map(({ sourceRow, name }) => ({ number: Number(sourceRow), name }));
 };
+/** Block both detected prohibited ingredients and ambiguous declarations requiring review. */
 const assertNoProhibitedIngredients = (product) => {
     const check = checkProductIngredients(product);
     if (check.status !== 'not_detected') throw ApiError.badRequest(check.message);
@@ -36,7 +37,6 @@ const complianceMissingFields = (details) => {
         ['registrationNumber', messages.MATERIAL_COMPLIANCE.REGISTRATION_REQUIRED],
         ['ingredientsText', messages.MATERIAL_COMPLIANCE.INGREDIENTS_REQUIRED],
         ['usageInstructions', messages.MATERIAL_COMPLIANCE.LABEL_USAGE_REQUIRED],
-        ['reviewNote', messages.MATERIAL_COMPLIANCE.REVIEW_NOTE_REQUIRED],
     ]) {
         if (typeof details?.[field] !== 'string' || !details[field].trim()) missing.push(label);
     }
@@ -49,29 +49,24 @@ const complianceMissingFields = (details) => {
         missing.push(messages.MATERIAL_COMPLIANCE.WITHDRAWAL_REQUIRED);
     return missing;
 };
-// Both catalogue records and proposal snapshots require label photos and complete facts.
-const isReviewed = (product, details) => Boolean(
-    hasLabelImages(product) && details?.complianceStatus === 'reviewed' && details.checkedBy && details.checkedAt &&
-    (product.id
-        ? isInventoryProductReviewable({ ...product, compliance: details })
-        : complianceMissingFields(details).length === 0),
+// Input validation records the declaration; operational reads do not repeat label validation.
+const isDeclared = details => Boolean(
+    ['feed', 'environment', 'dual_purpose', 'medicine'].includes(details?.regulatoryType)
+    && details.checkedBy && details.checkedAt,
 );
+/** Classify the stored declaration as usable, treatment-only or unavailable. */
 const getMaterialSafety = (product) => {
     if (product.deletedProductId) return { status: 'UNVERIFIED', reason: messages.INVENTORY.DELETED_MATERIAL_REPLACEMENT };
-    const check = checkProductIngredients(product);
-    if (check.status !== 'not_detected') return { status: 'BANNED', reason: check.message };
     const details = complianceOf(product);
-    if (details?.complianceStatus === 'blocked')
-        return {
-            status: 'BANNED',
-            reason: messages.MATERIAL_COMPLIANCE.PROHIBITED_WARNING,
-        };
+    if (product.id && product.status && product.status !== 'ACTIVE') {
+        return { status: 'UNVERIFIED', reason: messages.PRODUCTION_PROTOCOL.PRODUCT };
+    }
     if (details?.containsAntibiotic === true)
         return {
             status: 'TREATMENT_ONLY',
             reason: messages.MATERIAL_COMPLIANCE.ANTIBIOTIC_TREATMENT_ONLY,
         };
-    if (!isReviewed(product, details)) {
+    if (!isDeclared(details)) {
         return {
             status: 'UNVERIFIED',
             reason: messages.MATERIAL_COMPLIANCE.PROFILE_INCOMPLETE,
@@ -80,28 +75,22 @@ const getMaterialSafety = (product) => {
     return { status: 'VERIFIED', reason: null };
 };
 
-/** Saved plans must contain complete material dossiers; photos never bypass prohibited-ingredient checks. */
+/** Apply the persisted dossier decision and the prescription's permitted route. */
 const assertMaterialSafety = (
     product,
     environment,
     _instructions,
-    { requireReviewed = true, production = true } = {},
+    { production = true } = {},
 ) => {
     const safety = getMaterialSafety(product);
     if (product.deletedProductId) throw ApiError.badRequest(safety.reason);
     const details = complianceOf(product);
-    const reviewed = isReviewed(product, details);
-    if (safety.status === 'BANNED') throw ApiError.badRequest(safety.reason);
     if (
         (production && safety.status === 'TREATMENT_ONLY') ||
-        (requireReviewed && !reviewed)
+        safety.status === 'UNVERIFIED' || !isDeclared(details)
     )
         throw ApiError.badRequest(
             `${product.name}: ${safety.reason || messages.MATERIAL_COMPLIANCE.PROFILE_INCOMPLETE}`,
-        );
-    if (requireReviewed && product.id && !product.manufacturerId)
-        throw ApiError.badRequest(
-            messages.MATERIAL_COMPLIANCE.MANUFACTURER_UNVERIFIED(product.name),
         );
     if (
         details &&
@@ -113,22 +102,21 @@ const assertMaterialSafety = (
         );
     }
 };
-const reviewProposal = (product, accountId, now = new Date()) => {
+/** Validate the proposal before stamping its declaring account and submission time. */
+const confirmProposal = (product, accountId, now = new Date()) => {
     assertNoProhibitedIngredients(product);
     if (!hasLabelImages(product)) throw ApiError.badRequest(messages.INVENTORY.LABEL_IMAGE_REQUIRED);
     if (!product.manufacturerId && !product.manufacturer?.name?.trim()) {
-        throw ApiError.badRequest(messages.MATERIAL_COMPLIANCE.MANUFACTURER_REVIEW_REQUIRED);
+        throw ApiError.badRequest(messages.MATERIAL_COMPLIANCE.MANUFACTURER_REQUIRED);
     }
     const details = product.productCompliance ?? {};
-    const missing = complianceMissingFields({
-        ...details, reviewNote: messages.MATERIAL_COMPLIANCE.PROPOSAL_COMPLETENESS_NOTE,
-    });
+    const missing = complianceMissingFields(details);
+    if (!product.recommendationReason?.trim()) missing.push(messages.MATERIAL_COMPLIANCE.PROPOSAL_REASON_REQUIRED);
     if (missing.length) {
         throw ApiError.badRequest(messages.MATERIAL_COMPLIANCE.MISSING_PROPOSAL_FIELDS(missing.join(', ')));
     }
     // These stamps identify the server-checked submission, not an independent evidence review.
     return {
-        complianceStatus: 'reviewed',
         checkedBy: accountId,
         checkedAt: now.toISOString(),
     };
@@ -139,25 +127,16 @@ const reviewProposal = (product, accountId, now = new Date()) => {
  * Proposals remain planning snapshots and never authorize operational use of a catalog product.
  */
 const assessTemplateProposal = (product, accountId, now = new Date()) => {
-    assertNoProhibitedIngredients(product);
-    const candidate = {
-        ...Object.fromEntries(
-            Object.entries(product.productCompliance ?? {}).filter(
-                ([field]) =>
-                    !['complianceStatus', 'reviewNote', 'checkedBy', 'checkedAt'].includes(field),
-            ),
-        ),
-        reviewNote: messages.MATERIAL_COMPLIANCE.PROPOSAL_COMPLETENESS_NOTE,
-    };
-    const productCompliance = {
-        ...candidate,
-        complianceStatus: 'reviewed',
-    };
+    const fields = ['regulatoryType', 'registrationNumber', 'ingredientsText', 'containsAntibiotic',
+        'usageInstructions', 'withdrawalDays', 'evidenceUrls'];
+    const productCompliance = Object.fromEntries(fields.filter(field => Object.hasOwn(product.productCompliance ?? {}, field))
+        .map(field => [field, product.productCompliance[field]]));
     return {
         productCompliance,
-        review: reviewProposal({ ...product, productCompliance }, accountId, now),
+        review: confirmProposal({ ...product, productCompliance }, accountId, now),
     };
 };
+/** Reconstruct proposal display fields without assigning a catalog product identity. */
 const productFromRecommendation = (details) =>
     details?.proposed
         ? {
@@ -180,7 +159,6 @@ module.exports = {
     complianceMissingFields,
     getMaterialSafety,
     assertMaterialSafety,
-    reviewProposal,
     assessTemplateProposal,
     productFromRecommendation,
 };

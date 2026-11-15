@@ -1,6 +1,6 @@
 const Joi = require('joi');
 
-// One contract covers material profiles and proposals; the service owns reviewer identity and timestamps.
+// One contract covers material facts; the service records the declaring account and time.
 const productCompliance = Joi.object({
     regulatoryType: Joi.string()
         .valid(
@@ -36,8 +36,6 @@ const productCompliance = Joi.object({
         .max(6)
         .unique()
         .default([]),
-    complianceStatus: Joi.any().strip(),
-    reviewNote: Joi.any().strip(),
     checkedBy: Joi.any().strip(),
     checkedAt: Joi.any().strip(),
 }).unknown(false);

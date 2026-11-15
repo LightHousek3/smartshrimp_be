@@ -32,7 +32,7 @@ const create = asyncHandler(async (req, res) => {
 
 /**
  * POST /api/v1/me/seasons/:seasonId/disease-cases/:caseId/responses
- * Submit a technician response (information, monitoring, treatment result, or emergency alert) with optimistic concurrency check.
+ * Submit ordinary conversation or an emergency alert without changing clinical state.
  */
 const respond = asyncHandler(async (req, res) => {
     ResponseHandler.created(res, { data: await diseaseCaseService.respond(req.account.id, req.params.seasonId, req.params.caseId, req.body),

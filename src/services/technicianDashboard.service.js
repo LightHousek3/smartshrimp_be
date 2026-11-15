@@ -44,7 +44,7 @@ const dayWindow = (now) => {
 
 // Respect the existing protocol/case lifecycle without introducing new treatment workflow here.
 const effectiveProtocol = {
-    status: PROTOCOL_STATUS.APPROVED,
+    AND: [{ OR: [{ status: PROTOCOL_STATUS.ACTIVE }, { contentVersion: 1, status: PROTOCOL_STATUS.APPROVED }] }],
     OR: [
         { protocolType: PROTOCOL_TYPE.PRODUCTION, season: { diseaseCases: { none: { status: 'IN_TREATMENT' } } } },
         { protocolType: PROTOCOL_TYPE.TREATMENT, diseaseCase: { status: 'IN_TREATMENT' } },
@@ -105,7 +105,7 @@ const readBlockedAlerts = async (tx, seasons, now, window, sources) => {
     const ids = seasons.map(s => s.id);
     const [protocols, slots] = await Promise.all([
         tx.protocol.findMany({ where: { seasonId: { in: ids }, protocolType: PROTOCOL_TYPE.PRODUCTION,
-            status: PROTOCOL_STATUS.APPROVED, contentVersion: 2,
+            status: PROTOCOL_STATUS.ACTIVE, contentVersion: 2,
             season: { diseaseCases: { none: { status: 'IN_TREATMENT' } } } },
         include: { items: { orderBy: { sequenceOrder: 'asc' } } } }),
         tx.operationSchedule.findMany({ where: { seasonId: { in: ids }, scheduledAt: { gte: now, lt: window.end } },

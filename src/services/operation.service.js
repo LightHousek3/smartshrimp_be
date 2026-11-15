@@ -4,10 +4,13 @@ const prisma = require('../config/prisma');
 const config = require('../config');
 const { emitNotification } = require('../realtime');
 const {
-    ApiError, stockQuantity, vietnamDate, requireCompleteInventoryProduct, productionProtocolV2: v2, productionSchedule: scheduleRules,
+    ApiError, stockQuantity, vietnamDate, assertMaterialSafety, productionProtocolV2: v2, productionSchedule: scheduleRules,
 } = require('../utils');
 const withdrawal = require('./harvestWithdrawal.service');
 const { materialSelect, assertOperationalMaterial, assertApprovedMaterial } = require('./productionProtocolReview.service');
+const lifecycle = require('./protocolLifecycle.service');
+const { courseEndsAt } = require('../utils/protocolTimeline');
+const { latestHarvestAt } = require('./harvest.service');
 const {
     messages,
     PERSONNEL_ROLE,
@@ -24,6 +27,7 @@ const toNumber = (val) => (val == null ? null : Number(val));
 const ITEM_STORAGE_SELECT = { productionMealId: true, dailyDoseIncrement: true,
     recurrenceAnchorDay: true, doseAnchorDay: true, materialSnapshot: true };
 
+/** Present saved material facts and quantities without exposing internal scheduling metadata. */
 const formatSchedule = (s) => {
     if (!s) return s;
     const material = s.protocolItem?.materialSnapshot;
@@ -201,7 +205,7 @@ const listSchedules = async (technicianId, seasonId, query = {}) => {
                     },
                 },
             },
-            orderBy: [{ scheduledAt: 'asc' }, { generatedAt: 'asc' }],
+            orderBy: [{ scheduledAt: 'asc' }, { createdAt: 'asc' }],
             skip,
             take: limit,
         }),
@@ -368,7 +372,11 @@ const notifyInsufficientInventory = async (technicianId, scheduleId) => {
     }
 };
 
-/** Execute a planned schedule with FEFO deductions in a serializable transaction. */
+/**
+ * Record an authorized planned slot and its FEFO stock deductions in one serializable transaction.
+ * Reconcile lifecycle state before accepting new usage; an older executedAt cannot reopen a closed course.
+ * A matching idempotent retry returns the saved execution without a second stock deduction.
+ */
 const executeSchedule = async (technicianId, scheduleId, payload) => {
     const pointer = await prisma.operationSchedule.findUnique({ where: { id: scheduleId }, select: { seasonId: true } });
     if (!pointer) throw ApiError.notFound(messages.OPERATION.NOT_FOUND);
@@ -378,9 +386,12 @@ const executeSchedule = async (technicianId, scheduleId, payload) => {
     }
     for (let attempt = 0; attempt < 3; attempt++) {
         try {
-            return await prisma.$transaction(async (tx) => {
+            const notifications = [];
+            const result = await prisma.$transaction(async (tx) => {
                 // Shared order with harvest: season -> schedule -> actual product -> receipt layers.
                 await tx.$queryRaw`SELECT id FROM aquaculture_seasons WHERE id = ${pointer.seasonId}::uuid FOR UPDATE`;
+                // A delayed worker must not leave a superseded production slot executable.
+                notifications.push(...await lifecycle.reconcile(tx, pointer.seasonId));
                 await tx.$queryRaw`SELECT id FROM operation_schedules WHERE id = ${scheduleId}::uuid FOR UPDATE`;
                 const schedule = await tx.operationSchedule.findUnique({
                     where: { id: scheduleId },
@@ -388,12 +399,14 @@ const executeSchedule = async (technicianId, scheduleId, payload) => {
                         season: { include: { pond: { select: { farmId: true, farm: { select: { ownerId: true, status: true } } } } } },
                         protocolItem: { select: { ...ITEM_STORAGE_SELECT, operationType: true, doseBasis: true, doseValue: true,
                             doseUnit: true, startDayOffset: true, endDayOffset: true, repeatIntervalDays: true, mealNumber: true, instructions: true,
-                            protocol: { select: { contentVersion: true, allowedVariancePct: true, protocolType: true, diseaseCaseId: true, status: true } } } },
+                            dueAtMinutes: true,
+                            protocol: { select: { id: true, contentVersion: true, allowedVariancePct: true, protocolType: true, diseaseCaseId: true, status: true, treatmentStartAt: true, items: true } } } },
                     },
                 });
                 if (!schedule) throw ApiError.notFound(messages.OPERATION.NOT_FOUND);
                 const assignment = await tx.seasonPersonnelAssignment.findFirst({
-                    where: { seasonId: schedule.seasonId, accountId: technicianId, role: PERSONNEL_ROLE.TECHNICIAN, unassignedAt: null },
+                    where: { seasonId: schedule.seasonId, accountId: technicianId, role: PERSONNEL_ROLE.TECHNICIAN, unassignedAt: null,
+                        account: { role: 'TECHNICIAN', status: 'ACTIVE', managedByOwnerId: schedule.season.pond.farm.ownerId } },
                     select: { id: true },
                 });
                 if (!assignment) throw ApiError.forbidden(messages.OPERATION.NOT_ASSIGNED_TECHNICIAN);
@@ -416,11 +429,27 @@ const executeSchedule = async (technicianId, scheduleId, payload) => {
                 if (schedule.season.status !== SEASON_STATUS.ACTIVE) throw ApiError.badRequest(messages.OPERATION.SEASON_NOT_ACTIVE);
                 if (schedule.status !== OPERATION_STATUS.PLANNED) throw ApiError.conflict(messages.OPERATION.SCHEDULE_NOT_PLANNED);
                 const protocol = schedule.protocolItem.protocol;
+                const end = protocol.contentVersion === 2 ? courseEndsAt({ ...protocol, season: schedule.season }) : null;
+                const replacementStart = await lifecycle.nextTreatmentStart(tx, schedule.seasonId, protocol.id);
+                if (replacementStart && new Date() >= replacementStart) throw ApiError.conflict(messages.TREATMENT_PROTOCOL.REPLACEMENT_DUE);
+                if (protocol.contentVersion === 2 && (!end || new Date() > end)) {
+                    throw ApiError.conflict(messages.TREATMENT_PROTOCOL.RECORDING_CLOSED);
+                }
                 const approvedMaterial = schedule.protocolItem.materialSnapshot;
+                if (protocol.protocolType === 'TREATMENT' && !await tx.diseaseCase.count({ where: {
+                    id: protocol.diseaseCaseId, seasonId: schedule.seasonId, status: 'IN_TREATMENT',
+                } })) throw ApiError.conflict(messages.TREATMENT_PROTOCOL.STATE);
+                if (protocol.protocolType === 'PRODUCTION' && await lifecycle.productionBlocked(tx, schedule.seasonId)) {
+                    throw ApiError.conflict(messages.PRODUCTION_PROTOCOL.STATE);
+                }
+                if (!v2.isV2(protocol) && protocol.status !== PROTOCOL_STATUS.APPROVED
+                    && !(protocol.protocolType === 'TREATMENT' && protocol.status === PROTOCOL_STATUS.ACTIVE)) {
+                    throw ApiError.conflict(messages.PRODUCTION_PROTOCOL.STATE);
+                }
                 if (v2.isV2(schedule.protocolItem.protocol)) {
                     v2.assertItemMetadata(schedule.protocolItem);
                     if (!approvedMaterial || targetProductId !== schedule.productId) throw ApiError.conflict(messages.PRODUCTION_PROTOCOL.MATERIAL_LOCKED);
-                    if (protocol.status !== PROTOCOL_STATUS.APPROVED || schedule.season.pond.farm.status !== FARM_STATUS.ACTIVE) {
+                    if (protocol.status !== PROTOCOL_STATUS.ACTIVE || schedule.season.pond.farm.status !== FARM_STATUS.ACTIVE) {
                         throw ApiError.conflict(messages.PRODUCTION_PROTOCOL.STATE);
                     }
                     if (['PER_KG_BIOMASS', 'PERCENT_BIOMASS'].includes(schedule.doseBasisSnapshot ?? schedule.protocolItem.doseBasis)) {
@@ -433,14 +462,16 @@ const executeSchedule = async (technicianId, scheduleId, payload) => {
                         });
                         // The season lock serializes this check with source voiding and schedule generation.
                         // Freshness is measured at the saved occurrence, preserving retrospective execution.
-                        if (!source || !scheduleRules.biomassAt([source], schedule.scheduledAt, new Date(), config.productionProtocol.biomassMaxAgeHours)) {
+                        const actualAt = payload.executedAt ? new Date(payload.executedAt) : new Date();
+                        const harvestedAt = await latestHarvestAt(tx, schedule.seasonId, actualAt);
+                        if (!source || !scheduleRules.biomassAt([source], schedule.scheduledAt, new Date(), config.productionProtocol.biomassMaxAgeHours, harvestedAt)) {
                             throw ApiError.conflict(messages.PRODUCTION_PROTOCOL.BIOMASS_SOURCE_INVALID);
                         }
                     }
                 }
                 const planned = new Prisma.Decimal(schedule.plannedQuantity);
                 const variance = actual.minus(planned).abs().div(planned).mul(100);
-                if (variance.gt(protocol.allowedVariancePct ?? 10) && !payload.varianceReason?.trim()) {
+                if (variance.gt(0) && !payload.varianceReason?.trim()) {
                     throw ApiError.badRequest(messages.OPERATION.VARIANCE_REASON_REQUIRED);
                 }
                 const executedAt = payload.executedAt ? new Date(payload.executedAt) : new Date();
@@ -454,14 +485,18 @@ const executeSchedule = async (technicianId, scheduleId, payload) => {
                     });
                     if (!product) throw ApiError.badRequest(messages.HARVEST.WITHDRAWAL_PRODUCT_NOT_READY);
                     if (product.status !== 'ACTIVE') throw ApiError.badRequest(messages.HARVEST.WITHDRAWAL_PRODUCT_NOT_READY);
-                    requireCompleteInventoryProduct(product);
                     if (approvedMaterial) {
-                        assertOperationalMaterial(product, schedule.protocolItem, schedule.season.pond.farmId, schedule.season.pond.farm.ownerId);
+                        assertOperationalMaterial(product, schedule.protocolItem, schedule.season.pond.farmId, schedule.season.pond.farm.ownerId,
+                            { ...protocol, season: schedule.season });
                         assertApprovedMaterial(product, approvedMaterial);
+                    } else {
+                        assertMaterialSafety({ ...product, productCompliance: product.compliance },
+                            schedule.operationType !== OPERATION_TYPE.FEEDING, null,
+                            { production: protocol?.protocolType !== 'TREATMENT' });
                     }
                     const requested = stockQuantity(actual, schedule.unit, product);
                     const balances = await tx.inventoryBalance.findMany({
-                        where: { productId: targetProductId, quantity: { gt: 0 }, expiryDate: { gte: vietnamDate(executedAt) } },
+                        where: { productId: targetProductId, quantity: { gt: 0 }, receivedAt: { lte: executedAt }, expiryDate: { gte: vietnamDate(executedAt) } },
                         orderBy: [{ expiryDate: 'asc' }, { receivedAt: 'asc' }, { id: 'asc' }],
                     });
                     const available = balances.reduce((total, balance) => total.add(balance.quantity), new Prisma.Decimal(0));
@@ -496,6 +531,9 @@ const executeSchedule = async (technicianId, scheduleId, payload) => {
                         remaining = remaining.minus(deduction);
                     }
                 }
+                // Processing may wait on stock locks; a backdated payload never extends the live plan.
+                if (end && new Date() > end) throw ApiError.conflict(messages.TREATMENT_PROTOCOL.RECORDING_CLOSED);
+                if (replacementStart && new Date() >= replacementStart) throw ApiError.conflict(messages.TREATMENT_PROTOCOL.REPLACEMENT_DUE);
                 const execution = await tx.operationExecution.create({
                     data: {
                         id: executionId,
@@ -513,13 +551,20 @@ const executeSchedule = async (technicianId, scheduleId, payload) => {
                 });
                 const completed = await tx.operationSchedule.updateMany({ where: { id: scheduleId, status: 'PLANNED' }, data: { status: 'COMPLETED' } });
                 if (completed.count !== 1) throw ApiError.conflict(messages.OPERATION.EXECUTION_CONFLICT);
+                if (protocol.contentVersion === 2) notifications.push(...await lifecycle.reconcile(tx, schedule.seasonId));
                 return { ...execution, actualQuantity: Number(execution.actualQuantity) };
-            }, { isolationLevel: 'Serializable' });
+            }, { isolationLevel: 'Serializable', maxWait: 5000, timeout: config.productionProtocol.transactionTimeoutMs });
+            for (const notification of notifications) {
+                try { emitNotification(notification.accountId, 'notification:new', { id: notification.id }); } catch {
+                    // The execution and persisted notices remain committed if socket delivery fails.
+                }
+            }
+            return result;
         } catch (error) {
             const retryable = error.code === 'P2034'
                 || (error.code === 'P2010' && ['40001', '40P01'].includes(error.meta?.code));
             if (retryable && attempt < 2) continue;
-            if (retryable || error.code === 'P2002') throw ApiError.conflict(messages.OPERATION.EXECUTION_CONFLICT);
+            if (retryable || ['P2002', 'P2028'].includes(error.code)) throw ApiError.conflict(messages.OPERATION.EXECUTION_CONFLICT);
             if (error instanceof ApiError && error.message === messages.OPERATION.INSUFFICIENT_INVENTORY) {
                 await notifyInsufficientInventory(technicianId, scheduleId);
             }

@@ -6,6 +6,7 @@
 const { Prisma } = require('@prisma/client');
 // The config entry point exposes settings; Prisma has a dedicated shared client.
 const prisma = require('../config/prisma');
+const lifecycle = require('./protocolLifecycle.service');
 const { ApiError } = require('../utils');
 const { HARVEST_ERROR_CODE, HARVEST_POLICY, HARVEST_LIMITS, messages, NOTIFICATION_TYPE, ACCOUNT_STATUS, PERSONNEL_ROLE, SHRIMP_CULTIVATION } = require('../constants');
 const M = messages.HARVEST;
@@ -223,6 +224,7 @@ const create = async (ownerId, seasonId, body, key) => {
                     data: { status: 'COMPLETED', actualEndDate: new Date(`${vietnamDay}T00:00:00Z`) },
                 });
                 if (changed.count !== 1) throw ApiError.conflict(M.CONFLICT);
+                await lifecycle.closeSeason(tx, seasonId, ownerId, false, new Date());
                 // Preserve executed history; cancel only pending work in this same commit.
                 await tx.$executeRaw`UPDATE operation_schedules SET status = 'cancelled',
                     cancellation_type = 'season_completed', cancellation_reason = ${M.SCHEDULE_COMPLETED_REASON},
@@ -274,4 +276,10 @@ const readProfessionalHistory = (tx, seasonId, at) => tx.$queryRaw(Prisma.sql`
     FROM harvest_events WHERE season_id = ${seasonId}::uuid AND harvested_at <= ${at}
     ORDER BY harvested_at ASC, estimated_remaining_count DESC NULLS FIRST, id ASC`);
 
-module.exports = { list, detail, create, readProfessionalHistory };
+const latestHarvestAt = async (tx, seasonId, at) => {
+    const [row] = await tx.$queryRaw`SELECT max(harvested_at) AS at FROM harvest_events
+        WHERE season_id = ${seasonId}::uuid AND harvested_at <= ${at}`;
+    return row?.at ?? null;
+};
+
+module.exports = { list, detail, create, readProfessionalHistory, latestHarvestAt };

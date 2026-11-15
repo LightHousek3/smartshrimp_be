@@ -1,4 +1,5 @@
 const prisma = require('../config/prisma');
+const lifecycle = require('./protocolLifecycle.service');
 const { emitNotification } = require('../realtime/notification.socket');
 const { ApiError } = require('../utils');
 const {
@@ -285,7 +286,7 @@ const getApprovedProductionProtocols = async (client, seasonId) => {
            FROM protocols
           WHERE season_id = $1::uuid
             AND protocol_type = 'production'
-            AND status = 'approved'
+            AND status IN ('approved','active','paused')
           ORDER BY version_no DESC
           LIMIT 2`,
         seasonId,
@@ -945,6 +946,7 @@ const cancelSeason = async (seasonId, { reason, expectedUpdatedAt }, ownerId) =>
                 throw new ApiError(httpStatus.CONFLICT, messages.SEASON.CHANGE_CONFLICT);
             }
 
+            await lifecycle.closeSeason(transaction, seasonId, ownerId, true, cancelledAt);
             await unassignCurrentSeasonPersonnel(
                 transaction,
                 seasonId,

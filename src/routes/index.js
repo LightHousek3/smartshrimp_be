@@ -24,7 +24,6 @@ const operationRoute = require('./operation.route');
 const protocolRoute = require('./protocol.route');
 const expertProtocolTemplateRoute = require('./expertProtocolTemplate.route');
 const inventoryRoute = require('./inventory.route');
-const adminInventoryRoute = require('./adminInventory.route');
 const taskRoute = require('./task.route');
 const assignedTaskRoute = require('./assignedTask.route');
 const harvestRoute = require('./harvest.route');
@@ -43,7 +42,6 @@ const routes = [
     { path: '/auth', route: authRoute },
     { path: '/admin/dashboard', route: adminDashboardRoute },
     { path: '/admin/accounts', route: adminAccountRoute },
-    { path: '/admin/inventory', route: adminInventoryRoute },
     { path: '/admin/rag/documents', route: adminRagDocumentRoute },
     { path: '/profile', route: profileRoute },
     { path: '/owner/farms', route: farmRoute },

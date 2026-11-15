@@ -4,8 +4,6 @@ const prisma = require('../config/prisma');
 const { ApiError } = require('../utils');
 const { httpStatus, messages, ACCOUNT_STATUS } = require('../constants');
 const tokenService = require('./token.service');
-const authTransaction = require('../utils/authTransaction');
-const { createAuthError } = require('../utils/authPolicy');
 
 const LOGIN_ACCOUNT_SELECT = {
     id: true,
@@ -24,9 +22,9 @@ const LOGIN_ACCOUNT_SELECT = {
 };
 
 const ACCOUNT_STATUS_ERRORS = {
-    [ACCOUNT_STATUS.PENDING_ACTIVATION]: messages.AUTH.PENDING_ACTIVATION,
-    [ACCOUNT_STATUS.BLOCKED]: messages.AUTH.ACCOUNT_BLOCKED,
-    [ACCOUNT_STATUS.INACTIVE]: messages.AUTH.ACCOUNT_INACTIVE,
+    [ACCOUNT_STATUS.PENDING_ACTIVATION]: 'PENDING_ACTIVATION',
+    [ACCOUNT_STATUS.BLOCKED]: 'ACCOUNT_BLOCKED',
+    [ACCOUNT_STATUS.INACTIVE]: 'ACCOUNT_INACTIVE',
 };
 
 const withoutPassword = ({ passwordHash, ...account }) => account;
@@ -36,7 +34,7 @@ const withoutPassword = ({ passwordHash, ...account }) => account;
  * Password validity is checked before account status so an attacker cannot use
  * this endpoint to discover the status of an account without its password.
  */
-const login = async (email, password, deviceId) => {
+const login = async (email, password) => {
     const account = await prisma.account.findUnique({
         where: { email },
         select: LOGIN_ACCOUNT_SELECT,
@@ -47,39 +45,27 @@ const login = async (email, password, deviceId) => {
         : false;
 
     if (!account || !passwordMatches) {
-        throw new ApiError(httpStatus.UNAUTHORIZED, messages.AUTH.INVALID_CREDENTIALS);
+        throw new ApiError(httpStatus.UNAUTHORIZED, messages.AUTH.LOGIN_ERRORS.INVALID_CREDENTIALS);
     }
 
     if (account.status !== ACCOUNT_STATUS.ACTIVE) {
-        const key = account.status === ACCOUNT_STATUS.PENDING_ACTIVATION
-            ? 'PENDING_ACTIVATION' : `ACCOUNT_${account.status}`;
-        throw createAuthError(ACCOUNT_STATUS_ERRORS[account.status] ? key : 'FORBIDDEN', 403);
+        const key = ACCOUNT_STATUS_ERRORS[account.status] || 'FORBIDDEN';
+        throw Object.assign(new ApiError(httpStatus.FORBIDDEN, messages.AUTH.LOGIN_ERRORS[key]), {
+            errorCode: `AUTH_${key}`,
+        });
     }
 
     const loginAt = new Date();
-    const resolvedDeviceId = deviceId || crypto.randomUUID();
+    const deviceId = crypto.randomUUID();
 
-    const result = await authTransaction(async (transaction) => {
-        const current = await transaction.account.findUnique({
-            where: { id: account.id }, select: LOGIN_ACCOUNT_SELECT,
-        });
-        if (!current || current.passwordHash !== account.passwordHash) {
-            throw createAuthError('INVALID_CREDENTIALS', 401);
-        }
-        if (current.status !== ACCOUNT_STATUS.ACTIVE) {
-            const key = current.status === ACCOUNT_STATUS.PENDING_ACTIVATION
-                ? 'PENDING_ACTIVATION' : `ACCOUNT_${current.status}`;
-            throw createAuthError(ACCOUNT_STATUS_ERRORS[current.status] ? key : 'FORBIDDEN', 403);
-        }
-        const updated = await transaction.account.updateMany({
-            where: { id: account.id, status: ACCOUNT_STATUS.ACTIVE, passwordHash: account.passwordHash },
+    return prisma.$transaction(async (transaction) => {
+        await transaction.account.update({
+            where: { id: account.id },
             data: { lastLoginAt: loginAt },
         });
-        if (updated.count !== 1) throw createAuthError('VERIFICATION_CONFLICT', 409);
-        const tokens = await tokenService.generateAuthTokens(current, resolvedDeviceId, transaction);
-        return { account: withoutPassword({ ...current, lastLoginAt: loginAt }), tokens };
+        const tokens = await tokenService.generateAuthTokens(account, deviceId, transaction);
+        return { account: withoutPassword({ ...account, lastLoginAt: loginAt }), tokens };
     });
-    return result;
 };
 
 /**

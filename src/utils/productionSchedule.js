@@ -7,12 +7,13 @@ const dateInVietnam = (at) => new Date(at.getTime() + VIETNAM_OFFSET_MS).toISOSt
 const positive = value => value != null && new Prisma.Decimal(value).gt(0);
 
 /** Compare freshness at the occurrence, not just when the worker happens to run. */
-const biomassAt = (logs, scheduledAt, now, maxAgeHours) => logs.find(log =>
+const biomassAt = (logs, scheduledAt, now, maxAgeHours, latestHarvestAt = null) => logs.find(log =>
     !log.isVoided && positive(log.estimatedBiomassKg)
+    && (!latestHarvestAt || log.recordedAt > latestHarvestAt)
     && log.recordedAt <= now && log.recordedAt <= scheduledAt
     && scheduledAt - log.recordedAt <= maxAgeHours * 60 * 60 * 1000);
 
-const calculate = (item, doc, scheduledAt, { volumeM3, healthLogs, now, biomassMaxAgeHours }) => {
+const calculate = (item, doc, scheduledAt, { volumeM3, healthLogs, now, biomassMaxAgeHours, latestHarvestAt }) => {
     const dose = doseAtDay(item, doc);
     let quantity = dose, basisQuantity = null, basisUnit = null, sourceHealthLogId = null;
     if (item.doseBasis === 'PER_M3_WATER') {
@@ -21,7 +22,7 @@ const calculate = (item, doc, scheduledAt, { volumeM3, healthLogs, now, biomassM
         basisUnit = 'm3_water';
         quantity = dose.times(basisQuantity);
     } else if (['PER_KG_BIOMASS', 'PERCENT_BIOMASS'].includes(item.doseBasis)) {
-        const log = biomassAt(healthLogs, scheduledAt, now, biomassMaxAgeHours);
+        const log = biomassAt(healthLogs, scheduledAt, now, biomassMaxAgeHours, latestHarvestAt);
         if (!log) return { blocked: 'BIOMASS_MISSING_OR_STALE' };
         basisQuantity = new Prisma.Decimal(log.estimatedBiomassKg);
         basisUnit = 'kg_biomass';
@@ -48,7 +49,7 @@ const occurrences = (protocol, now) => {
     if (!protocol.season.stockingDate) return [];
     const anchor = protocol.season.stockingDate.toISOString().slice(0, 10);
     const today = Date.parse(dateInVietnam(now));
-    const windowDays = Math.min(14, Math.max(1, protocol.rollingWindowDays));
+    const windowDays = Math.min(3, Math.max(1, protocol.rollingWindowDays));
     const rows = [];
     for (let index = 0; index < windowDays; index++) {
         const calendarDay = today + index * DAY_MS;

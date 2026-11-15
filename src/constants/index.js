@@ -14,7 +14,6 @@ const {
     PersonnelRole: PERSONNEL_ROLE,
     ShrimpType: SHRIMP_TYPE,
     HealthStatus: HEALTH_STATUS,
-    DiseaseCaseStatus: DISEASE_CASE_STATUS,
 } = require('@prisma/client');
 
 // Shared by the technician list validator and service; keep cursor bounds at the boundary.
@@ -25,7 +24,12 @@ const ASSIGNED_SEASON_LIMITS = Object.freeze({
     SEARCH_LENGTH: 255,
     CURSOR_LENGTH: 1000,
 });
-const { DISEASE_CASE_STATUS, CASE_SEVERITIES, TECHNICIAN_RESPONSE_TYPES, CASE_LIMITS } = require('./diseaseCase');
+const {
+    DISEASE_CASE_STATUS,
+    CASE_SEVERITIES,
+    TECHNICIAN_RESPONSE_TYPES,
+    CASE_LIMITS,
+} = require('./diseaseCase');
 const HARVEST_ERROR_CODE = Object.freeze({
     TIME_NOT_AFTER_LATEST: 'HARVEST_TIME_NOT_AFTER_LATEST',
     PARTIAL_COUNT_REQUIRED: 'HARVEST_PARTIAL_COUNT_REQUIRED',
@@ -35,7 +39,7 @@ const HARVEST_ERROR_CODE = Object.freeze({
     WITHDRAWAL_ACTIVE: 'HARVEST_WITHDRAWAL_ACTIVE',
     VARIANCE_REASON_REQUIRED: 'HARVEST_VARIANCE_REASON_REQUIRED',
 });
-// Enable only after the v2 compliance/snapshot schema and legacy review are ready.
+// Withdrawal checks depend on material declarations and recorded execution snapshots.
 const HARVEST_POLICY = Object.freeze({ withdrawalEnabled: true });
 const HARVEST_LIMITS = Object.freeze({ noteMaxLength: 500, legacyNoteMaxLength: 5000 });
 
@@ -51,8 +55,12 @@ const harvestWarningDays = (name, fallback) => {
     return Number.isSafeInteger(days) && days >= 0 ? days : fallback;
 };
 const SHRIMP_CULTIVATION = Object.freeze({
-    WHITELEG: Object.freeze({ typicalHarvestMinDays: harvestWarningDays('HARVEST_WHITELEG_WARNING_MIN_DAYS', 90) }),
-    BLACK_TIGER: Object.freeze({ typicalHarvestMinDays: harvestWarningDays('HARVEST_BLACK_TIGER_WARNING_MIN_DAYS', 120) }),
+    WHITELEG: Object.freeze({
+        typicalHarvestMinDays: harvestWarningDays('HARVEST_WHITELEG_WARNING_MIN_DAYS', 90),
+    }),
+    BLACK_TIGER: Object.freeze({
+        typicalHarvestMinDays: harvestWarningDays('HARVEST_BLACK_TIGER_WARNING_MIN_DAYS', 120),
+    }),
 });
 
 const DASHBOARD_PERIOD = Object.freeze({
@@ -90,10 +98,7 @@ const POND_PAGINATION = Object.freeze({
     MAX_LIMIT: 100,
 });
 // Business rule: planning and active seasons reserve the pond, regardless of readiness.
-const OPEN_SEASON_STATUSES = Object.freeze([
-    SEASON_STATUS.PLANNING,
-    SEASON_STATUS.ACTIVE,
-]);
+const OPEN_SEASON_STATUSES = Object.freeze([SEASON_STATUS.PLANNING, SEASON_STATUS.ACTIVE]);
 
 const TASK_OPEN_STATUSES = Object.freeze(['PENDING', 'IN_PROGRESS']);
 const TASK_STATUSES = Object.freeze([...TASK_OPEN_STATUSES, 'COMPLETED', 'CANCELLED']);
@@ -178,17 +183,9 @@ const INVENTORY_LIMITS = Object.freeze({
     MAX_BALANCE_QUANTITY: '99999999999.999999999',
     MAX_TRANSACTION_AMOUNT: '9999999999999999.99',
     SCHEMA_CACHE_MS: 30000,
-    REVIEW_NOTE_MAX_LENGTH: 5000,
-});
-
-const PRODUCT_COMPLIANCE_STATUS = Object.freeze({
-    DRAFT: 'draft',
-    REVIEWED: 'reviewed',
-    BLOCKED: 'blocked',
 });
 
 const PRODUCT_REGULATORY_TYPE = Object.freeze({
-    UNCLASSIFIED: 'unclassified',
     FEED: 'feed',
     ENVIRONMENT: 'environment',
     DUAL_PURPOSE: 'dual_purpose',
@@ -214,6 +211,9 @@ const PROTOCOL_STATUS = Object.freeze({
     SUPERSEDED: 'SUPERSEDED',
     CANCELLED: 'CANCELLED',
     ABORTED: 'ABORTED',
+    ACTIVE: 'ACTIVE',
+    PAUSED: 'PAUSED',
+    COMPLETED: 'COMPLETED',
 });
 
 const PRODUCTION_PROTOCOL_EDITABLE_STATUSES = ['DRAFT', 'REJECTED'];
@@ -222,11 +222,21 @@ const PRODUCTION_PROTOCOL_IN_PROGRESS_STATUSES = [
     'PENDING_APPROVAL',
 ];
 const PRODUCTION_PROTOCOL_WRITABLE_SEASONS = [SEASON_STATUS.PLANNING, SEASON_STATUS.ACTIVE];
-const PRODUCTION_PROTOCOL_UNITS = ['KG', 'G', 'L', 'ML', 'PACK', 'BOTTLE', 'PCS'];
+const PRODUCTION_PROTOCOL_UNITS = ['KG', 'G', 'L', 'ML', 'PACK', 'BOTTLE'];
 const PRODUCTION_PROTOCOL_CATEGORIES = ['FEED', 'MEDICINE', 'MINERAL', 'CHEMICAL', 'OTHER'];
-const PRODUCTION_PROTOCOL_LIMITS = Object.freeze({ stages: 120, items: 1000, workerBatch: 20,
-    materialOptions: 50, biomassMaxAgeHours: 168, structureVersion: 1, maxDoc: 2147483647 });
+const PRODUCTION_PROTOCOL_LIMITS = Object.freeze({
+    defaultDueAtMinutes: 30,
+    minDueAtMinutes: 10,
+    stages: 120,
+    items: 1000,
+    workerBatch: 20,
+    materialOptions: 50,
+    biomassMaxAgeHours: 168,
+    structureVersion: 1,
+    maxDoc: 2147483647,
+});
 
+/** Apply the culture-day biomass boundary separately from fixed-quantity feeding rules. */
 const allowedProductionProtocolDoseBases = (operationType, offset) => {
     if ([OPERATION_TYPE.FEEDING, OPERATION_TYPE.MEDICINE].includes(operationType)) {
         // API offsets are zero-based; the persisted DOC 30 boundary is offset 29.
@@ -250,7 +260,12 @@ const SCHEDULE_CANCELLATION_TYPE = {
 };
 
 // RAG query status and document upload rules
-const RAG_STATUS = { ANSWERED: 'ANSWERED', NO_SOURCE: 'NO_SOURCE', LOW_MATCH: 'LOW_MATCH', ERROR: 'ERROR' };
+const RAG_STATUS = {
+    ANSWERED: 'ANSWERED',
+    NO_SOURCE: 'NO_SOURCE',
+    LOW_MATCH: 'LOW_MATCH',
+    ERROR: 'ERROR',
+};
 const RAG_DOCUMENT_STATUS = Object.freeze({
     UPLOADING: 'UPLOADING',
     PENDING: 'PENDING',
@@ -269,73 +284,74 @@ const RAG_UPLOAD_SIGNATURE_TTL_MS = 60 * 60 * 1000;
 const RAG_UPLOAD_CLEANUP_DELAY_MS = RAG_UPLOAD_SIGNATURE_TTL_MS + 10 * 60 * 1000;
 
 const RAG_DOCUMENT_ERRORS = Object.freeze({
-    RAG_SOURCE_MISSING: { status: httpStatus.NOT_FOUND, message: messages.RAG_DOCUMENT_ERRORS.RAG_SOURCE_MISSING },
-    RAG_STORAGE_AUTH: { status: httpStatus.SERVICE_UNAVAILABLE, message: messages.RAG_DOCUMENT_ERRORS.RAG_STORAGE_AUTH },
-    RAG_STORAGE_TIMEOUT: { status: httpStatus.GATEWAY_TIMEOUT, message: messages.RAG_DOCUMENT_ERRORS.RAG_STORAGE_TIMEOUT },
-    RAG_STORAGE_UNAVAILABLE: { status: httpStatus.SERVICE_UNAVAILABLE, message: messages.RAG_DOCUMENT_ERRORS.RAG_STORAGE_UNAVAILABLE },
-    RAG_INVALID_CONTENT: { status: httpStatus.BAD_REQUEST, message: messages.RAG_DOCUMENT_ERRORS.RAG_INVALID_CONTENT },
-    RAG_INGESTION_TIMEOUT: { status: httpStatus.GATEWAY_TIMEOUT, message: messages.RAG_DOCUMENT_ERRORS.RAG_INGESTION_TIMEOUT },
-    RAG_INGESTION_FAILED: { status: httpStatus.SERVICE_UNAVAILABLE, message: messages.RAG_DOCUMENT_ERRORS.RAG_INGESTION_FAILED },
-    RAG_REUPLOAD_FILE_MISMATCH: { status: httpStatus.BAD_REQUEST, message: messages.RAG_DOCUMENT_ERRORS.RAG_REUPLOAD_FILE_MISMATCH },
+    RAG_SOURCE_MISSING: {
+        status: httpStatus.NOT_FOUND,
+        message: messages.RAG_DOCUMENT_ERRORS.RAG_SOURCE_MISSING,
+    },
+    RAG_STORAGE_AUTH: {
+        status: httpStatus.SERVICE_UNAVAILABLE,
+        message: messages.RAG_DOCUMENT_ERRORS.RAG_STORAGE_AUTH,
+    },
+    RAG_STORAGE_TIMEOUT: {
+        status: httpStatus.GATEWAY_TIMEOUT,
+        message: messages.RAG_DOCUMENT_ERRORS.RAG_STORAGE_TIMEOUT,
+    },
+    RAG_STORAGE_UNAVAILABLE: {
+        status: httpStatus.SERVICE_UNAVAILABLE,
+        message: messages.RAG_DOCUMENT_ERRORS.RAG_STORAGE_UNAVAILABLE,
+    },
+    RAG_INVALID_CONTENT: {
+        status: httpStatus.BAD_REQUEST,
+        message: messages.RAG_DOCUMENT_ERRORS.RAG_INVALID_CONTENT,
+    },
+    RAG_INGESTION_TIMEOUT: {
+        status: httpStatus.GATEWAY_TIMEOUT,
+        message: messages.RAG_DOCUMENT_ERRORS.RAG_INGESTION_TIMEOUT,
+    },
+    RAG_INGESTION_FAILED: {
+        status: httpStatus.SERVICE_UNAVAILABLE,
+        message: messages.RAG_DOCUMENT_ERRORS.RAG_INGESTION_FAILED,
+    },
+    RAG_REUPLOAD_FILE_MISMATCH: {
+        status: httpStatus.BAD_REQUEST,
+        message: messages.RAG_DOCUMENT_ERRORS.RAG_REUPLOAD_FILE_MISMATCH,
+    },
 });
 
 /**
- * Water quality thresholds
- * ==========================
- * Ngưỡng cảnh báo chất lượng nước theo loại tôm, dùng cho:
- *  - F1 "Nhập nhật ký đo nước": so sánh từng chỉ số lúc nhập, vượt ngưỡng ->
- *    tạo notification `water_threshold_exceeded` cho chủ trại (BR-NOTI-03).
- *  - F4 "Xem thống kê chất lượng nước": tính % mẫu vượt ngưỡng.
- *
- * NGUỒN SỐ LIỆU (DRAFT 2026-10-08): tổng hợp từ tài liệu trực tuyến
- * (tôm thẻ chân trắng L. vannamei; tôm sú P. monodon).
- * ⚠️ TEAM NUÔI TRỒNG BẮT BUỘC rà soát và điều chỉnh trước khi dùng production.
- *
- * Quy ước: vượt ngưỡng = giá trị nằm NGOÀI [min, max].
- * Các chỉ số một phía (vd. NH3 chỉ có max) thì phía còn lại để null = không giới hạn.
- * Đây là ngưỡng CẢNH BÁO vận hành, khác với khoảng vật lý ở DB CHECK
- * (temp 0–50, pH 0–14, các chỉ số ≥ 0) — DB CHECK vẫn là tuyến phòng thủ cuối.
- *
- * Lưu ý về NH3: cột `nh3_mg_l` trong DB chưa rõ là NH3 tự do hay TAN
- * (total ammonia nitrogen). Ngưỡng dưới đây áp cho giá trị đo thực tế được nhập;
- * team cần chốt định nghĩa cột, lý tưởng là quy đổi NH3 tự do từ TAN + pH + nhiệt độ.
+ * Operational alert thresholds used by water-log notifications and statistics.
+ * Bounds are inclusive; null means that side is unbounded. Database physical limits remain separate.
+ * Draft values (2026-10-08) require domain review before production use, including confirmation
+ * of whether nh3_mg_l represents free ammonia or total ammonia nitrogen.
  */
 
-// Dùng đúng key SHRIMP_TYPE của src/constants/index.js: WHITELEG / BLACK_TIGER
+// Keys match the persisted shrimp-type enum.
 const WATER_THRESHOLDS = {
     WHITELEG: {
-        // Tôm thẻ chân trắng (Litopenaeus vannamei)
-        // Nguồn: tổng hợp nhiều nghiên cứu — temp tối ưu 25–33 (tốt nhất 28–30);
-        // pH 7.5–8.5; DO > 4 (tối ưu ≥ 5); độ mặn 15–25 (chịu được 5–35);
-        // NH3 < 0.1; NO2 < 0.5; kiềm > 120; H2S < 0.05.
-        temperatureC:       { min: 25,  max: 33,  unit: '°C' },
-        ph:                 { min: 7.5, max: 8.5, unit: 'pH' },
+        // Whiteleg shrimp (Litopenaeus vannamei).
+        temperatureC: { min: 25, max: 33, unit: '°C' },
+        ph: { min: 7.5, max: 8.5, unit: 'pH' },
         dissolvedOxygenMgL: { min: 4.0, max: null, unit: 'mg/L' },
-        salinityPpt:        { min: 10,  max: 30,  unit: 'ppt' },
-        nh3MgL:             { min: null, max: 0.1, unit: 'mg/L' },
-        no2MgL:             { min: null, max: 0.5, unit: 'mg/L' },
+        salinityPpt: { min: 10, max: 30, unit: 'ppt' },
+        nh3MgL: { min: null, max: 0.1, unit: 'mg/L' },
+        no2MgL: { min: null, max: 0.5, unit: 'mg/L' },
         alkalinityMgLCaCO3: { min: 100, max: 250, unit: 'mg/L CaCO3' },
-        h2sMgL:             { min: null, max: 0.05, unit: 'mg/L' },
+        h2sMgL: { min: null, max: 0.05, unit: 'mg/L' },
     },
     BLACK_TIGER: {
-        // Tôm sú (Penaeus monodon)
-        // Nguồn: tổng hợp nhiều nghiên cứu — temp tối ưu 26–32 (tốt nhất 26–29);
-        // pH 7.5–8.5; DO tối thiểu 4; độ mặn 10–25 (chịu được 5–32);
-        // NH3-N tối đa 0.1; NO2-N tối đa 0.5–1.0 (lấy mức chặt 0.5);
-        // H2S < 0.05; kiềm 100–200.
-        temperatureC:       { min: 26,  max: 32,  unit: '°C' },
-        ph:                 { min: 7.5, max: 8.5, unit: 'pH' },
+        // Black tiger shrimp (Penaeus monodon).
+        temperatureC: { min: 26, max: 32, unit: '°C' },
+        ph: { min: 7.5, max: 8.5, unit: 'pH' },
         dissolvedOxygenMgL: { min: 4.0, max: null, unit: 'mg/L' },
-        salinityPpt:        { min: 10,  max: 30,  unit: 'ppt' },
-        nh3MgL:             { min: null, max: 0.1, unit: 'mg/L' },
-        no2MgL:             { min: null, max: 0.5, unit: 'mg/L' },
+        salinityPpt: { min: 10, max: 30, unit: 'ppt' },
+        nh3MgL: { min: null, max: 0.1, unit: 'mg/L' },
+        no2MgL: { min: null, max: 0.5, unit: 'mg/L' },
         alkalinityMgLCaCO3: { min: 100, max: 250, unit: 'mg/L CaCO3' },
-        h2sMgL:             { min: null, max: 0.05, unit: 'mg/L' },
+        h2sMgL: { min: null, max: 0.05, unit: 'mg/L' },
     },
 };
 
-// Map tên field camelCase (BE) -> key ngưỡng, để loop kiểm tra.
-// Thêm/xóa chỉ số đo trong tương lai chỉ cần sửa map này + WATER_THRESHOLDS.
+// New measurements need matching entries here and in WATER_THRESHOLDS.
 const THRESHOLD_FIELD_MAP = {
     temperatureC: 'temperatureC',
     ph: 'ph',
@@ -363,10 +379,10 @@ const WATER_METRIC_DEFINITIONS = Object.freeze({
 });
 
 /**
- * Kiểm tra các chỉ số đo so với ngưỡng của loại tôm.
- * @param {string} shrimpType 'WHITELEG' | 'BLACK_TIGER' (đúng enum SHRIMP_TYPE)
- * @param {Object} values object các chỉ số (Decimal hoặc number, null = không đo)
- * @returns {Array<{field, direction, value, min, max, unit}>} danh sách chỉ số vượt ngưỡng
+ * Compare recorded measurements against the species' inclusive alert bounds.
+ * @param {string} shrimpType Species key matching the stored enum.
+ * @param {Object} values Decimal or numeric measurements; null means unmeasured.
+ * @returns {Array<Object>} Breached measurements with their direction, bounds and unit.
  */
 const checkWaterThresholds = (shrimpType, values = {}) => {
     const thresholds = WATER_THRESHOLDS[shrimpType];
@@ -431,7 +447,6 @@ module.exports = {
     TASK_LIMITS,
     PERSONNEL_ROLE,
     HEALTH_STATUS,
-    DISEASE_CASE_STATUS,
     OPERATION_TYPE,
     OPERATION_STATUS,
     DOSE_BASIS,
@@ -463,6 +478,5 @@ module.exports = {
     PRODUCT_ARCHIVE_STATUS,
     PRODUCT_STATUS,
     INVENTORY_LIMITS,
-    PRODUCT_COMPLIANCE_STATUS,
     PRODUCT_REGULATORY_TYPE,
 };

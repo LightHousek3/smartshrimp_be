@@ -12,7 +12,8 @@ const {
     assessTemplateProposal,
     productFromRecommendation,
 } = require('../utils');
-const { messages, FARM_STATUS } = require('../constants');
+const { messages, FARM_STATUS, PRODUCTION_PROTOCOL_LIMITS } = require('../constants');
+const { materialRevision, assertMaterialRevision } = require('../utils/protocolMaterial');
 
 const notFound = () =>
     ApiError.notFound(messages.EXPERT_PROTOCOL_TEMPLATE.NOT_FOUND);
@@ -53,6 +54,7 @@ const materialSelect = {
 };
 const normalizeManufacturer = (row) =>
     row ? { ...row, supplierType: row.supplierType?.toLowerCase() ?? null } : null;
+/** Serialize withdrawal days consistently for catalog and proposal responses. */
 const normalizeCompliance = (details) =>
     details
         ? {
@@ -63,8 +65,10 @@ const normalizeCompliance = (details) =>
                       : Number(details.withdrawalDays),
           }
         : null;
+/** Expose authoring fields together with the catalog revision and declared safety state. */
 const normalizeMaterial = ({ compliance, ...product }) => ({
     ...product,
+    ...(product.id && { materialRevision: materialRevision({ ...product, compliance }) }),
     conversionQuantity:
         product.conversionQuantity == null
             ? null
@@ -88,6 +92,7 @@ const applications = (ownerId, ids) =>
             season: { pond: { farm: { ownerId } } },
         },
     });
+/** Include application counts and deletion eligibility without exposing internal relation counts. */
 const normalizeHeader = (row, appliedSeasons) => {
     const { _count, ...header } = row;
     return {
@@ -100,6 +105,7 @@ const normalizeHeader = (row, appliedSeasons) => {
         canDelete: _count.sourcedProtocols === 0,
     };
 };
+/** Filter templates within the Expert's managing Owner before paginating. */
 const getTemplates = async (account, query = {}) => {
     const { managedByOwnerId } = account;
     const { page = 1, limit = 10 } = query;
@@ -148,6 +154,7 @@ const getTemplates = async (account, query = {}) => {
     };
 };
 
+/** Retain proposal evidence when a template item cannot use the selected farm's catalog product. */
 const normalizeItem = (item, farmId) => {
     const owned = farmId != null && item.product?.farmId === farmId;
     const product = owned
@@ -161,6 +168,7 @@ const normalizeItem = (item, farmId) => {
         repeatIntervalDays: item.repeatIntervalDays,
         mealNumber: item.mealNumber,
         plannedTime: item.plannedTime?.toISOString().slice(11, 16) ?? null,
+        dueAtMinutes: item.dueAtMinutes,
         doseBasis: item.doseBasis,
         doseValue: Number(item.doseValue),
         dailyDoseIncrement: Number(item.dailyDoseIncrement ?? 0),
@@ -179,12 +187,16 @@ const normalizeItem = (item, farmId) => {
                 manufacturerId: item.recommendedManufacturerId ?? undefined,
             }),
             isRecommendation: !owned && Boolean(product) && !product.deletedProductId,
+            ...(owned && {
+                materialRevision: materialRevision(product),
+            }),
             unavailable: Boolean(
                 product?.deletedProductId || (item.productId && (!owned || product.status !== 'ACTIVE'))
             ),
         },
     };
 };
+/** Return scoped template details and retain the farm lock once operational versions reference it. */
 const readTemplate = async (account, templateId) => {
     const { managedByOwnerId } = account;
     if (!managedByOwnerId) throw notFound();
@@ -222,6 +234,7 @@ const readTemplate = async (account, templateId) => {
         items: items.map((item) => normalizeItem(item, row.farm?.id)),
     };
 };
+/** Limit available farms and manufacturers to the Expert's managing Owner. */
 const getCreationOptions = async ({ managedByOwnerId }) => {
     if (!managedByOwnerId) return { farms: [], manufacturers: [] };
     const [farms, manufacturers] = await Promise.all([
@@ -357,6 +370,7 @@ const getMaterials = async (
         meta: { page, limit, totalResults },
     };
 };
+/** Preserve recurrence and dose anchors when flattening editor stages into template items. */
 const flatten = (stages) =>
     stages.flatMap((stage) => [
         ...stage.meals.flatMap((meal, index) =>
@@ -387,6 +401,7 @@ const flatten = (stages) =>
             environment: true,
         })),
     ]);
+/** Recheck the active Expert account and managing Owner inside the write transaction. */
 const requireExpert = async (tx, account) => {
     const expert = await tx.account.findFirst({
         where: {
@@ -403,6 +418,7 @@ const requireExpert = async (tx, account) => {
         );
     return expert;
 };
+/** Map concurrent writes and changed references to a conflict without hiding unrelated errors. */
 const mapWriteError = (error) => {
     if (['P2034', 'P2003', 'P2002'].includes(error.code))
         throw ApiError.conflict(
@@ -486,6 +502,9 @@ const saveTemplate = async (account, body, templateId = null) => {
                     throw ApiError.notFound(
                         messages.EXPERT_PROTOCOL_TEMPLATE.FARM_NOT_FOUND
                     );
+                for (const id of [...productIds].sort()) {
+                    await tx.$queryRaw`SELECT id FROM products WHERE id = ${id}::uuid FOR SHARE`;
+                }
                 const products = productIds.length
                     ? await tx.product.findMany({
                           where: {
@@ -533,6 +552,7 @@ const saveTemplate = async (account, body, templateId = null) => {
                     const product = entry.productId
                         ? { ...catalog, productCompliance: catalog.compliance }
                         : entry.recommendation;
+                    if (catalog) assertMaterialRevision(catalog, entry.productRevision);
                     const assessment = entry.recommendation
                         ? assessTemplateProposal(product, account.id)
                         : null;
@@ -597,6 +617,7 @@ const saveTemplate = async (account, body, templateId = null) => {
                         doseBasis: entry.doseBasis,
                         doseValue: entry.doseValue,
                         dailyDoseIncrement: entry.dailyDoseIncrement ?? 0,
+                        dueAtMinutes: entry.dueAtMinutes ?? PRODUCTION_PROTOCOL_LIMITS.defaultDueAtMinutes,
                         doseUnit: entry.doseUnit,
                         instructions: entry.instructions || null,
                         sequenceOrder: index + 1,
@@ -719,7 +740,7 @@ const updateStatus = async (account, templateId, body) => {
                 };
                 const row = await tx.productionProtocolTemplate.findFirst({
                     where,
-                    select: { versionNo: true, items: { select: { recommendedProductDetails: true } } },
+                    select: { versionNo: true, farmId: true, items: { include: { product: { select: materialSelect } } } },
                 });
                 if (!row) throw notFound();
                 if (row.versionNo !== body.expectedVersionNo)
@@ -728,6 +749,19 @@ const updateStatus = async (account, templateId, body) => {
                     );
                 if (body.status === TemplateStatus.active && row.items.some(item => item.recommendedProductDetails?.review?.deletedProductId)) {
                     throw ApiError.conflict(messages.INVENTORY.DELETED_MATERIAL_REPLACEMENT);
+                }
+                if (body.status === TemplateStatus.active) {
+                    const ids = [...new Set(row.items.map(item => item.productId).filter(Boolean))].sort();
+                    for (const id of ids) await tx.$queryRaw`SELECT id FROM products WHERE id = ${id}::uuid FOR SHARE`;
+                    for (const item of row.items) {
+                        const product = item.product ?? productFromRecommendation(item.recommendedProductDetails);
+                        if (!product || item.productId && (product.status !== 'ACTIVE' || product.farmId !== row.farmId)) {
+                            throw ApiError.conflict(messages.INVENTORY.MATERIAL_SELECTION_CHANGED(product?.name));
+                        }
+                        assertMaterialSafety(product, item.mealNumber == null, item.instructions);
+                        assertTemplateDose({ ...item, doseValue: Number(item.doseValue), dailyDoseIncrement: Number(item.dailyDoseIncrement ?? 0),
+                            endDay: item.endDayOfCulture }, product, item.startDayOfCulture, item.mealNumber == null);
+                    }
                 }
                 const result = await tx.productionProtocolTemplate.updateMany({
                     where: { ...where, versionNo: body.expectedVersionNo },

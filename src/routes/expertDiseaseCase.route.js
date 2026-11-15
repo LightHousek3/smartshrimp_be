@@ -6,6 +6,7 @@ const { expertDiseaseCaseValidator: validator } = require('../validators');
 
 const router = express.Router();
 router.use(authenticate, authorize(ACCOUNT_ROLE.EXPERT));
+router.use('/:caseId/protocols', require('./expertTreatmentProtocol.route'));
 
 /**
  * @route   GET /api/v1/expert/disease-cases
@@ -23,10 +24,17 @@ router.get('/:caseId', validate(validator.detail), controller.detail);
 
 /**
  * @route   POST /api/v1/expert/disease-cases/:caseId/responses
- * @desc    Expert sends a response (REQUEST_INFO, EXPERT_ASSESSMENT, EXPERT_INSTRUCTION)
+ * @desc    Expert sends an ordinary case response
  * @access  Private (EXPERT)
  */
 router.post('/:caseId/responses', validate(validator.respond), controller.respond);
+
+/**
+ * @route   POST /api/v1/expert/disease-cases/:caseId/care
+ * @desc    Confirm a care decision for the current post-treatment suspension
+ * @access  Private (currently assigned EXPERT)
+ */
+router.post('/:caseId/care', validate(validator.care), controller.care);
 
 /**
  * @route   POST /api/v1/expert/disease-cases/:caseId/resolve
@@ -34,16 +42,5 @@ router.post('/:caseId/responses', validate(validator.respond), controller.respon
  * @access  Private (EXPERT)
  */
 router.post('/:caseId/resolve', validate(validator.resolve), controller.resolve);
-
-/**
- * @route   POST /api/v1/expert/disease-cases/:caseId/protocols/:protocolId/abort
- * @desc    Emergency abort treatment protocol (BR-TRT-01/02/03)
- * @access  Private (EXPERT)
- */
-router.post(
-    '/:caseId/protocols/:protocolId/abort',
-    validate(validator.abortProtocol),
-    controller.abortProtocol,
-);
 
 module.exports = router;
