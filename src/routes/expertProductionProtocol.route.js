@@ -37,11 +37,11 @@ router.get('/:protocolId', validate(validator.detail), controller.detail);
 router.patch('/:protocolId', validate(validator.update), controller.update);
 
 /**
- * @route   POST /api/v1/expert/seasons/:seasonId/production-protocols/:protocolId/cancel
- * @desc    Cancel a DRAFT with a reason while preserving content and history
+ * @route   DELETE /api/v1/expert/seasons/:seasonId/production-protocols/:protocolId
+ * @desc    Delete the latest unpublished draft without operational references
  * @access  Private (currently assigned EXPERT; PLANNING or ACTIVE season)
  */
-router.post('/:protocolId/cancel', validate(validator.cancel), controller.cancel);
+router.delete('/:protocolId', validate(validator.remove), controller.remove);
 
 /**
  * @route   POST /api/v1/expert/seasons/:seasonId/production-protocols/:protocolId/submit

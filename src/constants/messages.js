@@ -31,19 +31,26 @@ const messages = {
     INVENTORY_LABEL: {
         SCANNED: 'Đã đọc nhãn. Vui lòng đối chiếu trước khi sử dụng.',
         INVALID_IMAGE_TYPE: 'OCR chỉ nhận ảnh JPG, PNG hoặc WebP hợp lệ.',
-        INVALID_IMAGE_SOURCE: 'Ảnh đã lưu phải thuộc Cloudinary của ứng dụng. Hãy chọn lại ảnh từ thiết bị.',
+        INVALID_IMAGE_SOURCE:
+            'Ảnh đã lưu phải thuộc Cloudinary của ứng dụng. Hãy chọn lại ảnh từ thiết bị.',
         IMAGE_DOWNLOAD_FAILED: 'Không tải được ảnh nhãn đã lưu. Hãy chọn lại ảnh từ thiết bị.',
         INVALID_IMAGE_SIZE: 'Mỗi ảnh OCR phải có dung lượng từ 1 byte đến 5 MB.',
         INCOMPLETE_RESULT: 'AI chưa đọc được nhãn đầy đủ. Hãy chụp rõ phần chữ hoặc nhập tay.',
         INVALID_RESULT: 'Kết quả đọc nhãn không hợp lệ. Hãy thử lại hoặc nhập tay.',
         NO_EVIDENCE: 'Không đọc được thông tin có bằng chứng. Hãy chụp rõ nhãn hoặc nhập tay.',
-        TOTAL_SIZE_EXCEEDED: 'Tổng ảnh OCR không được vượt quá 5 MB. Hãy chọn ít ảnh hơn hoặc giảm dung lượng.',
-        DAILY_LIMIT: 'Đã hết hạn mức OCR trong ngày của ứng dụng. Bạn có thể nhập tay hoặc thử lại ngày mai.',
-        PROVIDER_QUOTA: 'Gemini đã hết quota hoặc đang giới hạn lượt gọi. Hãy nhập tay và thử lại sau; không cần bấm quét liên tục.',
-        INVALID_CONFIG: 'OCR chưa sử dụng được API key hoặc model đã cấu hình. Vui lòng kiểm tra cấu hình Gemini ở backend.',
+        TOTAL_SIZE_EXCEEDED:
+            'Tổng ảnh OCR không được vượt quá 5 MB. Hãy chọn ít ảnh hơn hoặc giảm dung lượng.',
+        DAILY_LIMIT:
+            'Đã hết hạn mức OCR trong ngày của ứng dụng. Bạn có thể nhập tay hoặc thử lại ngày mai.',
+        PROVIDER_QUOTA:
+            'Gemini đã hết quota hoặc đang giới hạn lượt gọi. Hãy nhập tay và thử lại sau; không cần bấm quét liên tục.',
+        INVALID_CONFIG:
+            'OCR chưa sử dụng được API key hoặc model đã cấu hình. Vui lòng kiểm tra cấu hình Gemini ở backend.',
         TIMEOUT: 'Đọc nhãn quá thời gian chờ. Bạn có thể thử lại hoặc nhập tay.',
-        PROVIDER_UNAVAILABLE: 'Dịch vụ đọc nhãn đang gián đoạn. Vui lòng thử lại sau hoặc nhập tay.',
-        MISSING_KEY: 'Chưa cấu hình OCR_GEMINI_API_KEY ở backend. Bạn vẫn có thể nhập thông tin nhãn bằng tay.',
+        PROVIDER_UNAVAILABLE:
+            'Dịch vụ đọc nhãn đang gián đoạn. Vui lòng thử lại sau hoặc nhập tay.',
+        MISSING_KEY:
+            'Chưa cấu hình OCR_GEMINI_API_KEY ở backend. Bạn vẫn có thể nhập thông tin nhãn bằng tay.',
         COOLDOWN: 'Gemini đang giới hạn lượt gọi. Vui lòng chờ một phút hoặc nhập tay.',
         BUSY: 'OCR đang bận. Vui lòng thử lại sau hoặc nhập tay.',
         RATE_LIMIT: 'Bạn đã quét nhãn quá nhiều lần. Vui lòng chờ một phút hoặc nhập tay.',
@@ -97,12 +104,10 @@ const messages = {
     },
 
     MATERIAL_COMPLIANCE: {
+        PROPOSAL_REASON_REQUIRED: 'lý do đề xuất',
         DETECTED_SUBSTANCES: (names) => `Phát hiện chất cấm: ${names} trong sản phẩm.`,
         NEGATED_SUBSTANCES: (names) => `Tên chất cần đối chiếu trong câu phủ định: ${names}.`,
-        PROPOSAL_COMPLETENESS_NOTE:
-            'Hệ thống kiểm tra tính đầy đủ và nhất quán của hồ sơ do Expert cung cấp khi lưu phác đồ. Kết quả này không xác thực mã lưu hành với cơ quan nhà nước; phải đối chiếu điều kiện sử dụng trước khi áp dụng cho vụ nuôi.',
-        PROHIBITED_WARNING:
-            'Phát hiện chất cấm trong sản phẩm.',
+        PROHIBITED_WARNING: 'Phát hiện chất cấm trong sản phẩm.',
         PROHIBITED_REVIEW_REQUIRED:
             'Nội dung nhắc đến chất cấm trong câu phủ định. Cần đối chiếu nhãn và làm rõ thành phần trước khi sử dụng.',
         NO_PROHIBITED_MATCH:
@@ -111,10 +116,12 @@ const messages = {
         REGISTRATION_REQUIRED: 'mã tiếp nhận/số ĐKLH',
         INGREDIENTS_REQUIRED: 'thành phần',
         LABEL_USAGE_REQUIRED: 'hướng dẫn theo nhãn',
-        REVIEW_NOTE_REQUIRED: 'căn cứ đối chiếu',
         EVIDENCE_REQUIRED: 'ảnh/nguồn hồ sơ',
         ANTIBIOTIC_CLASSIFICATION_REQUIRED: 'xác định kháng sinh',
-        REGISTRATION_TYPE_MISMATCH: 'mã tiếp nhận không khớp phân loại pháp lý',
+        REGISTRATION_FORMAT: (prefix) =>
+            `Mã số tiếp nhận phải có dạng ${prefix}XXXXXX (6 chữ số từ 000001 đến 999999), ví dụ ${prefix}123456. Nhập đúng mã trên nhãn/hồ sơ sản phẩm.`,
+        MEDICINE_REGISTRATION_FORMAT:
+            'Nhập nguyên số đăng ký lưu hành thuốc thú y trên nhãn/hồ sơ, tối đa 100 ký tự; không dùng mã tiếp nhận 01-/02-/03- của thức ăn hoặc sản phẩm môi trường.',
         ANTIBIOTIC_REQUIRES_MEDICINE: 'kháng sinh chỉ thuộc hồ sơ thuốc',
         WITHDRAWAL_REQUIRED: 'thời gian ngừng thuốc',
         ANTIBIOTIC_TREATMENT_ONLY:
@@ -125,7 +132,7 @@ const messages = {
         MANUFACTURER_UNVERIFIED: (productName) => `${productName}: chưa đối chiếu nhà sản xuất.`,
         INCOMPATIBLE_LEGAL_USE: (productName) =>
             `${productName}: mục đích sử dụng không phù hợp hồ sơ pháp lý.`,
-        MANUFACTURER_REVIEW_REQUIRED: 'Phải đối chiếu nhà sản xuất trước khi đánh dấu reviewed.',
+        MANUFACTURER_REQUIRED: 'Phải xác định nhà sản xuất trước khi lưu hồ sơ vật tư.',
         MISSING_PROPOSAL_FIELDS: (missingFields) => `Hồ sơ đề xuất thiếu: ${missingFields}.`,
     },
 
@@ -171,7 +178,8 @@ const messages = {
     AUTH: {
         LOGIN_ERRORS: {
             INVALID_CREDENTIALS: 'Email or password is incorrect',
-            PENDING_ACTIVATION: 'Account has not been activated. Please activate your account first',
+            PENDING_ACTIVATION:
+                'Account has not been activated. Please activate your account first',
             ACCOUNT_BLOCKED: 'Your account has been blocked. Please contact support',
             ACCOUNT_INACTIVE: 'Your account is inactive. Please contact support',
             FORBIDDEN: 'You do not have permission to perform this action',
@@ -270,11 +278,14 @@ const messages = {
     },
 
     INVENTORY: {
-        AUTO_REVIEW_NOTE:
-            'Hồ sơ đủ thông tin do chủ trại khai báo; hệ thống tự xác nhận tính đầy đủ, không thay thế kiểm chứng chuyên môn',
-        COMPLIANCE_REVIEWED: 'Cập nhật kết quả duyệt hồ sơ vật tư thành công',
-        REVIEW_STATE_CONFLICT: 'Trạng thái hồ sơ không phù hợp để duyệt. Vui lòng tải lại',
-        REVIEW_FACTS_REQUIRED: 'Vật tư có kháng sinh phải được phân loại thuốc',
+        MATERIAL_SELECTION_CHANGED: (name) =>
+            `Vật tư ${name ? `"${name}" ` : ''}đã thay đổi hoặc không còn khả dụng. Vui lòng xem lại và chọn lại vật tư trước khi lưu hoặc gửi duyệt.`,
+        MATERIAL_UPDATED_TITLE: 'Vật tư trong phác đồ đã thay đổi',
+        MATERIAL_UPDATED_CONTENT: (name) =>
+            `Thông tin vật tư "${name}" đã được cập nhật. Vui lòng xem lại và chọn lại vật tư trong phác đồ nháp hoặc mẫu liên quan.`,
+        MATERIAL_INACTIVE_TITLE: 'Vật tư trong phác đồ đã ngừng sử dụng',
+        MATERIAL_INACTIVE_CONTENT: (name) =>
+            `Vật tư "${name}" đã ngừng sử dụng. Vui lòng điều chỉnh vật tư trong phác đồ hoặc mẫu liên quan.`,
         INCOMPLETE_PRODUCT:
             'Vui lòng nhập đầy đủ nhà sản xuất, loại sản phẩm, mã số tiếp nhận, thành phần, hướng dẫn sử dụng, kháng sinh và thời gian ngừng trước khi sử dụng vật tư',
         READ_ONLY: 'Kho hiện chỉ hỗ trợ xem dữ liệu. Cần đồng bộ dữ liệu kho trước khi cập nhật.',
@@ -288,14 +299,17 @@ const messages = {
         INVALID_CONVERSION: 'Vật tư chưa có quy cách quy đổi hợp lệ',
         CONVERTED_QUANTITY_LIMIT: 'Lượng quy đổi vượt giới hạn độ chính xác của kho',
         DELETED: 'Xóa vật tư chưa có phát sinh thành công',
-        HAS_REFERENCES: 'Không thể xóa vật tư đã có phát sinh kho, lịch vận hành hoặc phác đồ không còn ở trạng thái nháp',
+        HAS_REFERENCES:
+            'Không thể xóa vật tư đã có phát sinh kho, lịch vận hành hoặc phác đồ không còn ở trạng thái nháp',
         DELETE_CONFIRMATION: (name, templates, protocols) =>
             `Vật tư "${name}" đang được dùng trong ${[templates.length && `mẫu phác đồ: ${templates.join(', ')}`, protocols.length && `phác đồ nháp: ${protocols.join(', ')}`].filter(Boolean).join('; ')}. Xóa sẽ gỡ liên kết vật tư và tạm ngưng các mẫu bị ảnh hưởng. Bạn cần cập nhật vật tư thay thế trước khi sử dụng lại. Bạn có xác nhận xóa không?`,
-        DELETED_MATERIAL_REPLACEMENT: 'Vật tư đã bị xóa. Vui lòng cập nhật vật tư thay thế trong phác đồ.',
+        DELETED_MATERIAL_REPLACEMENT:
+            'Vật tư đã bị xóa. Vui lòng cập nhật vật tư thay thế trong phác đồ.',
         DELETED_NOTIFICATION_TITLE: 'Vật tư đã bị xóa',
         DELETED_NOTIFICATION_CONTENT: (name, templates, protocols) =>
             `Đã xóa vật tư "${name}".${templates.length ? ` Vui lòng cập nhật vật tư thay thế trong các mẫu phác đồ đã tạm ngưng: ${templates.join(', ')}.` : ''}${protocols.length ? ` Vui lòng cập nhật các phác đồ nháp: ${protocols.join(', ')}.` : ''}`,
-        METADATA_LOCKED: 'Vật tư đã có đơn hoặc giao dịch. Chỉ được sửa ngưỡng cảnh báo và mô tả',
+        METADATA_LOCKED:
+            'Vật tư đã có lịch sử kho, vận hành hoặc phác đồ gửi duyệt. Hồ sơ được khóa, chỉ được sửa ngưỡng cảnh báo tồn kho',
         LOT_EXPIRY_CONFLICT: 'Các lần nhập cùng vật tư và số lô phải có cùng hạn sử dụng',
         LOT_EXPIRY_LOCKED:
             'Lô đã được dùng. Cần đối chiếu chuyên môn, không tự thay đổi bằng chứng hạn dùng',
@@ -529,6 +543,12 @@ const messages = {
     },
 
     PRODUCTION_PROTOCOL: {
+        DRAFT_DELETED: 'Đã xóa bản nháp phác đồ.',
+        DRAFT_DELETE_STATE:
+            'Chỉ được xóa bản nháp chưa từng gửi duyệt; các bản đã gửi hoặc đã hủy được giữ trong lịch sử.',
+        DUE_WINDOW_TOO_LARGE: 'Khoảng thực hiện quá lớn. Vui lòng nhập khoảng thời gian ngắn hơn.',
+        DUE_WINDOW_INTEGER: 'Khoảng thực hiện phải là số phút nguyên.',
+        DUE_WINDOW_INVALID: 'Khoảng thực hiện cần ít nhất 10 phút kể từ giờ dự kiến.',
         HARVEST_COVERAGE: (minimumDoc) =>
             `DOC kết thúc phác đồ nuôi phải lớn hơn hoặc bằng DOC ${minimumDoc} (ngày dự kiến thu hoạch của vụ nuôi).`,
         V2_REQUIRED:
@@ -554,7 +574,8 @@ const messages = {
         SCHEDULE_BLOCKERS: {
             VOLUME_MISSING: 'thiếu thể tích ao hợp lệ',
             BASIS_OUT_OF_RANGE: 'sinh khối hoặc thể tích vượt giới hạn dữ liệu lịch',
-            BIOMASS_MISSING_OR_STALE: 'thiếu nguồn sinh khối hợp lệ trong 7 ngày (168 giờ) trước cữ dự kiến',
+            BIOMASS_MISSING_OR_STALE:
+                'thiếu nguồn sinh khối hợp lệ trong 7 ngày (168 giờ) trước cữ dự kiến',
             DOSE_INVALID: 'quy tắc liều không hợp lệ',
             QUANTITY_OUT_OF_RANGE: 'lượng vật tư vượt giới hạn hoặc quá nhỏ',
             MATERIAL_UNRESOLVED: 'vật tư chưa được xác nhận',
@@ -738,8 +759,8 @@ const messages = {
         ALREADY_RESOLVED: 'Ca bệnh đã được giải quyết, không thể thực hiện thêm thao tác',
         RESOLUTION_SUMMARY_REQUIRED: 'Bắt buộc nhập nội dung tóm tắt giải quyết',
         CASE_OR_ROLE_CONFLICT: 'Ca bệnh hoặc phân công đã thay đổi. Vui lòng tải lại.',
-        PROTOCOL_PENDING_APPROVAL_BLOCK: 'Còn phác đồ nháp, bị từ chối hoặc đang chờ duyệt. Cần xử lý trước khi khép ca.',
-        PROTOCOL_RUNNING_BLOCK: 'Còn phác đồ điều trị chưa có kết quả kết thúc. Không thể đóng ca chỉ dựa vào số lịch đã sinh.',
+        PROTOCOL_RUNNING_BLOCK:
+            'Ca đang điều trị. Expert cần dừng hoặc chờ phác đồ kết thúc trước khi khép ca.',
         PROTOCOL_ABORTED: 'Dừng phác đồ điều trị thành công',
     },
 
@@ -748,19 +769,57 @@ const messages = {
     },
 
     TREATMENT_PROTOCOL: {
-        PRODUCTION_TEMPLATE_FORBIDDEN: 'Phác đồ điều trị phải được Expert lập riêng cho ca bệnh, không được áp dụng mẫu phác đồ nuôi.',
-        INSTRUCTIONS_REQUIRED: 'Cần ghi chỉ định và hướng theo dõi sau điều trị trước khi gửi duyệt.',
-        INFORMATION_PENDING: 'Ca hoặc yêu cầu thông tin chưa cho phép chuyển bước; cần xử lý yêu cầu còn mở trước.',
-        START_REQUIRED: 'Cần mốc bắt đầu điều trị hợp lệ trong tương lai, vụ đang hoạt động và đầy đủ khoảng giờ thực hiện trước khi gửi/duyệt.',
+        PRODUCTION_TEMPLATE_FORBIDDEN:
+            'Phác đồ điều trị phải được Expert lập riêng cho ca bệnh, không được áp dụng mẫu phác đồ nuôi.',
+        REQUEST_REPLY_INVALID: 'Tin nhắn được trả lời phải tồn tại và thuộc đúng ca bệnh.',
+        START_REQUIRED:
+            'Cần mốc bắt đầu điều trị hợp lệ trong tương lai, vụ đang hoạt động và đầy đủ khoảng giờ thực hiện trước khi gửi/duyệt.',
         FIRST_OCCURRENCE: 'Cữ ngày điều trị đầu tiên không được trước giờ bắt đầu Expert chỉ định.',
         FIRST_STAGE_DAY: 'Giai đoạn điều trị đầu tiên phải bắt đầu từ ngày điều trị 1.',
-        DAY_ONE_REQUIRED: 'Ngày điều trị 1 cần ít nhất một lần thực hiện từ mốc bắt đầu; hãy sửa lịch hoặc mốc bắt đầu trước khi gửi duyệt.',
-        START_BEFORE_STOCKING: 'Mốc điều trị phải là ngày giờ hợp lệ và không được trước ngày thả giống của vụ.',
+        DAY_ONE_REQUIRED:
+            'Ngày điều trị 1 cần ít nhất một lần thực hiện từ mốc bắt đầu; hãy sửa lịch hoặc mốc bắt đầu trước khi gửi duyệt.',
+        LAST_DAY_REQUIRED:
+            'Ngày cuối liệu trình cần có lịch thực hiện. Hãy chỉnh ngày kết thúc giai đoạn hoặc nhịp lặp để không có phần cuối bỏ trống.',
+        START_BEFORE_STOCKING:
+            'Mốc điều trị phải là ngày giờ hợp lệ và không được trước ngày thả giống của vụ.',
         START_TIMEZONE_REQUIRED: 'Mốc điều trị phải có cả ngày, giờ và múi giờ (Z hoặc ±HH:mm).',
         STATE: 'Trạng thái ca hoặc phác đồ không cho phép thao tác này.',
         REASON_REQUIRED: 'Cần ghi lý do và quyết định cho phác đồ nuôi tiếp tục hoặc tạm giữ.',
-        COMPLETED: 'Đã hoàn tất toàn bộ liệu trình theo kế hoạch được duyệt.',
-        HOLD_RELEASE_REQUIRED: 'Ca còn giữ phác đồ nuôi. Expert cần gỡ giữ bằng chỉ dẫn trong ca trước khi khép chuyên môn.',
+        COMPLETED: 'Đã kết thúc thời gian áp dụng phác đồ; Expert cần quyết định chăm sóc tiếp.',
+        RECORDING_CLOSED: 'Phác đồ đã kết thúc thời gian áp dụng; lịch đã khóa ghi nhận.',
+        REPLACEMENT_DUE:
+            'Đã tới mốc thay phác đồ; lịch cũ đã khóa. Vui lòng tải lại và kiểm tra bản điều trị mới.',
+        CARE_NOT_PENDING:
+            'Ca chưa có quyết định chăm sóc sau điều trị cần xử lý. Vui lòng tải lại ca bệnh.',
+        CARE_MONITOR_RECORDED:
+            'Đã chọn tiếp tục theo dõi trong đợt này. Bạn có thể bổ sung chỉ dẫn trong trao đổi.',
+        CARE_CONTINUATION: 'Đã có phác đồ điều trị tiếp theo được duyệt, đang chờ mốc bắt đầu.',
+        CARE_CONFIRM_REQUIRED: 'Vui lòng xác nhận cho phép phác đồ nuôi chạy tiếp.',
+        CARE_CLOSE_CONFIRM_REQUIRED:
+            'Không còn lịch nuôi để tiếp tục. Vui lòng xác nhận khép ca và kết thúc tạm hoãn của đợt điều trị này.',
+        CARE_RESUME_BEFORE_CLOSE:
+            'Phác đồ nuôi đang tạm hoãn và vẫn còn lịch có thể tiếp tục. Vui lòng cho phép phác đồ nuôi chạy tiếp trước khi khép ca.',
+        CARE_INDEPENDENT_HOLD:
+            'Còn quyết định tạm hoãn khác chưa được xử lý. Không thể tự gỡ khi xử lý đợt này.',
+        CARE_NO_PRODUCTION:
+            'Chưa có phác đồ nuôi đã duyệt để tiếp tục. Hãy lập phác đồ nuôi cho vụ này và gửi Owner duyệt.',
+        CARE_PRODUCTION_ENDED:
+            'Phác đồ nuôi không còn cữ tương lai để tiếp tục. Hãy lập phác đồ nuôi mới cho vụ này.',
+        CARE_PRODUCTION_EXPIRED: (at) =>
+            `Phác đồ nuôi đã hết lịch lúc ${at.toLocaleString('vi-VN', { timeZone: 'Asia/Ho_Chi_Minh' })}. Hãy lập phác đồ nuôi mới cho vụ này.`,
+        CARE_PRODUCTION_UNAPPROVED:
+            'Phác đồ nuôi mới chưa được duyệt. Hãy kiểm tra bản đang soạn hoặc chờ Owner duyệt trước khi cho chạy tiếp.',
+        CARE_PRODUCTION_LEGACY:
+            'Phác đồ nuôi cũ chưa đủ dữ liệu để xác định lịch tiếp theo. Hãy kiểm tra và lập phiên bản phù hợp trước khi tiếp tục.',
+        CARE_TREATMENT_DUE:
+            'Phác đồ điều trị đã tới mốc bắt đầu nhưng chưa thể kích hoạt. Hãy xử lý kế hoạch điều trị trước khi cho nuôi tiếp.',
+        CARE_PRODUCTION_INVALID:
+            'Phác đồ nuôi còn lịch nhưng vật tư hoặc cấu hình áp dụng chưa hợp lệ. Hãy kiểm tra phác đồ trước khi tiếp tục.',
+        CARE_BIOMASS_REQUIRED:
+            'Chưa đủ dữ liệu sinh khối hợp lệ để sinh lịch nuôi. Cần KTV bổ sung nhật ký sức khỏe trước khi tiếp tục.',
+        CARE_CALCULATION_INVALID:
+            'Chưa thể tính lượng cho lịch nuôi tiếp theo. Hãy kiểm tra căn cứ tính liều của phác đồ.',
+        HOLD_CHANGED: 'Quyết định tạm hoãn đã thay đổi. Vui lòng tải lại ca bệnh.',
     },
 
     // Server

@@ -24,10 +24,17 @@ router.get('/:caseId', validate(validator.detail), controller.detail);
 
 /**
  * @route   POST /api/v1/expert/disease-cases/:caseId/responses
- * @desc    Expert sends a response (REQUEST_INFO, EXPERT_ASSESSMENT, EXPERT_INSTRUCTION)
+ * @desc    Expert sends an ordinary case response
  * @access  Private (EXPERT)
  */
 router.post('/:caseId/responses', validate(validator.respond), controller.respond);
+
+/**
+ * @route   POST /api/v1/expert/disease-cases/:caseId/care
+ * @desc    Confirm a care decision for the current post-treatment suspension
+ * @access  Private (currently assigned EXPERT)
+ */
+router.post('/:caseId/care', validate(validator.care), controller.care);
 
 /**
  * @route   POST /api/v1/expert/disease-cases/:caseId/resolve

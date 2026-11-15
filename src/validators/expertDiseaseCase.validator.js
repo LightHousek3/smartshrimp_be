@@ -1,4 +1,5 @@
 const Joi = require('joi');
+const { CASE_LIMITS } = require('../constants/diseaseCase');
 
 const uuid = () => Joi.string().uuid();
 const severities = ['LOW', 'MEDIUM', 'HIGH', 'CRITICAL'];
@@ -8,7 +9,7 @@ const list = {
         page: Joi.number().integer().min(1).default(1),
         limit: Joi.number().integer().min(1).max(100).default(10),
         status: Joi.string()
-            .valid('OPEN', 'WAITING_FOR_INFO', 'MONITORING', 'IN_TREATMENT', 'RESOLVED', 'action')
+            .valid('OPEN', 'MONITORING', 'IN_TREATMENT', 'RESOLVED', 'action')
             .allow('', null),
         severity: Joi.alternatives()
             .try(
@@ -39,19 +40,16 @@ const respond = {
     }),
     body: Joi.object({
         responseType: Joi.string()
-            .valid('REQUEST_INFO', 'EXPERT_ASSESSMENT', 'EXPERT_INSTRUCTION')
-            .required(),
+            .valid('NORMAL').default('NORMAL'),
         message: Joi.string().trim().min(1).max(500).required(),
-        switchToMonitoring: Joi.boolean().default(false),
-        withdrawRequestId: uuid(),
-        releaseHoldIds: Joi.array().items(uuid().required()).unique().max(100),
+        replyToResponseId: uuid(),
         attachments: Joi.array().items(
             Joi.object({
-                fileUrl: Joi.string().uri().required(),
+                fileUrl: Joi.string().uri({ scheme: ['https'] }).max(CASE_LIMITS.URL).required(),
                 mediaType: Joi.string().max(100).allow('', null),
                 caption: Joi.string().max(255).allow('', null),
             }).unknown(true),
-        ).default([]),
+        ).max(CASE_LIMITS.ATTACHMENTS).default([]),
     }),
 };
 
@@ -61,6 +59,22 @@ const resolve = {
     }),
     body: Joi.object({
         resolutionSummary: Joi.string().trim().min(5).max(500).required(),
+        confirmWithoutProduction: Joi.boolean().default(false),
+        expectedUpdatedAt: Joi.date().iso().when('confirmWithoutProduction', { is: true, then: Joi.required() }),
+    }),
+};
+
+const care = {
+    params: Joi.object({ caseId: uuid().required() }),
+    body: Joi.object({
+        action: Joi.string().valid('MONITOR', 'RESUME_PRODUCTION').required(),
+        reason: Joi.string().trim().min(5).max(450).required(),
+        expectedUpdatedAt: Joi.date().iso().required(),
+        releaseHoldIds: Joi.array().items(uuid()).unique().default([]),
+        episodeId: uuid().required(),
+        confirmResume: Joi.boolean().when('action', { is: 'RESUME_PRODUCTION', then: Joi.valid(true).required(), otherwise: Joi.forbidden() }),
+        expectedProduction: Joi.object({ id: uuid().required(), updatedAt: Joi.date().iso().required() })
+            .when('action', { is: 'RESUME_PRODUCTION', then: Joi.required(), otherwise: Joi.forbidden() }),
     }),
 };
 
@@ -68,5 +82,6 @@ module.exports = {
     list,
     detail,
     respond,
+    care,
     resolve,
 };

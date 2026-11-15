@@ -6,11 +6,15 @@ const { productionProtocolV2: v2, productionSchedule: rules, ApiError } = requir
 const { materialSelect, assertOperationalMaterial, assertApprovedMaterial } = require('./productionProtocolReview.service');
 const { FARM_STATUS, NOTIFICATION_TYPE, messages, PRODUCTION_PROTOCOL_LIMITS, PROTOCOL_STATUS, PROTOCOL_TYPE, SEASON_STATUS } = require('../constants');
 const lifecycle = require('./protocolLifecycle.service');
-const { treatmentOccurrences } = require('../utils/protocolTimeline');
+const { treatmentOccurrences, courseEndsAt } = require('../utils/protocolTimeline');
 const { latestHarvestAt } = require('./harvest.service');
 
-/** Lock the season before its protocol, matching authoring/approval order; never rewrite existing facts. */
-const generate = async (protocolId, now = new Date()) => {
+/**
+ * Lock season then protocol and reconcile lifecycle state before creating the rolling schedule window.
+ * Generate only eligible ACTIVE content; missing material or calculation inputs block affected slots.
+ * Preserve existing execution facts and deliver saved lifecycle or generation notices after commit.
+ */
+const generate = async (protocolId, requestedAt) => {
     if (!v2.v2Enabled() || !config.productionProtocol.scheduleWorkerEnabled) return { created: 0, blocked: [] };
     const notices = [];
     const result = await prisma.$transaction(async client => {
@@ -18,12 +22,18 @@ const generate = async (protocolId, now = new Date()) => {
         if (!context) return { created: 0, blocked: [] };
         await client.$queryRaw`SELECT id FROM aquaculture_seasons WHERE id=${context.seasonId}::uuid FOR UPDATE`;
         await client.$queryRaw`SELECT id FROM protocols WHERE id=${protocolId}::uuid FOR UPDATE`;
-        await lifecycle.reconcile(client, context.seasonId, now);
+        const now = requestedAt ?? new Date();
+        notices.push(...await lifecycle.reconcile(client, context.seasonId, now));
         const p = await client.protocol.findUnique({ where: { id: protocolId }, include: {
             season: { include: { pond: { include: { farm: true } } } },
             items: { include: { product: { select: materialSelect } }, orderBy: { sequenceOrder: 'asc' } },
         } });
         if (!p || p.status !== PROTOCOL_STATUS.ACTIVE || !v2.isV2(p)) return { created: 0, blocked: [] };
+        const replacementStart = await lifecycle.nextTreatmentStart(client, p.seasonId, p.id);
+        if (replacementStart && now >= replacementStart) return { created: 0, blocked: ['TREATMENT_OVERRIDE'] };
+        if (p.protocolType === PROTOCOL_TYPE.PRODUCTION && await lifecycle.productionBlocked(client, p.seasonId, now)) {
+            return { created: 0, blocked: ['TREATMENT_OVERRIDE'] };
+        }
         if (p.season.status !== SEASON_STATUS.ACTIVE || p.season.pond.farm.status !== FARM_STATUS.ACTIVE || !p.season.stockingDate) {
             return { created: 0, blocked: ['SEASON_NOT_READY'] };
         }
@@ -78,17 +88,29 @@ const generate = async (protocolId, now = new Date()) => {
         return { created, blocked: [...blocked] };
     }, { isolationLevel: 'Serializable', timeout: 20000 });
     for (const notice of notices) {
-        try { emitNotification(notice.accountId, 'notification:new', { id: notice.id, referenceId: protocolId }); }
+        try { emitNotification(notice.accountId, 'notification:new', { id: notice.id,
+            referenceId: notice.referenceId ?? protocolId, ...(notice.referenceType && { referenceType: notice.referenceType }) }); }
         catch (error) { logger.warn(messages.PRODUCTION_PROTOCOL.SCHEDULE_DELIVERY_ERROR(protocolId, rules.errorDetail(error))); }
     }
     return result;
 };
 
-// A cursor avoids starving later protocols when there are more than one batch of active seasons.
+/**
+ * Page eligible protocol versions without starving later IDs.
+ * Derive the next wakeup from the full prescription deadline or future treatment start, not generated rows.
+ */
 const batch = async (afterId) => {
     if (!v2.v2Enabled() || !config.productionProtocol.scheduleWorkerEnabled) return [];
-    return prisma.protocol.findMany({ where: { status: { in: [PROTOCOL_STATUS.APPROVED, PROTOCOL_STATUS.ACTIVE, PROTOCOL_STATUS.PAUSED] },
+    const rows = await prisma.protocol.findMany({ where: { status: { in: [PROTOCOL_STATUS.APPROVED, PROTOCOL_STATUS.ACTIVE, PROTOCOL_STATUS.PAUSED] },
         contentVersion: 2, season: { status: SEASON_STATUS.ACTIVE }, ...(afterId && { id: { gt: afterId } }) },
-    select: { id: true }, take: PRODUCTION_PROTOCOL_LIMITS.workerBatch, orderBy: { id: 'asc' } });
+    select: { id: true, protocolType: true, status: true, treatmentStartAt: true,
+        season: { select: { stockingDate: true } }, items: { select: { startDayOffset: true, endDayOffset: true,
+            recurrenceAnchorDay: true, repeatIntervalDays: true, plannedTime: true, dueAtMinutes: true } } },
+    take: PRODUCTION_PROTOCOL_LIMITS.workerBatch, orderBy: { id: 'asc' } });
+    return rows.map(row => {
+        const end = courseEndsAt(row);
+        const times = [end && end.getTime() + 1, row.status === 'APPROVED' && row.treatmentStartAt > new Date() && row.treatmentStartAt.getTime()].filter(Boolean);
+        return { id: row.id, nextCheckAt: times.length ? Math.min(...times) : null };
+    });
 };
 module.exports = { generate, batch };

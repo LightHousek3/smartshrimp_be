@@ -44,13 +44,15 @@ const prepareExecution = async (tx, seasonId, productId, operationType, executed
         return null;
     }
     const [product] = await tx.$queryRaw(Prisma.sql`SELECT p.category, p.status,
-        c.regulatory_type, c.compliance_status, c.withdrawal_days, c.contains_antibiotic
+        c.regulatory_type, c.checked_by, c.checked_at, c.withdrawal_days, c.contains_antibiotic
         FROM products p LEFT JOIN product_compliance c ON c.product_id = p.id
         JOIN ponds pond ON pond.farm_id = p.farm_id
         JOIN aquaculture_seasons season ON season.pond_id = pond.id
         WHERE p.id = ${productId}::uuid AND season.id = ${seasonId}::uuid FOR UPDATE OF p`);
-    if (!product || product.status !== 'active' || product.compliance_status !== 'reviewed'
-        || product.regulatory_type === 'unclassified') throw ApiError.badRequest(M.WITHDRAWAL_PRODUCT_NOT_READY);
+    if (!product || product.status !== 'active' || !product.checked_by || !product.checked_at
+        || !['feed', 'environment', 'dual_purpose', 'medicine'].includes(product.regulatory_type)) {
+        throw ApiError.badRequest(M.WITHDRAWAL_PRODUCT_NOT_READY);
+    }
     if (product.contains_antibiotic && (protocol.protocolType !== 'TREATMENT' || !protocol.diseaseCaseId)) {
         throw ApiError.badRequest('Vật tư có kháng sinh chỉ được dùng trong phác đồ điều trị gắn ca bệnh');
     }

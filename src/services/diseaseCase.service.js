@@ -1,12 +1,15 @@
 const prisma = require('../config/prisma');
+const transaction = require('./caseTransaction.service');
+const caseCare = require('./caseCare.service');
+const lifecycle = require('./protocolLifecycle.service');
 const { ApiError, recognitionResult } = require('../utils');
 const { messages, DISEASE_CASE_STATUS: STATUS, NOTIFICATION_TYPE, ACCOUNT_ROLE, ACCOUNT_STATUS, SEASON_STATUS, AI_RECOGNITION_STATUS } = require('../constants');
 const { emitNotification } = require('../realtime/notification.socket');
 const msg = messages.DISEASE_CASE;
-const identity = { id: true, fullName: true };
+const identity = { id: true, fullName: true, role: true };
 const seasonSelect = {
     id: true, name: true, status: true, shrimpType: true, stockingDate: true,
-    pond: { select: { id: true, name: true, farm: { select: { id: true, name: true, ownerId: true } } } },
+    pond: { select: { id: true, name: true, farm: { select: { id: true, name: true, ownerId: true, status: true } } } },
     personnelAssignments: { where: { unassignedAt: null }, select: {
         accountId: true, role: true, account: { select: { role: true, status: true, managedByOwnerId: true } },
     } },
@@ -22,12 +25,13 @@ const detailSelect = {
     expert: { select: identity },
     attachments: { select: { id: true, fileUrl: true, caption: true }, orderBy: [{ createdAt: 'asc' }, { id: 'asc' }] },
     responses: { select: { id: true, authorId: true, author: { select: identity }, responseType: true,
-        message: true, attachments: true, createdAt: true },
+        message: true, attachments: true, createdAt: true, replyToResponseId: true },
         orderBy: [{ createdAt: 'asc' }, { id: 'asc' }] },
     statusHistory: { select: { id: true, fromStatus: true, toStatus: true, changedBy: true, reason: true, changedAt: true },
         orderBy: [{ changedAt: 'asc' }, { id: 'asc' }] },
 };
 
+/** Check technician access, allowing historical reads but restricting writes to the active assignment. */
 const scope = async (tx, accountId, seasonId, writing = false) => {
     // Prisma has no row-lock API; this also serializes concurrent case creation per season.
     if (writing) await tx.$queryRaw`SELECT id FROM aquaculture_seasons WHERE id=${seasonId}::uuid FOR UPDATE`;
@@ -47,18 +51,24 @@ const scope = async (tx, accountId, seasonId, writing = false) => {
         if (!historicalRead) throw ApiError.forbidden(msg.NO_ASSIGNMENT);
     }
     if (writing && season.status !== SEASON_STATUS.ACTIVE) throw ApiError.forbidden(msg.SEASON_NOT_ACTIVE);
+    if (writing && season.pond.farm.status !== 'ACTIVE') throw ApiError.forbidden(msg.SEASON_NOT_ACTIVE);
     return season;
 };
+/** Keep case lookups inside the season whose technician access has already been checked. */
 const findCase = async (tx, seasonId, caseId) => {
     const item = await tx.diseaseCase.findFirst({ where: { id: caseId, seasonId }, select: detailSelect });
     if (!item) throw ApiError.notFound(msg.NOT_FOUND);
     return item;
 };
 const present = (item, season) => ({ ...item, canRespond: season.status === 'ACTIVE' && item.status !== STATUS.RESOLVED });
+/** Read conversation, care markers and production suspension state from one database snapshot. */
 const getCase = (accountId, seasonId, caseId) => prisma.$transaction(async (tx) => {
     const season = await scope(tx, accountId, seasonId);
-    return present(await findCase(tx, seasonId, caseId), season);
+    const item = await findCase(tx, seasonId, caseId);
+    return { ...present(item, season), responses: await caseCare.annotate(tx, item.responses),
+        productionPaused: await lifecycle.productionPaused(tx, seasonId) };
 }, { isolationLevel: 'RepeatableRead' });
+/** Keep filtered rows, counts and creation eligibility consistent within the authorized season. */
 const listCases = (accountId, seasonId, { page = 1, limit = 20, status, severity, resolved } = {}) =>
     prisma.$transaction(async (tx) => {
         const season = await scope(tx, accountId, seasonId);
@@ -76,10 +86,11 @@ const listCases = (accountId, seasonId, { page = 1, limit = 20, status, severity
             existingCaseId: existing?.id ?? null, canCreate: season.status === SEASON_STATUS.ACTIVE && !existing } };
     }, { isolationLevel: 'RepeatableRead' });
 
+/** Translate transaction conflicts before sending notifications for committed case changes. */
 const mutate = async (operation) => {
     let result;
     try {
-        result = await prisma.$transaction(operation, { isolationLevel: 'Serializable' });
+        result = await transaction(operation);
     } catch (error) {
         if (['P2034', 'P2025'].includes(error.code)) throw ApiError.conflict(msg.CONFLICT);
         if (error.code === 'P2002') throw ApiError.conflict(msg.EXISTING_CASE);
@@ -87,7 +98,9 @@ const mutate = async (operation) => {
         throw error;
     }
     for (const notification of result.notifications) {
-        emitNotification(notification.accountId, 'notification:new', { id: notification.id });
+        try { emitNotification(notification.accountId, 'notification:new', { id: notification.id }); } catch {
+            // Persisted notices remain available if realtime delivery fails after commit.
+        }
     }
     return result.item;
 };
@@ -95,6 +108,7 @@ const notify = (tx, item, recipients, type, content) => Promise.all([...new Set(
     tx.notification.create({ data: { accountId, type, title: item.title, content,
         referenceType: 'disease_case', referenceId: item.id }, select: { id: true, accountId: true } })));
 
+/** Open one unresolved case per season and capture the observations available at reporting time. */
 const createCase = (accountId, seasonId, input) => mutate(async (tx) => {
     const season = await scope(tx, accountId, seasonId, true);
     if (await tx.diseaseCase.findFirst({ where: { seasonId, status: { not: STATUS.RESOLVED } }, select: { id: true } })) {
@@ -151,26 +165,32 @@ const createCase = (accountId, seasonId, input) => mutate(async (tx) => {
     return { item: present(item, season), notifications };
 });
 
+/** Record observations or an emergency alert without changing clinical or treatment state. */
 const respond = (accountId, seasonId, caseId, input) => mutate(async (tx) => {
     const season = await scope(tx, accountId, seasonId, true);
     const item = await findCase(tx, seasonId, caseId);
     if (item.status === STATUS.RESOLVED) throw ApiError.forbidden(msg.ALREADY_RESOLVED);
-    if (item.updatedAt.getTime() !== input.expectedUpdatedAt.getTime()) throw ApiError.conflict(msg.CONFLICT);
+    if (input.replyToResponseId) {
+        const parent = await tx.diseaseCaseResponse.findFirst({ where: { id: input.replyToResponseId, caseId }, select: { id: true } });
+        if (!parent) throw ApiError.badRequest(messages.TREATMENT_PROTOCOL.REQUEST_REPLY_INVALID);
+    }
+    const now = new Date(Math.max(Date.now(), item.updatedAt.getTime() + 1));
     // PostgreSQL stores microseconds; Prisma Date truncates to milliseconds. Match that entire millisecond.
     // Serializable isolation also detects assignment changes and simultaneous responses before commit.
     const changed = await tx.diseaseCase.updateMany({ where: { id: caseId, seasonId, status: item.status,
-        updatedAt: { gte: input.expectedUpdatedAt, lt: new Date(input.expectedUpdatedAt.getTime() + 1) } },
-    data: { updatedAt: new Date(Math.max(Date.now(), item.updatedAt.getTime() + 1)) } });
+        updatedAt: { gte: item.updatedAt, lt: new Date(item.updatedAt.getTime() + 1) } },
+    data: { updatedAt: now } });
     if (changed.count !== 1) throw ApiError.conflict(msg.CONFLICT);
     await tx.diseaseCaseResponse.create({ data: { caseId, authorId: accountId,
-        responseType: input.responseType, message: input.message, attachments: input.attachments } });
+        responseType: input.responseType, message: input.message, attachments: input.attachments,
+        replyToResponseId: input.replyToResponseId ?? null } });
     const emergency = input.responseType === 'EMERGENCY_ALERT';
     const experts = season.personnelAssignments.filter((a) => a.role === ACCOUNT_ROLE.EXPERT && a.account.role === ACCOUNT_ROLE.EXPERT && a.account.status === ACCOUNT_STATUS.ACTIVE &&
         a.account.managedByOwnerId === season.pond.farm.ownerId).map((a) => a.accountId);
     const notifications = await notify(tx, item, [...experts, ...(emergency ? [season.pond.farm.ownerId] : [])],
         emergency ? NOTIFICATION_TYPE.EMERGENCY_CASE_UPDATE : NOTIFICATION_TYPE.DISEASE_CASE_RESPONSE,
         emergency ? msg.EMERGENCY : msg.RESPONDED);
-    // A KTV supplies evidence; only the Expert orchestrates clinical state transitions.
+    // Conversation never changes the clinical state or the protocol's authority.
     return { item: present(await findCase(tx, seasonId, caseId), season), notifications };
 });
 module.exports = { listCases, getCase, createCase, respond };

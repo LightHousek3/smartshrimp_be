@@ -4,7 +4,7 @@ const pick = require('./pick');
 const ResponseHandler = require('./responseHandler');
 const { createDocumentError, getDocumentErrorCode } = require('./ragDocumentError');
 const { setRefreshTokenCookie, clearRefreshTokenCookie } = require('./refreshTokenCookie');
-const { requireCompleteInventoryProduct, isInventoryProductReviewable } = require('./inventoryProductReadiness');
+const { requireCompleteInventoryProduct } = require('./inventoryProductReadiness');
 const { stockQuantity, vietnamDate } = require('./inventoryQuantity');
 const { assertTemplateDose } = require('./protocolTemplateRules');
 const { applicationRuns } = require('./templateApplicationDays');
@@ -44,7 +44,6 @@ module.exports = {
     setRefreshTokenCookie,
     clearRefreshTokenCookie,
     requireCompleteInventoryProduct,
-    isInventoryProductReviewable,
     stockQuantity,
     vietnamDate,
 };

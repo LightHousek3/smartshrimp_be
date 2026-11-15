@@ -7,12 +7,13 @@ const prisma = require('../config/prisma');
 const { groupItems, wireItem, protocolStages } = require('../utils/protocolPresentation');
 const { cultureDay, courseCoverage } = require('../utils/protocolTimeline');
 const lifecycle = require('./protocolLifecycle.service');
+const drafts = require('./protocolDraft.service');
 const { executionRows } = require('../utils/protocolExecution');
 const logger = require('../config/logger');
 const config = require('../config');
 const { emitNotification } = require('../realtime/notification.socket');
 const { ApiError, productionProtocolV2: v2, assertMaterialSafety, assertTemplateDose, productFromRecommendation, assertProtocolHarvestCoverage,
-    assessTemplateProposal, getMaterialSafety } = require('../utils');
+    getMaterialSafety } = require('../utils');
 const { hasOverlappingStages, isProductionProtocolDoseValid } = require('../utils/productionProtocol');
 const {
     messages,
@@ -21,12 +22,14 @@ const {
     PRODUCTION_PROTOCOL_EDITABLE_STATUSES,
     PRODUCTION_PROTOCOL_IN_PROGRESS_STATUSES,
     PRODUCTION_PROTOCOL_WRITABLE_SEASONS,
+    PRODUCTION_PROTOCOL_LIMITS,
     httpStatus,
 } = require('../constants');
 
 const { assertTreatmentStart, assertTreatmentFirstStage, assertTreatmentCourse } = require('../utils/treatmentProtocolPolicy');
+const { materialRevision, assertMaterialRevision } = require('../utils/protocolMaterial');
 
-/** Production and treatment share authoring/storage; only their context and day policy differ. */
+/** Build shared authoring operations with protocol-specific scope, day rules and template policy. */
 const createWorkflow = ({ protocolType = 'PRODUCTION', diseaseCaseId = null } = {}) => {
     const treatment = protocolType === 'TREATMENT';
     const PRODUCT_SELECT = {
@@ -80,9 +83,12 @@ const createWorkflow = ({ protocolType = 'PRODUCTION', diseaseCaseId = null } = 
                  OR tgrelid='public.protocol_items'::regclass AND tgname='production_protocol_item_storage_check'))=2 AS ready`;
         if (!result?.ready) throw new ApiError(httpStatus.SERVICE_UNAVAILABLE, messages.PRODUCTION_PROTOCOL.SCHEMA_NOT_READY);
     };
+    /** Require an active farm and current assignment; treatment also needs an active season and unresolved case. */
     const isWritable = (season) => (treatment ? season.status === 'ACTIVE' && season.diseaseCase?.status !== 'RESOLVED'
         : PRODUCTION_PROTOCOL_WRITABLE_SEASONS.includes(season.status))
         && season.currentAssignment && season.pond.farm.status === FARM_STATUS.ACTIVE;
+    const { isUnsubmittedDraft } = drafts;
+    /** Surface stale revisions and concurrent database changes as protocol conflicts. */
     const mapError = (error) => {
         if (['P2002', 'P2034', 'P2025', 'P2003', 'P2028'].includes(error.code)
             || (error.code === 'P2010' && ['40001', '40P01', '55P03'].includes(error.meta?.code))) {
@@ -210,7 +216,7 @@ const createWorkflow = ({ protocolType = 'PRODUCTION', diseaseCaseId = null } = 
         }
         return result;
     };
-    /** Only production protocols belonging to the scoped season may enter this workflow. */
+    /** Match the protocol type, season and parent case; an unrelated protocol ID never grants access. */
     const findProtocol = async (tx, seasonId, protocolId) => {
         const row = await tx.protocol.findFirst({
             where: {
@@ -257,6 +263,7 @@ const createWorkflow = ({ protocolType = 'PRODUCTION', diseaseCaseId = null } = 
                 'dailyDoseIncrement', 'recurrenceAnchorDay', 'doseAnchorDay', 'materialSnapshot', 'dueAtMinutes']));
         return createHash('sha256').update(JSON.stringify(canonical({ ...header, items }))).digest('hex');
     };
+    /** Resolve audit actor names in bulk while retaining events recorded by the system. */
     const history = async (tx, protocolId) => {
         const rows = await tx.protocolStatusHistory.findMany({ where: { protocolId }, orderBy: [{ changedAt: 'asc' }, { id: 'asc' }] });
         const accounts = await tx.account.findMany({ where: { id: { in: [...new Set(rows.map(row => row.changedBy).filter(Boolean))] } },
@@ -264,10 +271,12 @@ const createWorkflow = ({ protocolType = 'PRODUCTION', diseaseCaseId = null } = 
         const names = new Map(accounts.map(account => [account.id, account.fullName]));
         return rows.map(row => ({ ...row, changedByName: row.changedBy ? names.get(row.changedBy) ?? 'Tài khoản cũ' : 'Hệ thống' }));
     };
+    /** Persist the status transition and optional event payload on the caller's transaction. */
     const appendHistory = (tx, protocolId, fromStatus, toStatus, accountId, reason = null, eventType = 'STATUS_CHANGED', eventData) =>
         tx.protocolStatusHistory.create({ data: { protocolId, fromStatus: fromStatus?.toUpperCase() ?? null,
             toStatus: toStatus.toUpperCase(), changedBy: accountId, reason, eventType,
             ...(eventData && { eventData: JSON.parse(JSON.stringify(eventData)) }) } });
+    /** Copy editable fields without the saved item ID, product object or material snapshot. */
     const copyItem = (entry) => {
         const fields = wireItem(entry);
         delete fields.id;
@@ -275,6 +284,7 @@ const createWorkflow = ({ protocolType = 'PRODUCTION', diseaseCaseId = null } = 
         delete fields.materialSnapshot;
         return fields;
     };
+    /** Return the saved prescription with a content revision and actions allowed in its current scope. */
     const wireDetail = (row, season, blocked, statusHistory) => ({
         id: row.id,
         seasonId: row.seasonId,
@@ -306,10 +316,8 @@ const createWorkflow = ({ protocolType = 'PRODUCTION', diseaseCaseId = null } = 
         availableActions: {
             submit: Boolean(isWritable(season) && PRODUCTION_PROTOCOL_EDITABLE_STATUSES.includes(row.status) && !blocked && row.items.length),
             update: Boolean(isWritable(season) && PRODUCTION_PROTOCOL_EDITABLE_STATUSES.includes(row.status) && !blocked),
-            cancel: Boolean(isWritable(season) && row.status === 'DRAFT' && !blocked),
-            withdraw: Boolean(treatment && isWritable(season) && ['PENDING_APPROVAL', 'REJECTED', 'APPROVED'].includes(row.status)),
-            stop: Boolean(treatment && isWritable(season) && (row.status === 'ACTIVE'
-                || row.contentVersion === 1 && row.status === 'APPROVED' && season.diseaseCase?.status === 'IN_TREATMENT')),
+            delete: Boolean(isWritable(season) && isUnsubmittedDraft(row) && !blocked),
+            stop: Boolean(treatment && isWritable(season) && ['ACTIVE', 'APPROVED'].includes(row.status)),
         },
     });
     /**
@@ -400,7 +408,7 @@ const createWorkflow = ({ protocolType = 'PRODUCTION', diseaseCaseId = null } = 
                     submit: Boolean(isWritable(season) && PRODUCTION_PROTOCOL_EDITABLE_STATUSES.includes(row.status) && !blocked && row.items.length),
                     view: true,
                     update: Boolean(isWritable(season) && PRODUCTION_PROTOCOL_EDITABLE_STATUSES.includes(row.status) && !blocked),
-                    cancel: Boolean(isWritable(season) && row.status === 'DRAFT' && !blocked),
+                    delete: Boolean(isWritable(season) && isUnsubmittedDraft(row) && !blocked),
                 },
             };
         }));
@@ -413,7 +421,10 @@ const createWorkflow = ({ protocolType = 'PRODUCTION', diseaseCaseId = null } = 
             },
         };
     });
-    /** Return scoped protocol content and audit history from the same transaction snapshot. */
+    /**
+     * Read content, action eligibility and history in one authorized transaction.
+     * Treatment details include execution rows and adherence counts for local client filtering.
+     */
     const detail = (accountId, seasonId, protocolId) => transaction(async (tx) => {
         const season = await scope(tx, accountId, seasonId);
         const row = await findProtocol(tx, seasonId, protocolId);
@@ -456,6 +467,7 @@ const createWorkflow = ({ protocolType = 'PRODUCTION', diseaseCaseId = null } = 
         return {
             data: products.map((product) => ({
                 ...product,
+                materialRevision: materialRevision(product),
                 conversionQuantity: product.conversionQuantity == null ? null : String(product.conversionQuantity),
             })),
             meta: {
@@ -477,12 +489,16 @@ const createWorkflow = ({ protocolType = 'PRODUCTION', diseaseCaseId = null } = 
      * Validate inclusive day ranges, existing identities, dose rules and product compatibility.
      * Retained inactive products may stay in a draft; submission revalidates them as new selections.
      */
-    const validateGraph = async (tx, season, stages, current, contentVersion = 1, accountId) => {
+    const validateGraph = async (tx, season, stages, current, contentVersion = 1, accountId, assessProposals = true) => {
         if (treatment) {
             assertTreatmentStart(season.treatmentStartAt, season);
             assertTreatmentFirstStage(stages);
         }
+        /** Map treatment days to the season's real DOC before checking dose and day-one timing rules. */
         const assertDose = (entry, window, product, environment, meal) => {
+            const dueAtMinutes = entry.dueAtMinutes ?? PRODUCTION_PROTOCOL_LIMITS.defaultDueAtMinutes;
+            if (!Number.isInteger(dueAtMinutes) || dueAtMinutes < PRODUCTION_PROTOCOL_LIMITS.minDueAtMinutes || dueAtMinutes > 2147483647)
+                throw ApiError.badRequest(messages.PRODUCTION_PROTOCOL.DUE_WINDOW_INVALID);
             let first = window.first + 1;
             let last = window.last + 1;
             if (treatment && season.treatmentStartAt && season.stockingDate) {
@@ -515,6 +531,7 @@ const createWorkflow = ({ protocolType = 'PRODUCTION', diseaseCaseId = null } = 
         const existingMeals = new Set(groups.flatMap((stage) => stage.meals.map((meal) => meal.id)));
         const oldItems = new Map(current?.items.map((entry) => [entry.id, entry]));
         const allIds = new Set();
+        /** Reject duplicate stage, meal or item IDs and identities outside this saved graph. */
         const checkId = (id, existing) => {
             if (id && (!existing.has(id) || allIds.has(id))) {
                 throw ApiError.badRequest(messages.PRODUCTION_PROTOCOL.ID);
@@ -543,12 +560,9 @@ const createWorkflow = ({ protocolType = 'PRODUCTION', diseaseCaseId = null } = 
                     if (contentVersion !== 2 && !isProductionProtocolDoseValid(entry, stage.startDayOffset)) {
                         throw ApiError.badRequest(messages.PRODUCTION_PROTOCOL.DOSE);
                     }
-                    if (contentVersion === 2 && entry.recommendedProductDetails) {
-                        entry.recommendedProductDetails = v2.normalizeProposal(entry.recommendedProductDetails);
+                    if (contentVersion === 2 && !entry.productId && entry.recommendedProductDetails) {
+                        if (assessProposals) entry.recommendedProductDetails = v2.normalizeProposal(entry.recommendedProductDetails, accountId);
                         const proposal = productFromRecommendation(entry.recommendedProductDetails);
-                        const assessment = assessTemplateProposal(proposal, accountId);
-                        entry.recommendedProductDetails.proposed.productCompliance = assessment.productCompliance;
-                        entry.recommendedProductDetails.review = assessment.review;
                         const proposedManufacturerId = entry.recommendedProductDetails.proposed.manufacturerId;
                         if (entry.recommendedManufacturerId && proposedManufacturerId && entry.recommendedManufacturerId !== proposedManufacturerId) {
                             throw ApiError.badRequest(messages.PRODUCTION_PROTOCOL.MATERIAL_RESOLUTION);
@@ -577,6 +591,7 @@ const createWorkflow = ({ protocolType = 'PRODUCTION', diseaseCaseId = null } = 
                     if (!product || product.farmId !== season.pond.farm.id || (!unchanged && product.status !== 'ACTIVE')) {
                         throw ApiError.badRequest(messages.PRODUCTION_PROTOCOL.PRODUCT);
                     }
+                    if (contentVersion === 2) assertMaterialRevision(product, entry.productRevision);
                     const operationType = product.category === 'FEED' ? 'FEEDING' : product.category;
                     if (entry.operationType !== operationType) {
                         throw ApiError.badRequest(messages.PRODUCTION_PROTOCOL.PRODUCT);
@@ -632,11 +647,13 @@ const createWorkflow = ({ protocolType = 'PRODUCTION', diseaseCaseId = null } = 
             for (const meal of stage.meals) {
                 for (const entry of meal.items) {
                     const { id, dailyDoseIncrement, _materialSnapshot, ...fields } = entry;
+                    delete fields.productRevision;
                     for (const field of ['firstDayOffset', 'lastDayOffset', 'recurrenceAnchorOffset', 'doseAnchorOffset']) delete fields[field];
                     const window = contentVersion === 2 ? v2.itemWindow(entry, stage) : null;
                     if (fields.recommendedProductDetails === null) fields.recommendedProductDetails = Prisma.DbNull;
                     const data = {
                         ...fields,
+                        dueAtMinutes: fields.dueAtMinutes ?? PRODUCTION_PROTOCOL_LIMITS.defaultDueAtMinutes,
                         startDayOffset: (window?.first ?? stage.startDayOffset) + 1,
                         endDayOffset: (window?.last ?? stage.endDayOffset) + 1,
                         mealNumber: meal.mealNumber,
@@ -763,21 +780,21 @@ const createWorkflow = ({ protocolType = 'PRODUCTION', diseaseCaseId = null } = 
                     operationType: item.operationType, repeatIntervalDays: item.repeatIntervalDays,
                     doseBasis: item.doseBasis, doseValue: Number(item.doseValue), doseUnit: item.doseUnit,
                     dailyDoseIncrement: Number(item.dailyDoseIncrement ?? 0), dueAtMinutes: item.dueAtMinutes,
-                    instructions: item.instructions, product: { ...product, safety: getMaterialSafety(product) } };
+                    instructions: item.instructions, product: { ...product, safety: getMaterialSafety(product),
+                        ...(item.productId && { materialRevision: materialRevision(product) }) } };
             }) };
 
     });
 
     /**
      * Revalidate saved content before transitioning to PENDING_APPROVAL in the caller's transaction.
-     * Clear previous review fields, retain audit history and leave schedule generation to approval.
+     * Clear previous review fields and save a submission snapshot with the Owner notification.
+     * Treatment stays inactive until Owner approval and the Expert's prescribed start both permit it.
      */
     const submitCurrent = async (tx, season, accountId, current, notifications) => {
         if (treatment && current.sourceTemplateId) throw ApiError.badRequest(messages.TREATMENT_PROTOCOL.PRODUCTION_TEMPLATE_FORBIDDEN);
         const fromStatus = current.status;
         if (treatment) {
-            if (await lifecycle.pendingRequests(tx, diseaseCaseId)) throw ApiError.conflict(messages.TREATMENT_PROTOCOL.INFORMATION_PENDING);
-            if (!current.summary?.trim()) throw ApiError.badRequest(messages.TREATMENT_PROTOCOL.INSTRUCTIONS_REQUIRED);
             if (!current.treatmentStartAt || current.treatmentStartAt <= new Date()
                 || !season.stockingDate || !['OPEN', 'MONITORING', 'IN_TREATMENT'].includes(season.diseaseCase.status)
                 || current.items.some(item => item.dueAtMinutes == null)) {
@@ -802,7 +819,7 @@ const createWorkflow = ({ protocolType = 'PRODUCTION', diseaseCaseId = null } = 
         }
         // Revalidate all products as newly selected: inactive products can remain in
         // draft history, but cannot be submitted as operational recommendations.
-        await validateGraph(tx, season, groups, null, current.contentVersion ?? 1, accountId);
+        await validateGraph(tx, season, groups, null, current.contentVersion ?? 1, accountId, false);
         if (treatment) assertTreatmentCourse(current, season, { future: true });
         const result = await tx.protocol.updateMany({
             where: {
@@ -858,6 +875,7 @@ const createWorkflow = ({ protocolType = 'PRODUCTION', diseaseCaseId = null } = 
     /**
      * Create the next version only when no draft, rejected or pending version is in progress.
      * Link the latest version, including cancelled ones; optional submission remains atomic.
+     * Creating a successor does not stop the currently effective treatment or change the case state.
      */
     const create = (accountId, seasonId, body) => transaction(async (tx, notifications) => {
         if (treatment && (body.templateId || body.templateVersionNo != null)) throw ApiError.badRequest(messages.TREATMENT_PROTOCOL.PRODUCTION_TEMPLATE_FORBIDDEN);
@@ -920,27 +938,24 @@ const createWorkflow = ({ protocolType = 'PRODUCTION', diseaseCaseId = null } = 
         return wireDetail(await findProtocol(tx, seasonId, row.id), season, false, await history(tx, row.id));
     });
     /**
-     * Share revision and dependency checks between draft edits and cancellation.
-     * Cancellation preserves items; omitted PATCH fields preserve their stored values.
+     * Edit only an unblocked DRAFT or REJECTED version whose revision still matches.
+     * Omitted fields retain their values; changing the treatment anchor revalidates saved items too.
      */
-    const mutate = (accountId, seasonId, protocolId, body, cancelling) => transaction(async (tx, notifications) => {
+    const mutate = (accountId, seasonId, protocolId, body) => transaction(async (tx, notifications) => {
         const season = await scope(tx, accountId, seasonId, true);
         await tx.$queryRaw`SELECT id FROM protocols WHERE id = ${protocolId}::uuid FOR UPDATE`;
-        // Resolve due activation under the same lock before allowing withdrawal of an expired approval.
-        if (treatment && cancelling) await lifecycle.reconcile(tx, seasonId);
         const current = await findProtocol(tx, seasonId, protocolId);
-        const canCancel = current.status === 'DRAFT' || treatment && ['REJECTED', 'PENDING_APPROVAL', 'APPROVED'].includes(current.status);
-        if (!(cancelling ? canCancel : PRODUCTION_PROTOCOL_EDITABLE_STATUSES.includes(current.status))) {
+        if (!PRODUCTION_PROTOCOL_EDITABLE_STATUSES.includes(current.status)) {
             throw ApiError.conflict(messages.PRODUCTION_PROTOCOL.STATE);
         }
         if (revisionOf(current) !== body.revision) {
             throw ApiError.conflict(messages.PRODUCTION_PROTOCOL.CONFLICT);
         }
-        if (await blockers(tx, current) && !(treatment && cancelling)) {
+        if (await blockers(tx, current)) {
             throw ApiError.conflict(messages.PRODUCTION_PROTOCOL.DEPENDENCY);
         }
         const {
-            stages, reason, submitForApproval, templateId, templateVersionNo, contentVersion, ...header
+            stages, submitForApproval, templateId, templateVersionNo, contentVersion, ...header
         } = body;
         delete header.revision;
         if (treatment && (templateId || templateVersionNo != null)) throw ApiError.badRequest(messages.TREATMENT_PROTOCOL.PRODUCTION_TEMPLATE_FORBIDDEN);
@@ -957,7 +972,7 @@ const createWorkflow = ({ protocolType = 'PRODUCTION', diseaseCaseId = null } = 
         if (!v2.isV2(current) && version === 2 && !stages) throw ApiError.conflict(messages.PRODUCTION_PROTOCOL.V2_REQUIRED);
         if (stages && v2.isV2(current) && contentVersion !== 2) throw ApiError.conflict(messages.PRODUCTION_PROTOCOL.V2_REQUIRED);
         let template;
-        if (templateId !== undefined && !cancelling) {
+        if (templateId !== undefined) {
             // Preserve snapshot references when the source template becomes inactive.
             if (templateId && (templateId !== current.sourceTemplateId || (templateVersionNo != null
                 && templateVersionNo !== current.sourceTemplateVersionNo))) {
@@ -979,44 +994,57 @@ const createWorkflow = ({ protocolType = 'PRODUCTION', diseaseCaseId = null } = 
             }
             await validateGraph(tx, season, stages, current, version, accountId);
         }
-        if (treatment && !cancelling && !stages && header.treatmentStartAt !== undefined)
-            await validateGraph(tx, season, protocolStages(current), current, version, accountId);
+        if (treatment && !stages && header.treatmentStartAt !== undefined)
+            await validateGraph(tx, season, protocolStages(current), current, version, accountId, false);
         const result = await tx.protocol.updateMany({
             where: {
                 id: protocolId,
                 status: current.status,
             },
             data: {
-                ...(cancelling ? { status: 'CANCELLED', rejectionReason: null } : header),
+                ...header,
                 updatedAt: new Date(),
             },
         });
         if (result.count !== 1) {
             throw ApiError.conflict(messages.PRODUCTION_PROTOCOL.CONFLICT);
         }
-        if (cancelling) {
-            await appendHistory(tx, protocolId, current.status, 'cancelled', accountId, reason, 'WITHDRAWN');
-            await lifecycle.cancelPlanned(tx, protocolId, 'MANUAL_CORRECTION', reason, accountId, new Date());
-        } else if (stages) {
+        if (stages) {
             await persistGraph(tx, protocolId, stages, current, version);
             if (version === 2 && (template || templateId === null)) await tx.protocol.update({ where: { id: protocolId }, data:
                 template ? { sourceTemplateVersionNo: template.versionNo, sourceTemplateSnapshot: JSON.parse(JSON.stringify(template)) }
                     : { sourceTemplateVersionNo: null, sourceTemplateSnapshot: Prisma.DbNull } });
         }
-        if (!cancelling && !stages && templateId === null && v2.isV2(current)) {
+        if (!stages && templateId === null && v2.isV2(current)) {
             await tx.protocol.update({ where: { id: protocolId }, data: {
                 sourceTemplateVersionNo: null, sourceTemplateSnapshot: Prisma.DbNull,
             } });
         }
-        if (!cancelling && submitForApproval) {
+        if (submitForApproval) {
             await submitCurrent(tx, season, accountId, await findProtocol(tx, seasonId, protocolId), notifications);
         }
         return wireDetail(await findProtocol(tx, seasonId, protocolId), season, false, await history(tx, protocolId));
     });
 
+    /** Delete only the last unpublished draft aggregate, never a submitted or operational fact. */
+    const remove = (accountId, seasonId, protocolId, body) => transaction(async tx => {
+        await scope(tx, accountId, seasonId, true);
+        await tx.$queryRaw`SELECT id FROM protocols WHERE id=${protocolId}::uuid FOR UPDATE`;
+        const current = await findProtocol(tx, seasonId, protocolId);
+        if (!isUnsubmittedDraft(current)) throw ApiError.conflict(messages.PRODUCTION_PROTOCOL.DRAFT_DELETE_STATE);
+        if (revisionOf(current) !== body.revision) throw ApiError.conflict(messages.PRODUCTION_PROTOCOL.CONFLICT);
+        if (!await drafts.tryRemove(tx, current)) throw ApiError.conflict(messages.PRODUCTION_PROTOCOL.DEPENDENCY);
+        return { id: protocolId };
+    });
+
+    /**
+     * Reconcile time-driven changes under the season lock before checking the confirmed revision.
+     * The lifecycle service cancels an unapplied plan or aborts active treatment with care instructions.
+     */
     const stop = (accountId, seasonId, protocolId, body) => transaction(async (tx, notifications) => {
         const season = await scope(tx, accountId, seasonId, true);
         if (!treatment) throw ApiError.conflict(messages.TREATMENT_PROTOCOL.STATE);
+        notifications.push(...await lifecycle.reconcile(tx, seasonId));
         await tx.$queryRaw`SELECT id FROM protocols WHERE id=${protocolId}::uuid FOR UPDATE`;
         const current = await findProtocol(tx, seasonId, protocolId);
         if (body.revision && revisionOf(current) !== body.revision) throw ApiError.conflict(messages.PRODUCTION_PROTOCOL.CONFLICT);
@@ -1034,8 +1062,8 @@ const createWorkflow = ({ protocolType = 'PRODUCTION', diseaseCaseId = null } = 
         submit,
         templates,
         templateDetail,
-        update: (accountId, seasonId, protocolId, body) => mutate(accountId, seasonId, protocolId, body, false),
-        cancel: (accountId, seasonId, protocolId, body) => mutate(accountId, seasonId, protocolId, body, true),
+        update: mutate,
+        remove,
     };
 };
 

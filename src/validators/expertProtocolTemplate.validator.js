@@ -1,6 +1,6 @@
 const messages = require('../constants/messages.js');
 const Joi = require('joi');
-const { SHRIMP_TYPE } = require('../constants');
+const { SHRIMP_TYPE, PRODUCTION_PROTOCOL_LIMITS } = require('../constants');
 const {
     ProductCategory,
     ConversionUnit,
@@ -13,13 +13,7 @@ const clock = Joi.string()
     .pattern(/^(?:[01]\d|2[0-3]):[0-5]\d$/)
     .required();
 const recommendation = Joi.object({
-    productCompliance: require('./materialCompliance.validator')
-        .productCompliance.keys({
-            // Legacy clients may send these fields; only the service can determine their persisted values.
-            complianceStatus: Joi.any().strip(),
-            reviewNote: Joi.any().strip(),
-        })
-        .required(),
+    productCompliance: require('./materialCompliance.validator').productCompliance.required(),
     // A proposal must identify either an Owner-scoped manufacturer or a complete inline identity.
     manufacturerId: uuid.empty(null),
     manufacturer: require('./materialCompliance.validator').manufacturer.empty(
@@ -69,6 +63,7 @@ const material = Joi.object({
         .unique(),
     repeatIntervalDays: Joi.number().integer().min(1).max(30).default(1),
     productId: uuid,
+    productRevision: Joi.string().pattern(/^[a-f0-9]{64}$/),
     recommendation,
     doseBasis: Joi.string()
         .valid(...Object.values(DoseBasis))
@@ -80,8 +75,13 @@ const material = Joi.object({
         .precision(4)
         .strict()
         .default(0),
-    doseUnit: Joi.string().valid('KG', 'G', 'L', 'ML', 'PCS').required(),
-    dueAtMinutes: Joi.number().integer().min(0).max(2147483647).allow(null),
+    doseUnit: Joi.string().valid('KG', 'G', 'L', 'ML').required(),
+    dueAtMinutes: Joi.number().integer().min(PRODUCTION_PROTOCOL_LIMITS.minDueAtMinutes).max(2147483647)
+        .empty(null).default(PRODUCTION_PROTOCOL_LIMITS.defaultDueAtMinutes).messages({
+            'number.min': messages.PRODUCTION_PROTOCOL.DUE_WINDOW_INVALID,
+            'number.max': messages.PRODUCTION_PROTOCOL.DUE_WINDOW_TOO_LARGE,
+            'number.integer': messages.PRODUCTION_PROTOCOL.DUE_WINDOW_INTEGER,
+        }),
     instructions: Joi.string().trim().max(500).allow('', null).default(null),
 })
     .xor('productId', 'recommendation')

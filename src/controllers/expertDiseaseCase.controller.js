@@ -51,9 +51,16 @@ const resolve = asyncHandler(async (req, res) => {
     });
 });
 
+/** Apply an explicit post-treatment care decision using the client's confirmed case and plan versions. */
+const care = asyncHandler(async (req, res) => {
+    const data = await service.care(req.account.id, req.params.caseId, req.body);
+    return ResponseHandler.success(res, { message: messages.DISEASE_CASE.RESPONSE_SENT, data });
+});
+
 module.exports = {
     list,
     detail,
     respond,
+    care,
     resolve,
 };

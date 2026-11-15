@@ -9,9 +9,7 @@ const {
     INVENTORY_TRANSACTION_TYPE,
     PRODUCT_STOCK_STATUS,
     PRODUCT_ARCHIVE_STATUS,
-    PRODUCT_COMPLIANCE_STATUS,
     PRODUCT_REGULATORY_TYPE,
-    INVENTORY_LIMITS,
     messages,
 } = require('../constants');
 
@@ -283,24 +281,6 @@ const getInventoryHistory = {
 };
 
 module.exports = {
-    getProductsForReview: {
-        query: Joi.object({
-            page: Joi.number().integer().min(1).default(1),
-            limit: Joi.number().integer().min(1).max(100).default(10),
-            farmId: uuid,
-            complianceStatus: Joi.string().valid(...Object.values(PRODUCT_COMPLIANCE_STATUS))
-                .default(PRODUCT_COMPLIANCE_STATUS.DRAFT),
-        }),
-    },
-    getProductForReview: { params: Joi.object({ productId: uuid.required() }) },
-    reviewProductCompliance: {
-        params: Joi.object({ productId: uuid.required() }),
-        body: Joi.object({
-            expectedUpdatedAt: Joi.date().iso().required(),
-            complianceStatus: Joi.string().valid(PRODUCT_COMPLIANCE_STATUS.REVIEWED, PRODUCT_COMPLIANCE_STATUS.BLOCKED).required(),
-            reviewNote: Joi.string().trim().min(1).max(INVENTORY_LIMITS.REVIEW_NOTE_MAX_LENGTH).required(),
-        }),
-    },
     getProducts,
     /**
      * Validate product navigation IDs before checking the authenticated owner's scope.

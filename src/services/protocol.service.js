@@ -497,17 +497,18 @@ const validateApproval = async (client, p) => {
     }
     if (p.protocolType === T.TREATMENT) {
         const diseaseCase = await client.diseaseCase.findFirst({
-            where: { id: p.diseaseCaseId, seasonId: p.seasonId, status: { in: ['OPEN', 'MONITORING', 'IN_TREATMENT'] } },
-            select: { id: true },
+            where: { id: p.diseaseCaseId, seasonId: p.seasonId },
+            select: { id: true, status: true },
         });
         if (p.season.status !== 'ACTIVE' || !diseaseCase) throw ApiError.forbidden(messages.PROTOCOL.INVALID_CASE);
-        if (await lifecycle.pendingRequests(client, p.diseaseCaseId)) throw ApiError.conflict(messages.TREATMENT_PROTOCOL.INFORMATION_PENDING);
+        if (!['OPEN', 'MONITORING', 'IN_TREATMENT'].includes(diseaseCase.status)) throw ApiError.conflict(messages.DISEASE_CASE.ALREADY_RESOLVED);
         if (productionReview.isV2(p)) assertTreatmentCourse({ ...p, items }, p.season, { future: true });
     }
 };
 
 /**
  * Replace only the linked current version; completed execution facts remain immutable.
+ * Treatment replaces an APPROVED waiting ancestor now; an ACTIVE ancestor runs until successor activation.
  */
 const supersede = async (client, p, ownerId, now) => {
     const context = {
@@ -515,8 +516,10 @@ const supersede = async (client, p, ownerId, now) => {
         protocolType: p.protocolType,
         diseaseCaseId: p.diseaseCaseId,
     };
+    const treatment = p.protocolType === T.TREATMENT;
+    const replaceable = treatment ? [S.APPROVED] : [S.APPROVED, S.ACTIVE, S.PAUSED];
     const current = await client.protocol.findFirst({
-        where: { ...context, status: { in: [S.APPROVED, S.ACTIVE, S.PAUSED] } },
+        where: { ...context, status: { in: replaceable } },
         orderBy: { versionNo: 'desc' },
         select: { id: true, versionNo: true },
     });
@@ -533,15 +536,15 @@ const supersede = async (client, p, ownerId, now) => {
         previous.versionNo + 1 !== p.versionNo
     )
         throw ApiError.conflict(messages.PROTOCOL.PREDECESSOR);
-    if (p.protocolType !== T.PRODUCTION && previous.status !== S.APPROVED) {
-        if (![S.REJECTED, S.CANCELLED, S.ABORTED].includes(previous.status) || current)
-            throw ApiError.conflict(messages.PROTOCOL.PREDECESSOR);
-        return;
-    }
     // Cancelled/rejected attempts remain in the version chain but own no active plan.
     // Follow contiguous scoped links to the actual approved ancestor, never skip a broken link.
-    while (![S.APPROVED, S.ACTIVE, S.PAUSED].includes(previous.status)) {
-        if (![S.REJECTED, S.CANCELLED, S.ABORTED].includes(previous.status))
+    while (!replaceable.includes(previous.status)) {
+        // A running treatment remains effective until the successor's anchor.
+        if (treatment && [S.ACTIVE, S.PAUSED].includes(previous.status)) {
+            if (current) throw ApiError.conflict(messages.PROTOCOL.PREDECESSOR);
+            return;
+        }
+        if (![S.REJECTED, S.CANCELLED, S.ABORTED, S.COMPLETED, S.SUPERSEDED].includes(previous.status))
             throw ApiError.conflict(messages.PROTOCOL.PREDECESSOR);
         if (!previous.supersedesProtocolId) {
             if (previous.versionNo !== 1 || current) throw ApiError.conflict(messages.PROTOCOL.PREDECESSOR);
@@ -555,7 +558,7 @@ const supersede = async (client, p, ownerId, now) => {
             throw ApiError.conflict(messages.PROTOCOL.PREDECESSOR);
         previous = ancestor;
     }
-    if ((p.protocolType === T.PRODUCTION && !current) || (current && current.id !== previous.id))
+    if (!current || current.id !== previous.id)
         throw ApiError.conflict(messages.PROTOCOL.PREDECESSOR);
     const changed = await client.protocol.updateMany({
         where: { id: previous.id, status: previous.status },
@@ -584,6 +587,7 @@ const supersede = async (client, p, ownerId, now) => {
             updatedAt: now,
         },
     });
+    return previous;
 };
 
 /**
@@ -630,7 +634,8 @@ const notifyReview = async (client, p, approved) => {
 /**
  * Perform the owner-only state transition with optimistic timestamp and serializable context protection.
  * Only PENDING_APPROVAL in an open season on an active farm can transition.
- * Version replacement, decision history, case state and persisted notices roll back together.
+ * Version replacement, lifecycle reconciliation and persisted notices roll back together.
+ * Treatment approval remains APPROVED; the prescribed start controls activation and IN_TREATMENT.
  * Approval clears any rejection reason; socket delivery happens only after commit.
  */
 const review = async (ownerId, id, { updatedAt, reason, materialSelections = [], contentVersion }, approved) => {
@@ -661,17 +666,27 @@ const review = async (ownerId, id, { updatedAt, reason, materialSelections = [],
                     data: { updatedAt: now },
                 });
                 if (season.count !== 1) throw ApiError.conflict(messages.PROTOCOL.CONFLICT);
+                let replaced;
+                const lifecycleNotices = [];
                 if (approved) {
+                    if (p.protocolType === T.TREATMENT) {
+                        lifecycleNotices.push(...await lifecycle.reconcile(client, p.seasonId, now));
+                        const legacy = await client.protocol.findFirst({ where: { seasonId: p.seasonId,
+                            diseaseCaseId: p.diseaseCaseId, protocolType: T.TREATMENT, contentVersion: 1,
+                            status: S.APPROVED, diseaseCase: { status: 'IN_TREATMENT' } }, select: { id: true, status: true } });
+                        if (legacy) await lifecycle.transition(client, legacy, S.ACTIVE, 'STATUS_CHANGED', ownerId,
+                            'Chuẩn hóa trạng thái bản điều trị cũ đang áp dụng; giữ nguyên lịch và giờ bắt đầu.', {}, now);
+                    }
                     // Old Owner clients must see the evidence and acknowledge V2 before approving it.
                     if (productionReview.isV2(p)) {
                         if (contentVersion !== 2) throw ApiError.conflict(messages.PRODUCTION_PROTOCOL.V2_REQUIRED);
                         await productionReview.resolveForApproval(client, p, ownerId, materialSelections);
                     } else if (materialSelections.length) throw ApiError.badRequest(messages.PRODUCTION_PROTOCOL.MATERIAL_RESOLUTION);
                     await validateApproval(client, p);
-                    if (p.protocolType === T.PRODUCTION) await supersede(client, p, ownerId, now);
-                    else if (!p.treatmentStartAt || p.treatmentStartAt <= now || !p.season.stockingDate) {
+                    if (p.protocolType === T.TREATMENT && (!p.treatmentStartAt || p.treatmentStartAt <= now || !p.season.stockingDate)) {
                         throw ApiError.conflict(messages.TREATMENT_PROTOCOL.START_REQUIRED);
                     }
+                    replaced = await supersede(client, p, ownerId, now);
                 }
                 const status = approved ? S.APPROVED : S.REJECTED;
                 const decisionAt = new Date();
@@ -702,12 +717,21 @@ const review = async (ownerId, id, { updatedAt, reason, materialSelections = [],
                         reason: approved ? null : reason,
                     },
                 });
-                if (approved) await lifecycle.reconcile(client, p.seasonId, decisionAt);
-                const notices = await notifyReview(
+                if (approved && replaced && p.protocolType === T.TREATMENT) {
+                    const holds = (await lifecycle.activeHolds(client, p.seasonId)).filter(row => row.eventData?.waitingForProtocolId === replaced.id);
+                    if (holds.length) {
+                        const successor = { ...p, status: S.APPROVED };
+                        await lifecycle.release(client, successor, ownerId, 'Chuyển giữ chăm sóc sang bản điều trị chờ mới.', holds, decisionAt);
+                        await lifecycle.hold(client, successor, ownerId, 'Giữ chăm sóc tới mốc bản điều trị chờ mới.', decisionAt,
+                            { waitingForProtocolId: id, replacesProtocolId: replaced.id });
+                    }
+                }
+                if (approved) lifecycleNotices.push(...await lifecycle.reconcile(client, p.seasonId, decisionAt));
+                const notices = [...lifecycleNotices, ...await notifyReview(
                     client,
                     { ...p, rejectionReason: reason },
                     approved,
-                );
+                )];
                 return { data: { id, status, updatedAt: decisionAt }, notices };
             },
             { isolationLevel: 'Serializable', timeout: config.productionProtocol.transactionTimeoutMs },

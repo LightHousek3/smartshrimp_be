@@ -32,6 +32,14 @@ const units = {
  */
 const stockQuantity = (actual, sourceUnit, product) => {
     const quantity = new Prisma.Decimal(actual);
+    if (!Object.values(PRODUCT_UNIT).includes(product.unit)
+        || !Object.hasOwn(units, sourceUnit) && !packagedUnits.includes(sourceUnit)) {
+        throw ApiError.badRequest(messages.INVENTORY.INCOMPATIBLE_EXECUTION_UNIT);
+    }
+    if (packagedUnits.includes(product.unit) && (!Object.hasOwn(units, product.conversionUnit)
+        || !product.conversionQuantity || new Prisma.Decimal(product.conversionQuantity).lte(0))) {
+        throw ApiError.badRequest(messages.INVENTORY.INVALID_CONVERSION);
+    }
     if (!quantity.isFinite() || quantity.lte(0)) {
         throw ApiError.badRequest(messages.INVENTORY.INVALID_EXECUTION_QUANTITY);
     }
@@ -45,9 +53,6 @@ const stockQuantity = (actual, sourceUnit, product) => {
         }
         result = quantity.mul(source.factor).div(target.factor);
         if (packagedUnits.includes(product.unit)) {
-            if (!product.conversionQuantity || new Prisma.Decimal(product.conversionQuantity).lte(0)) {
-                throw ApiError.badRequest(messages.INVENTORY.INVALID_CONVERSION);
-            }
             result = result.div(product.conversionQuantity);
         }
     }

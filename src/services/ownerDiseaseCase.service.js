@@ -1,4 +1,6 @@
 const prisma = require('../config/prisma');
+const caseCare = require('./caseCare.service');
+const lifecycle = require('./protocolLifecycle.service');
 const {
     AI_LABEL_NAMES, AI_MIN_RECOGNITION_CONFIDENCE, AI_RUN_STATUS,
     DISEASE_CASE_STATUS, HEALTH_STATUS, PROTOCOL_STATUS, PROTOCOL_TYPE,
@@ -135,10 +137,10 @@ const list = (ownerId, { seasonId, resolved, page, limit }) => prisma.$transacti
 /** Merge status changes and replies oldest-first, with changes first on equal timestamps. */
 const caseTimeline = (row) => [
     ...row.statusHistory.map(({ fromStatus, toStatus, changedAt, reason, changer }) => ({
-        kind: 'status', fromStatus, toStatus, at: changedAt, message: reason, authorName: changer.fullName,
+        kind: 'status', fromStatus, toStatus, at: changedAt, message: reason, authorName: changer?.fullName ?? 'Hệ thống',
     })),
-    ...row.responses.map(({ responseType, createdAt, message, author }) => ({
-        kind: 'response', responseType, at: createdAt, message, authorName: author.fullName, authorRole: author.role,
+    ...row.responses.map(({ responseType, createdAt, message, author, careAction }) => ({
+        kind: 'response', responseType, at: createdAt, message, authorName: author.fullName, authorRole: author.role, careAction,
     })),
 ].sort((first, second) => first.at - second.at);
 
@@ -174,7 +176,7 @@ const detail = (ownerId, caseId) => prisma.$transaction(async (client) => {
             },
             responses: {
                 select: {
-                    responseType: true, createdAt: true, message: true,
+                    id: true, responseType: true, createdAt: true, message: true,
                     author: { select: { fullName: true, role: true } },
                 },
                 orderBy: [{ createdAt: 'asc' }, { id: 'asc' }],
@@ -203,7 +205,8 @@ const detail = (ownerId, caseId) => prisma.$transaction(async (client) => {
             ...attachment, uploaderName: uploader.fullName,
         })),
         protocols: row.protocols,
-        timeline: caseTimeline(row),
+        timeline: caseTimeline({ ...row, responses: await caseCare.annotate(client, row.responses) }),
+        productionPaused: await lifecycle.productionPaused(client, season.id),
     };
 }, { isolationLevel: 'RepeatableRead' });
 

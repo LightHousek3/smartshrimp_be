@@ -15,6 +15,7 @@ const uuid = (value) => typeof value === 'string' && /^[0-9a-f]{8}-[0-9a-f]{4}-[
 const doc = (value) => Number.isInteger(value) && value >= 1 && value <= PRODUCTION_PROTOCOL_LIMITS.maxDoc;
 const timeText = (value) => value == null ? null : new Date(`1970-01-01T${value.length === 5 ? `${value}:00` : value}Z`).toISOString().slice(11, 23);
 
+/** Reject saved items whose meal, recurrence or dose anchors cannot be interpreted safely. */
 const assertItemMetadata = (item) => {
     if (!uuid(item.productionMealId) || item.dailyDoseIncrement == null || !doc(item.recurrenceAnchorDay)
         || !doc(item.doseAnchorDay) || item.recurrenceAnchorDay > item.startDayOffset || item.doseAnchorDay > item.startDayOffset) {
@@ -50,12 +51,14 @@ const assertStructure = (structure) => {
     return structure;
 };
 
+/** Store stage and meal identities separately from item rows, using one-based culture days. */
 const storedStructure = (stages) => assertStructure({ structureVersion: PRODUCTION_PROTOCOL_LIMITS.structureVersion,
     stages: stages.map((stage, index) => ({ id: stage.id, startDayOfCulture: stage.startDayOffset + 1,
         endDayOfCulture: stage.endDayOffset + 1, sequenceOrder: index + 1,
         meals: stage.meals.map((meal, mealIndex) => ({ id: meal.id, mealNumber: meal.mealNumber,
             plannedTime: timeText(meal.plannedTime), sequenceOrder: mealIndex + 1 })) })) });
 
+/** Validate item bounds and fixed-feed increments without moving the original recurrence anchor. */
 const itemWindow = (item, stage) => {
     const first = item.firstDayOffset ?? stage.startDayOffset;
     const last = item.lastDayOffset ?? stage.endDayOffset;
@@ -82,11 +85,13 @@ const occursOn = (item, day) => {
     return day >= item.startDayOffset && day <= item.endDayOffset
         && (day - (item.recurrenceAnchorDay ?? item.startDayOffset)) % item.repeatIntervalDays === 0;
 };
+/** Apply the saved daily increment from its original anchor using exact decimal arithmetic. */
 const doseAtDay = (item, day) => {
     if (item.productionMealId != null) assertItemMetadata(item);
     return new Prisma.Decimal(item.doseValue).plus(new Prisma.Decimal(item.dailyDoseIncrement ?? 0)
         .times(day - (item.doseAnchorDay ?? item.startDayOffset)));
 };
+/** Expose zero-based editor offsets and decimal text from the stored one-based anchors. */
 const v2WireItem = (entry) => entry.productionMealId != null ? {
     recommendedProductDetails: entry.recommendedProductDetails ?? null,
     recommendedManufacturerId: entry.recommendedManufacturerId ?? null,
@@ -98,6 +103,7 @@ const v2WireItem = (entry) => entry.productionMealId != null ? {
     materialSnapshot: entry.materialSnapshot ?? null,
 } : {};
 
+/** Rebuild saved stages only when every item matches its meal identity, time and day range. */
 const protocolGroups = (row, legacyGroups) => {
     if (!isV2(row)) return legacyGroups(row.items);
     const structure = assertStructure(row.productionStructure), byMeal = new Map();
@@ -115,6 +121,10 @@ const protocolGroups = (row, legacyGroups) => {
             mealNumber: meal.mealNumber, plannedTime: meal.plannedTime, items: byMeal.get(meal.id.toLowerCase()).items })) }));
 };
 
+/**
+ * Validate proposal facts and reject references to deleted catalog materials before stamping the
+ * submission.
+ */
 const normalizeProposal = (details, accountId) => {
     if (!details) return null;
     if (details.review?.deletedProductId) throw ApiError.badRequest(messages.INVENTORY.DELETED_MATERIAL_REPLACEMENT);
@@ -124,7 +134,7 @@ const normalizeProposal = (details, accountId) => {
     const proposed = JSON.parse(JSON.stringify(details.proposed));
     if (typeof proposed?.name !== 'string' || !proposed.name.trim() || proposed.name.length > 255
         || typeof proposed.category !== 'string' || !['feed', 'medicine', 'mineral', 'chemical', 'other'].includes(proposed.category.toLowerCase())
-        || typeof proposed.unit !== 'string' || !['kg', 'g', 'l', 'ml', 'pack', 'bottle', 'pcs'].includes(proposed.unit.toLowerCase())
+        || typeof proposed.unit !== 'string' || !['kg', 'g', 'l', 'ml', 'pack', 'bottle'].includes(proposed.unit.toLowerCase())
         || (proposed.description != null && (typeof proposed.description !== 'string' || proposed.description.length > 500))) {
         throw ApiError.badRequest(messages.PRODUCTION_PROTOCOL.PRODUCT);
     }
@@ -133,7 +143,7 @@ const normalizeProposal = (details, accountId) => {
     if (proposed.conversionUnit != null && typeof proposed.conversionUnit !== 'string') throw ApiError.badRequest(messages.PRODUCTION_PROTOCOL.UNIT);
     proposed.conversionUnit = proposed.conversionUnit?.toLowerCase() ?? null;
     if (['pack', 'bottle'].includes(proposed.unit) &&
-        (!['kg', 'g', 'mg', 'l', 'ml', 'pcs'].includes(proposed.conversionUnit)
+        (!['kg', 'g', 'mg', 'l', 'ml'].includes(proposed.conversionUnit)
             || !Number.isFinite(Number(proposed.conversionQuantity)) || Number(proposed.conversionQuantity) <= 0)) {
         throw ApiError.badRequest(messages.PRODUCTION_PROTOCOL.UNIT);
     }
@@ -143,7 +153,6 @@ const normalizeProposal = (details, accountId) => {
         throw ApiError.badRequest(messages.PRODUCTION_PROTOCOL.PRODUCT);
     }
     const compliance = proposed.productCompliance ?? {};
-    for (const field of ['complianceStatus', 'checkedBy', 'checkedAt', 'reviewNote']) delete compliance[field];
     const assessment = assessTemplateProposal({ ...proposed, productCompliance: compliance }, accountId);
     proposed.productCompliance = assessment.productCompliance;
     return { proposed, ownerOverrides: null, review: assessment.review };
@@ -176,7 +185,7 @@ const templateGroups = (items) => {
                 recommendedManufacturerId: item.recommendedManufacturerId ?? null,
                 doseBasis: item.doseBasis, doseValue: String(item.doseValue), doseUnit: item.doseUnit,
                 dailyDoseIncrement: String(item.dailyDoseIncrement ?? 0), repeatIntervalDays: item.repeatIntervalDays,
-                dueAtMinutes: item.dueAtMinutes ?? null,
+                dueAtMinutes: item.dueAtMinutes ?? PRODUCTION_PROTOCOL_LIMITS.defaultDueAtMinutes,
                 firstDayOffset: item.startDayOfCulture - 1, lastDayOffset: item.endDayOfCulture - 1,
                 recurrenceAnchorOffset: item.startDayOfCulture - 1, doseAnchorOffset: item.startDayOfCulture - 1,
                 instructions: item.instructions,

@@ -1,5 +1,5 @@
 const { Prisma } = require('@prisma/client');
-const { ApiError, assertMaterialSafety, assertTemplateDose, requireCompleteInventoryProduct, productionProtocolV2: v2 } = require('../utils');
+const { ApiError, assertMaterialSafety, assertTemplateDose, productionProtocolV2: v2 } = require('../utils');
 const { messages, PRODUCTION_PROTOCOL_LIMITS, PRODUCT_STATUS, PROTOCOL_STATUS, OPERATION_TYPE } = require('../constants');
 const { cultureDay } = require('../utils/protocolTimeline');
 
@@ -8,6 +8,7 @@ const materialSelect = { id: true, farmId: true, name: true, description: true, 
     recommendationReason: true, imageUrls: true,
     manufacturer: { select: { id: true, name: true, ownerId: true, status: true, supplierType: true, address: true, contactName: true, phone: true, email: true } } };
 
+/** Reject materials outside the farm or dose routes incompatible with the prescription. */
 const assertOperationalMaterial = (product, item, farmId, ownerId, protocol = {}) => {
     if (!product || product.status !== PRODUCT_STATUS.ACTIVE || product.farmId !== farmId
         || !product.manufacturer || product.manufacturer.ownerId !== ownerId
@@ -15,8 +16,7 @@ const assertOperationalMaterial = (product, item, farmId, ownerId, protocol = {}
         throw ApiError.badRequest(messages.PRODUCTION_PROTOCOL.MATERIAL_RESOLUTION);
     }
     assertMaterialSafety({ ...product, productCompliance: product.compliance }, item.mealNumber == null,
-        item.instructions, { requireReviewed: true, production: protocol.protocolType !== 'TREATMENT' });
-    requireCompleteInventoryProduct(product);
+        item.instructions, { production: protocol.protocolType !== 'TREATMENT' });
     if (['PACK', 'BOTTLE'].includes(product.unit) && (!product.conversionUnit
         || !Number.isFinite(Number(product.conversionQuantity)) || Number(product.conversionQuantity) <= 0)) {
         throw ApiError.badRequest(messages.PRODUCTION_PROTOCOL.UNIT);
@@ -62,6 +62,7 @@ const assertSelectionMatches = (item, product, submittedItem) => {
         compliance: proposed.productCompliance });
 };
 
+/** Return material evidence and unresolved catalog selections for the Owner's review. */
 const reviews = async (client, protocol, ownerId) => {
     const items = await client.protocolItem.findMany({ where: { protocolId: protocol.id }, orderBy: { sequenceOrder: 'asc' },
         include: { product: { select: materialSelect } } });
@@ -110,13 +111,13 @@ const resolveForApproval = async (client, protocol, ownerId, selections = []) =>
         assertOperationalMaterial(product, item, protocol.season.pond.farmId, ownerId, protocol);
         assertSelectionMatches(item, product, submission?.eventData?.snapshot?.items?.find(row => row.id === item.id));
         v2.assertItemMetadata(item);
-        const details = item.recommendedProductDetails;
-        await client.protocolItem.update({ where: { id: item.id }, data: { productId, materialSnapshot: JSON.parse(JSON.stringify(product)),
-            ...(details && { recommendedProductDetails: { ...details, ownerOverrides: { productId, resolvedBy: ownerId, resolvedAt: new Date().toISOString() } } }),
+        await client.protocolItem.update({ where: { id: item.id }, data: {
+            productId, materialSnapshot: JSON.parse(JSON.stringify(product)),
         } });
     }
 };
 
+/** Filter eligible catalog matches before applying the visible selection limit. */
 const options = async (client, ownerId, protocol, itemId, search = '') => {
     const item = await client.protocolItem.findFirst({ where: { id: itemId, protocolId: protocol.id } });
     if (!item) throw ApiError.notFound(messages.PRODUCTION_PROTOCOL.NOT_FOUND);
@@ -125,7 +126,7 @@ const options = async (client, ownerId, protocol, itemId, search = '') => {
         category: item.operationType === OPERATION_TYPE.FEEDING ? 'FEED' : item.operationType,
 
         manufacturer: { is: { ownerId, status: 'active', supplierType: { in: ['MANUFACTURER', 'BOTH'] } } },
-        compliance: { is: { complianceStatus: 'reviewed', ...(protocol.protocolType !== 'TREATMENT' && { containsAntibiotic: false }), checkedBy: { not: null }, checkedAt: { not: null } } },
+        compliance: { is: { ...(protocol.protocolType !== 'TREATMENT' && { containsAntibiotic: false }), checkedBy: { not: null }, checkedAt: { not: null } } },
 
         ...(search && { name: { contains: search, mode: 'insensitive' } }) };
     const eligible = [];

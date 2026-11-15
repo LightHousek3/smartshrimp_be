@@ -4,7 +4,6 @@ const prisma = require('../config/prisma');
 const {
     ApiError,
     requireCompleteInventoryProduct,
-    isInventoryProductReviewable,
     checkIngredients,
 } = require('../utils');
 const {
@@ -21,7 +20,6 @@ const {
     OWNER_INVENTORY_TRANSACTION_TYPES,
     NOTIFICATION_TYPE,
     INVENTORY_LIMITS,
-    PRODUCT_COMPLIANCE_STATUS,
     ACCOUNT_STATUS,
     PERSONNEL_ROLE,
     SEASON_STATUS,
@@ -31,6 +29,8 @@ const { emitNotification } = require('../realtime');
 const { requireSelectableSupplier } = require('./supplier.service');
 const legacyRead = require('./inventoryLegacyRead.service');
 const { getHistoryOptions } = require('./inventoryHistoryOptions.service');
+const { materialFactsChanged } = require('../utils/protocolMaterial');
+const logger = require('../config/logger');
 
 const PACKAGED_UNITS = new Set([PRODUCT_UNIT.PACK, PRODUCT_UNIT.BOTTLE]);
 const UNIT_LOCKED_FIELDS = ['unit', 'conversionQuantity', 'conversionUnit'];
@@ -138,6 +138,7 @@ const versionRange = (date) => ({
     lt: new Date(date.getTime() + 1),
 });
 
+/** Retain exact lot quantities and the supplier snapshot alongside display totals. */
 const normalizeBalance = (balance) => {
     const { transactions, ...base } = balance;
     const received = Array.isArray(transactions) && transactions.length
@@ -153,6 +154,7 @@ const normalizeBalance = (balance) => {
     };
 };
 
+/** Aggregate stock and valuation with Decimal arithmetic before serializing display values. */
 const calculateStockMetrics = (balances = []) => {
     let currentStock = decimal(0);
     let inventoryValue = decimal(0);
@@ -434,7 +436,14 @@ const getProducts = async (farmId, ownerId, query) => {
         }),
     ]);
 
-    const normalizedCandidates = candidates.map((product) => normalizeProduct(product));
+    const submitted = candidates.length ? await prisma.$queryRaw(Prisma.sql`
+        SELECT p.id FROM products p WHERE p.id IN (${Prisma.join(candidates.map(row => Prisma.sql`${row.id}::uuid`))})
+        AND EXISTS(SELECT 1 FROM protocol_status_history h WHERE h.event_type = 'SUBMITTED'
+            AND h.event_data->'snapshot'->'items' @> jsonb_build_array(jsonb_build_object('productId', p.id::text)))`) : [];
+    const submittedIds = new Set(submitted.map(row => row.id));
+    const normalizedCandidates = candidates.map(product => normalizeProduct({
+        ...product, ...(submittedIds.has(product.id) && { metadataLocked: true }),
+    }));
     const filteredProducts = stockStatus === PRODUCT_STOCK_STATUS.LOW
         ? normalizedCandidates.filter((product) => product.isLowStock)
         : normalizedCandidates;
@@ -530,7 +539,6 @@ const prepareProductData = ({ imageUrl, ...productData }, { fillDefaults = false
 
 /**
  * Owner saves require complete label facts and photos, never a client-supplied status.
- * A manual block survives ordinary edits until an Admin explicitly lifts it.
  */
 const prepareOwnerCompliance = (product, requested, ownerId, checkedAt, current = null, photosChanged = false) => {
     const facts = Object.fromEntries(COMPLIANCE_FACT_FIELDS
@@ -545,25 +553,10 @@ const prepareOwnerCompliance = (product, requested, ownerId, checkedAt, current 
         facts.evidenceUrls = product.imageUrls || [];
     }
     requireCompleteInventoryProduct({ ...product, compliance: facts });
-    const manuallyBlocked = current?.complianceStatus === PRODUCT_COMPLIANCE_STATUS.BLOCKED
-        && !current.reviewNote?.startsWith('AUTO_SUBSTANCE_BLOCK:');
-    if (manuallyBlocked) {
-        return {
-            ...facts,
-            complianceStatus: PRODUCT_COMPLIANCE_STATUS.BLOCKED,
-            checkedBy: current.checkedBy,
-            checkedAt: current.checkedAt,
-            reviewNote: current.reviewNote,
-            updatedAt: checkedAt,
-        };
-    }
-    const ready = isInventoryProductReviewable({ ...product, compliance: facts });
     return {
         ...facts,
-        complianceStatus: ready ? PRODUCT_COMPLIANCE_STATUS.REVIEWED : PRODUCT_COMPLIANCE_STATUS.DRAFT,
-        checkedBy: ready ? ownerId : null,
-        checkedAt: ready ? checkedAt : null,
-        reviewNote: ready ? messages.INVENTORY.AUTO_REVIEW_NOTE : null,
+        checkedBy: ownerId,
+        checkedAt,
         updatedAt: checkedAt,
     };
 };
@@ -601,6 +594,7 @@ const createProduct = async (farmId, productData, ownerId) => {
     }
 };
 
+/** Compare only submitted fields and normalize conversion quantities before testing equality. */
 const productFieldChanged = (current, next, field) => {
     if (!Object.hasOwn(next, field)) {
         return false;
@@ -628,6 +622,7 @@ const updateProduct = async (farmId, productId, productData, ownerId) => {
     }
     // Normalize aliases before merging so validation and both writes see the same label.
     const requestedData = prepareProductData(fields);
+    let notifications = [];
     try {
         const product = await prisma.$transaction(
             async (transaction) => {
@@ -651,7 +646,7 @@ const updateProduct = async (farmId, productId, productData, ownerId) => {
 
                 const used = await hasProductUsage(transaction, productId);
                 const identityFields = [
-                    'name', 'category', 'manufacturerId', 'imageUrls',
+                    'name', 'description', 'category', 'manufacturerId', 'imageUrls',
                     'recommendationReason', ...UNIT_LOCKED_FIELDS,
                 ];
                 const identityChanged = identityFields.some((field) => productFieldChanged(current, requestedData, field));
@@ -721,80 +716,31 @@ const updateProduct = async (farmId, productId, productData, ownerId) => {
                     where: { id: productId },
                     select: productWithBalancesSelect,
                 });
+                if (!used && materialFactsChanged(current, updated)) {
+                    const references = await planningReferences(transaction, productId, farmId, ownerId);
+                    await invalidatePlanningReferences(transaction, references, updatedAt);
+                    notifications = await notifyPlanningReferences(transaction, references, ownerId, {
+                        title: messages.INVENTORY.MATERIAL_UPDATED_TITLE,
+                        content: messages.INVENTORY.MATERIAL_UPDATED_CONTENT(updated.name),
+                    });
+                }
+                const oldThreshold = decimal(current.minAlertQuantity);
+                const newThreshold = decimal(updated.minAlertQuantity);
+                if (newThreshold.gt(oldThreshold)) {
+                    const stock = stockInAlertUnit(updated, await getProductStock(transaction, productId));
+                    if (stock.gte(oldThreshold) && stock.lt(newThreshold)) {
+                        notifications.push(...await saveInventoryNotifications(transaction, [ownerId], {
+                            type: NOTIFICATION_TYPE.INVENTORY_LOW, title: messages.INVENTORY.LOW_STOCK_TITLE,
+                            content: `${updated.name} còn ${stock.toString()} ${alertUnit(updated)}, thấp hơn ngưỡng ${newThreshold.toString()} ${alertUnit(updated)}.`,
+                            referenceType: 'product', referenceId: productId,
+                        }));
+                    }
+                }
                 return { ...updated, metadataLocked: used };
             },
             { isolationLevel: 'Serializable' },
         );
-        return normalizeProduct(product);
-    } catch (error) {
-        return mapWriteError(error);
-    }
-};
-
-/**
- * Admin review reads are explicit V2 operations, never inferred from legacy facts.
- */
-const getProductsForReview = async ({ page, limit, complianceStatus, farmId }) => {
-    const where = {
-        ...(farmId && { farmId }),
-        compliance: { is: { complianceStatus } },
-    };
-    const [products, totalResults] = await Promise.all([
-        prisma.product.findMany({
-            where,
-            select: productWithBalancesSelect,
-            orderBy: [{ updatedAt: 'asc' }, { id: 'asc' }],
-            skip: (page - 1) * limit,
-            take: limit,
-        }),
-        prisma.product.count({ where }),
-    ]);
-    return {
-        products: products.map((product) => normalizeProduct(product)),
-        meta: { page, limit, totalResults, totalPages: Math.ceil(totalResults / limit) },
-    };
-};
-
-const getProductForReview = async (productId) => {
-    const product = await prisma.product.findUnique({ where: { id: productId }, select: productWithBalancesSelect });
-    if (!product) throw ApiError.notFound(messages.INVENTORY.PRODUCT_NOT_FOUND);
-    return normalizeProduct(product);
-};
-
-/**
- * Share the product lock with Owner edits and execution so review applies to exact label facts.
- * Review changes also advance the product version, invalidating stale edits and reviews.
- */
-const reviewProductCompliance = async (productId, input, reviewerId) => {
-    const { expectedUpdatedAt, complianceStatus, reviewNote } = input;
-    try {
-        const product = await prisma.$transaction(async (tx) => {
-            await tx.$queryRaw`SELECT id FROM products WHERE id = ${productId}::uuid FOR UPDATE`;
-            const current = await tx.product.findUnique({ where: { id: productId }, select: PRODUCT_SELECT });
-            if (!current) throw ApiError.notFound(messages.INVENTORY.PRODUCT_NOT_FOUND);
-            requireActiveProduct(current);
-            if (!current.compliance || current.compliance.complianceStatus === complianceStatus) {
-                throw ApiError.conflict(messages.INVENTORY.REVIEW_STATE_CONFLICT);
-            }
-            if (complianceStatus === PRODUCT_COMPLIANCE_STATUS.REVIEWED) {
-                requireCompleteInventoryProduct(current);
-                if (!isInventoryProductReviewable(current)) {
-                    throw ApiError.badRequest(messages.INVENTORY.REVIEW_FACTS_REQUIRED);
-                }
-            }
-            const checkedAt = new Date(Math.max(Date.now(), current.updatedAt.getTime() + 1));
-            const changed = await tx.product.updateMany({
-                where: { id: productId, updatedAt: versionRange(expectedUpdatedAt) },
-                data: { updatedAt: checkedAt },
-            });
-            if (changed.count !== 1) throw ApiError.conflict(messages.INVENTORY.CHANGE_CONFLICT);
-            const reviewed = await tx.productCompliance.updateMany({
-                where: { productId, complianceStatus: current.compliance.complianceStatus },
-                data: { complianceStatus, checkedBy: reviewerId, checkedAt, reviewNote, updatedAt: checkedAt },
-            });
-            if (reviewed.count !== 1) throw ApiError.conflict(messages.INVENTORY.CHANGE_CONFLICT);
-            return tx.product.findUnique({ where: { id: productId }, select: productWithBalancesSelect });
-        }, { isolationLevel: 'Serializable' });
+        emitInventoryNotifications(notifications);
         return normalizeProduct(product);
     } catch (error) {
         return mapWriteError(error);
@@ -833,10 +779,73 @@ const saveInventoryNotifications = async (client, recipients, data) => Promise.a
     })),
 );
 
+/** Deliver persisted inventory notices after commit without undoing a saved movement on socket failure. */
 const emitInventoryNotifications = (notifications) => {
     for (const notification of notifications) {
-        emitNotification(notification.accountId, 'notification:new', { id: notification.id });
+        try {
+            emitNotification(notification.accountId, 'notification:new', { id: notification.id });
+        } catch (_) {
+            logger.warn('Inventory notification delivery failed after commit.');
+        }
     }
+};
+
+/** Resolve recipients from persisted drafts/templates, never from another staff member's browser state. */
+const planningReferences = async (client, productId, farmId, ownerId) => {
+    const [templates, protocols] = await Promise.all([
+        client.productionProtocolTemplate.findMany({
+            where: { farmId, items: { some: { productId } } },
+            select: { id: true, title: true, versionNo: true, createdBy: true },
+        }),
+        client.protocol.findMany({
+            where: { status: PROTOCOL_STATUS.DRAFT, season: { pond: { farmId, farm: { ownerId } },
+                status: { in: [SEASON_STATUS.PLANNING, SEASON_STATUS.ACTIVE] } }, items: { some: { productId } } },
+            select: { id: true, title: true, seasonId: true, protocolType: true, diseaseCaseId: true },
+        }),
+    ]);
+    const assignments = protocols.length ? await client.seasonPersonnelAssignment.findMany({
+        where: { seasonId: { in: [...new Set(protocols.map(row => row.seasonId))] }, unassignedAt: null,
+            role: PERSONNEL_ROLE.EXPERT, account: { status: ACCOUNT_STATUS.ACTIVE, managedByOwnerId: ownerId } },
+        select: { seasonId: true, accountId: true },
+    }) : [];
+    return { templates, protocols, assignments };
+};
+
+/** Invalidate affected templates and draft revisions without changing approved prescriptions. */
+const invalidatePlanningReferences = async (client, references, now) => {
+    if (references.templates.length) await client.productionProtocolTemplate.updateMany({
+        where: { id: { in: references.templates.map(row => row.id) } },
+        data: { status: 'inactive', versionNo: { increment: 1 }, updatedAt: now },
+    });
+    if (references.protocols.length) await client.protocol.updateMany({
+        where: { id: { in: references.protocols.map(row => row.id) }, status: PROTOCOL_STATUS.DRAFT },
+        data: { updatedAt: now },
+    });
+};
+
+/** Notify current protocol participants and active template authors about affected materials. */
+const notifyPlanningReferences = async (client, references, ownerId, message) => {
+    const creators = references.templates.length ? await client.account.findMany({
+        where: { id: { in: [...new Set(references.templates.map(row => row.createdBy))] },
+            role: 'EXPERT', status: ACCOUNT_STATUS.ACTIVE, managedByOwnerId: ownerId },
+        select: { id: true },
+    }) : [];
+    const activeCreators = new Set(creators.map(row => row.id));
+    const notifications = [];
+    for (const template of references.templates) {
+        if (activeCreators.has(template.createdBy)) notifications.push(...await saveInventoryNotifications(client, [template.createdBy], {
+            ...message, type: NOTIFICATION_TYPE.SYSTEM, referenceType: 'production_protocol_template', referenceId: template.id,
+        }));
+    }
+    for (const protocol of references.protocols) {
+        const recipients = [...new Set(references.assignments.filter(row => row.seasonId === protocol.seasonId).map(row => row.accountId))];
+        notifications.push(...await saveInventoryNotifications(client, recipients, {
+            ...message, type: NOTIFICATION_TYPE.SYSTEM,
+            referenceType: protocol.protocolType === 'TREATMENT' ? 'disease_case_material' : 'season_protocol_material',
+            referenceId: protocol.diseaseCaseId ?? protocol.seasonId,
+        }));
+    }
+    return notifications;
 };
 
 /** Stop new use and cancel unexecuted schedules while retaining stock and history. */
@@ -861,13 +870,24 @@ const changeStatus = async (farmId, productId, ownerId, status) => {
                     where: { productId, status: OPERATION_STATUS.PLANNED, execution: null },
                     select: { id: true, seasonId: true },
                 }) : [];
-            const seasonIds = [...new Set(schedules.map((schedule) => schedule.seasonId))].sort();
+            const scheduleCounts = new Map();
+            for (const schedule of schedules) scheduleCounts.set(schedule.seasonId, (scheduleCounts.get(schedule.seasonId) ?? 0) + 1);
+            const seasonIds = [...scheduleCounts.keys()].sort();
             for (const seasonId of seasonIds) {
                 await tx.$queryRaw`SELECT id FROM aquaculture_seasons WHERE id = ${seasonId}::uuid FOR UPDATE`;
             }
             await tx.$queryRaw`SELECT id FROM products WHERE id = ${productId}::uuid FOR UPDATE`;
             const current = await findOwnedProduct(tx, farmId, productId, ownerId);
+            if (current.status === status) return tx.product.findUnique({
+                where: { id: productId }, select: productWithBalancesSelect,
+            });
             const changedAt = new Date(Math.max(Date.now(), current.updatedAt.getTime() + 1));
+            if (status === PRODUCT_STATUS.ACTIVE) {
+                requireCompleteInventoryProduct(current);
+                if (!current.compliance.checkedBy || !current.compliance.checkedAt) {
+                    throw ApiError.badRequest(messages.INVENTORY.INCOMPLETE_PRODUCT);
+                }
+            }
             const changed = await tx.product.updateMany({
                 where: {
                     id: productId,
@@ -882,6 +902,14 @@ const changeStatus = async (farmId, productId, ownerId, status) => {
             if (changed.count !== 1) {
                 throw new ApiError(httpStatus.CONFLICT, messages.INVENTORY.CHANGE_CONFLICT);
             }
+            if (status === PRODUCT_STATUS.INACTIVE) {
+                const references = await planningReferences(tx, productId, farmId, ownerId);
+                await invalidatePlanningReferences(tx, references, changedAt);
+                notifications.push(...await notifyPlanningReferences(tx, references, ownerId, {
+                    title: messages.INVENTORY.MATERIAL_INACTIVE_TITLE,
+                    content: messages.INVENTORY.MATERIAL_INACTIVE_CONTENT(current.name),
+                }));
+            }
             if (schedules.length) {
                 const cancelled = await tx.operationSchedule.updateMany({
                     where: { productId, status: OPERATION_STATUS.PLANNED, execution: null },
@@ -895,14 +923,15 @@ const changeStatus = async (farmId, productId, ownerId, status) => {
                     },
                 });
                 if (cancelled.count) {
-                    const recipients = await inventoryRecipients(tx, farmId, productId, ownerId, seasonIds);
-                    notifications = await saveInventoryNotifications(tx, recipients, {
-                        title: messages.INVENTORY.SCHEDULES_CANCELLED_TITLE,
-                        content: messages.INVENTORY.SCHEDULES_CANCELLED_CONTENT(current.name, cancelled.count),
-                        type: NOTIFICATION_TYPE.OPERATION_CANCELLED,
-                        referenceType: 'product',
-                        referenceId: productId,
-                    });
+                    for (const seasonId of seasonIds) {
+                        const recipients = await inventoryRecipients(tx, farmId, productId, ownerId, [seasonId]);
+                        notifications.push(...await saveInventoryNotifications(tx, recipients, {
+                            title: messages.INVENTORY.SCHEDULES_CANCELLED_TITLE,
+                            content: messages.INVENTORY.SCHEDULES_CANCELLED_CONTENT(current.name, scheduleCounts.get(seasonId)),
+                            type: NOTIFICATION_TYPE.OPERATION_CANCELLED,
+                            referenceType: 'aquaculture_season', referenceId: seasonId,
+                        }));
+                    }
                 }
             }
             return tx.product.findUnique({
@@ -926,12 +955,15 @@ const canDeleteProduct = async (client, productId) => {
         OR EXISTS(SELECT 1 FROM inventory_transactions WHERE product_id = ${productId}::uuid)
         OR EXISTS(SELECT 1 FROM protocol_items i JOIN protocols p ON p.id = i.protocol_id
             WHERE i.product_id = ${productId}::uuid AND p.status <> 'draft')
+        OR EXISTS(SELECT 1 FROM protocol_status_history h WHERE h.event_type = 'SUBMITTED'
+            AND h.event_data->'snapshot'->'items' @> jsonb_build_array(jsonb_build_object('productId', ${productId}::text)))
         OR EXISTS(SELECT 1 FROM operation_schedules WHERE product_id = ${productId}::uuid)
         OR EXISTS(SELECT 1 FROM operation_executions WHERE actual_product_id = ${productId}::uuid)
     ) AS allowed`);
     return result.allowed;
 };
 
+/** Bind deletion confirmation to the product and every referencing planning revision. */
 const productDeletionImpact = async (client, product) => {
     if (!await canDeleteProduct(client, product.id)) return { allowed: false, token: null, message: null };
     // Keep the database timestamp precision in the confirmation fingerprint.
@@ -955,12 +987,13 @@ const deletedMaterialDetails = (product, details, ownerId, now) => {
     const proposed = details?.proposed ?? {
         name: product.name, description: product.description, category: product.category.toLowerCase(),
         unit: product.unit.toLowerCase(), conversionUnit: product.conversionUnit?.toLowerCase() ?? null,
-        conversionQuantity: product.conversionQuantity == null ? null : String(product.conversionQuantity),
+        conversionQuantity: product.conversionQuantity == null ? null : Number(product.conversionQuantity),
         manufacturer: product.manufacturer, productCompliance: product.compliance, imageUrls: product.imageUrls,
         recommendationReason: product.recommendationReason || messages.INVENTORY.DELETED_MATERIAL_REPLACEMENT,
     };
     return JSON.parse(JSON.stringify({ proposed, ownerOverrides: details?.ownerOverrides ?? null, review: {
-        ...details?.review, deletedProductId: product.id, deletedAt: now.toISOString(), deletedBy: ownerId,
+        checkedBy: null, checkedAt: null,
+        deletedProductId: product.id, deletedAt: now.toISOString(), deletedBy: ownerId,
     } }));
 };
 
@@ -968,23 +1001,7 @@ const deletedMaterialDetails = (product, details, ownerId, now) => {
  * Keep identity immutable after an order is issued or stock history is recorded.
  * Draft protocol references alone do not lock edits; cancelled schedules retain their history.
  */
-const hasProductUsage = async (client, productId) => {
-    const counts = await Promise.all([
-        client.inventoryTransaction.count({ where: { productId } }),
-        client.inventoryBalance.count({ where: { productId } }),
-        client.operationSchedule.count({ where: { productId } }),
-        client.protocolItem.count({ where: { productId, protocol: { status: { not: PROTOCOL_STATUS.DRAFT } } } }),
-        client.operationExecution.count({
-            where: {
-                OR: [{ actualProductId: productId }, {
-                    actualProductId: null,
-                    schedule: { productId },
-                }],
-            },
-        }),
-    ]);
-    return counts.some((count) => count > 0);
-};
+const hasProductUsage = async (client, productId) => !await canDeleteProduct(client, productId);
 
 /**
  * Delete unused stock masters after confirming affected plans; retain their material snapshots.
@@ -1003,6 +1020,7 @@ const deleteProduct = async (farmId, productId, ownerId, input = {}) => {
                     ? messages.INVENTORY.CHANGE_CONFLICT : impact.message);
             }
             const now = new Date();
+            const references = await planningReferences(tx, productId, farmId, ownerId);
             const templateItems = await tx.productionProtocolTemplateItem.findMany({
                 where: { productId }, select: { id: true, recommendedProductDetails: true },
             });
@@ -1025,6 +1043,7 @@ const deleteProduct = async (farmId, productId, ownerId, input = {}) => {
             for (const item of protocolItems) {
                 const updated = await tx.protocolItem.updateMany({
                     where: { id: item.id, productId }, data: { productId: null, materialSnapshot: Prisma.DbNull,
+                        recommendedProductName: product.name, recommendedCategory: product.category,
                         recommendedProductDetails: deletedMaterialDetails(product, item.recommendedProductDetails, ownerId, now) },
                 });
                 if (updated.count !== 1) throw ApiError.conflict(messages.INVENTORY.CHANGE_CONFLICT);
@@ -1044,11 +1063,16 @@ const deleteProduct = async (farmId, productId, ownerId, input = {}) => {
             if (changed.count !== 1) {
                 throw new ApiError(httpStatus.CONFLICT, messages.INVENTORY.CHANGE_CONFLICT);
             }
-            return saveInventoryNotifications(tx, [ownerId], {
+            const expertNotifications = await notifyPlanningReferences(tx, references, ownerId, {
+                title: messages.INVENTORY.DELETED_NOTIFICATION_TITLE,
+                content: messages.INVENTORY.DELETED_NOTIFICATION_CONTENT(product.name,
+                    impact.templates.map(row => row.title), impact.protocols.map(row => row.title)),
+            });
+            return [...expertNotifications, ...await saveInventoryNotifications(tx, [ownerId], {
                 type: NOTIFICATION_TYPE.SYSTEM, title: messages.INVENTORY.DELETED_NOTIFICATION_TITLE,
                 content: messages.INVENTORY.DELETED_NOTIFICATION_CONTENT(product.name, impact.templates.map(row => row.title), impact.protocols.map(row => row.title)),
                 referenceType: 'inventory_product', referenceId: productId,
-            });
+            })];
         }, { isolationLevel: 'Serializable' });
         emitInventoryNotifications(notifications);
     } catch (error) {
@@ -1120,6 +1144,7 @@ const getProductStock = async (client, productId) => {
     return decimal(stock._sum.quantity);
 };
 
+/** Load the committed movement with its lot and ownership context before accepting a retry. */
 const findIdempotentTransaction = (client, idempotencyKey) =>
     client.inventoryTransaction.findUnique({
         where: { idempotencyKey },
@@ -1176,6 +1201,7 @@ const isIdempotencyUniqueError = (error) =>
     error?.code === 'P2002'
     && JSON.stringify(error.meta?.target || '').includes('idempotency');
 
+/** Return the original movement and current stock instead of recording the same movement twice. */
 const buildReplayResult = async (client, existing) => {
     const existingTransaction = { ...existing };
     delete existingTransaction.product;
@@ -1596,9 +1622,6 @@ const getInventoryHistory = async (farmId, ownerId, query) => {
 };
 
 module.exports = {
-    getProductsForReview: legacyRead.guardWrite(getProductsForReview),
-    getProductForReview: legacyRead.guardWrite(getProductForReview),
-    reviewProductCompliance: legacyRead.guardWrite(reviewProductCompliance),
     getProducts: async (...args) => (await legacyRead.isV2() ? getProducts : legacyRead.getProducts)(...args),
     getProduct: async (...args) => (await legacyRead.isV2() ? getProduct : legacyRead.getProduct)(...args),
     createProduct: legacyRead.guardWrite(createProduct),

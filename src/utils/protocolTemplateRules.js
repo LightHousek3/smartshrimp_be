@@ -2,12 +2,13 @@ const messages = require('../constants/messages.js');
 const { DoseBasis, OperationType, ProductUnit } = require('@prisma/client');
 const ApiError = require('./ApiError');
 
+/** Use the package conversion unit to offer compatible mass or volume dose units. */
 const doseUnitsForProduct = ({ unit, conversionUnit }) => {
     const baseUnit = ['PACK', 'BOTTLE'].includes(unit) ? conversionUnit : unit;
     if (['MG', 'G', 'KG'].includes(baseUnit))
         return [ProductUnit.G, ProductUnit.KG];
     if (['ML', 'L'].includes(baseUnit)) return [ProductUnit.ML, ProductUnit.L];
-    return [ProductUnit.PCS];
+    return [];
 };
 
 /** DOC is one-based; a dose is for one occurrence, never an automatically prescribed daily total. */

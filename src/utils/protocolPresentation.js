@@ -1,5 +1,7 @@
 const { createHash } = require('crypto');
 const v2 = require('./productionProtocolV2');
+const { materialRevision } = require('./protocolMaterial');
+const { PRODUCTION_PROTOCOL_LIMITS } = require('../constants');
 
 // PostgreSQL TIME is a wall-clock value, represented by Prisma on a fixed UTC date.
 const timeText = value => value == null ? null : value.toISOString().slice(11, 23);
@@ -36,6 +38,7 @@ const groupItems = (items, dayLabel = 'DOC') => {
     return stages;
 };
 
+/** Serialize exact dose text and retain snapshot revisions when live catalog facts change. */
 const wireItem = entry => ({
     ...(entry.recommendedProductDetails && { recommendedProductDetails: entry.recommendedProductDetails,
         recommendedManufacturerId: entry.recommendedManufacturerId ?? null }),
@@ -43,6 +46,7 @@ const wireItem = entry => ({
     id: entry.id,
     operationType: entry.operationType,
     productId: entry.productId,
+    ...(entry.productId && { productRevision: materialRevision(entry.materialSnapshot ?? entry.product ?? {}) }),
     recommendedProductName: entry.recommendedProductName,
     recommendedCategory: entry.recommendedCategory,
     repeatIntervalDays: entry.repeatIntervalDays,
@@ -50,10 +54,12 @@ const wireItem = entry => ({
     doseValue: String(entry.doseValue),
     doseUnit: entry.doseUnit,
     instructions: entry.instructions,
-    dueAtMinutes: entry.dueAtMinutes ?? null,
+    dueAtMinutes: entry.dueAtMinutes ?? PRODUCTION_PROTOCOL_LIMITS.defaultDueAtMinutes,
     product: entry.product && {
         id: entry.product.id, name: entry.product.name, category: entry.product.category,
         unit: entry.product.unit, status: entry.product.status,
+        materialRevision: materialRevision(entry.materialSnapshot ?? entry.product),
+        needsReview: Boolean(entry.materialSnapshot && materialRevision(entry.materialSnapshot) !== materialRevision(entry.product)),
     },
 });
 

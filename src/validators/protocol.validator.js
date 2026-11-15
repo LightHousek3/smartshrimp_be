@@ -48,7 +48,7 @@ const review = {
         materialSelections: Joi.when('decision', { is: 'APPROVE', then: Joi.array().max(1000).unique('itemId').items(
             Joi.object({ itemId: uuid.required(), productId: uuid.required() }).unknown(false)), otherwise: Joi.forbidden() }),
         reason: Joi.when('decision', {
-            is: 'REJECT', then: Joi.string().trim().min(1).max(2000).required(), otherwise: Joi.forbidden(),
+            is: 'REJECT', then: Joi.string().trim().min(1).max(500).required(), otherwise: Joi.forbidden(),
         }),
     }).unknown(false),
 };

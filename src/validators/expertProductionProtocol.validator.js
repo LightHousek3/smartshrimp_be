@@ -15,13 +15,12 @@ const proposal = Joi.object({
     name: Joi.string().trim().min(1).max(255).required(),
     description: Joi.string().max(500).allow('', null),
     category: Joi.string().uppercase().valid('FEED', 'MEDICINE', 'MINERAL', 'CHEMICAL', 'OTHER').required(),
-    unit: Joi.string().uppercase().valid('KG', 'G', 'L', 'ML', 'PACK', 'BOTTLE', 'PCS').required(),
-    conversionUnit: Joi.string().uppercase().valid('KG', 'G', 'MG', 'L', 'ML', 'PCS').allow(null),
+    unit: Joi.string().uppercase().valid('KG', 'G', 'L', 'ML', 'PACK', 'BOTTLE').required(),
+    conversionUnit: Joi.string().uppercase().valid('KG', 'G', 'MG', 'L', 'ML').allow(null),
     conversionQuantity: Joi.alternatives().try(Joi.number().greater(0), Joi.string().pattern(/^(?:0|[1-9]\d{0,9})(?:\.\d{1,4})?$/)).allow(null),
     manufacturerId: uuid().empty(null),
     manufacturer: manufacturer.keys({ supplierType: Joi.string().lowercase().valid('manufacturer', 'both') }).unknown(true).empty(null),
-    productCompliance: productCompliance.keys({ complianceStatus: Joi.any().strip(), reviewNote: Joi.any().strip(),
-        checkedBy: Joi.any().strip(), checkedAt: Joi.any().strip() }).unknown(true).required(),
+    productCompliance: productCompliance.required(),
     recommendationReason: Joi.string().max(500).allow('', null),
     imageUrls: Joi.array().min(1).max(3).unique().items(Joi.string().uri({ scheme: ['https'] }).max(2000)).required(),
 }).xor('manufacturerId', 'manufacturer').unknown(true);
@@ -35,6 +34,7 @@ const item = Joi.object({
     id: uuid(),
     operationType: Joi.string().valid(...Object.values(OPERATION_TYPE)).required(),
     productId: uuid().allow(null).default(null),
+    productRevision: Joi.string().pattern(/^[a-f0-9]{64}$/),
     recommendedProductName: Joi.string().trim().max(255).allow(null).default(null),
     recommendedCategory: Joi.string().valid(...PRODUCTION_PROTOCOL_CATEGORIES).allow(null).default(null),
     recommendedManufacturerId: uuid().allow(null),
@@ -44,7 +44,12 @@ const item = Joi.object({
         review: Joi.any().strip(),
     }).allow(null).custom((value, helpers) => JSON.stringify(value).length <= 100000 ? value : helpers.error('any.invalid')),
     dailyDoseIncrement: decimal(10, 4, true),
-    dueAtMinutes: Joi.number().integer().min(0).max(2147483647).allow(null),
+    dueAtMinutes: Joi.number().integer().min(PRODUCTION_PROTOCOL_LIMITS.minDueAtMinutes).max(2147483647)
+        .empty(null).default(PRODUCTION_PROTOCOL_LIMITS.defaultDueAtMinutes).messages({
+            'number.min': messages.PRODUCTION_PROTOCOL.DUE_WINDOW_INVALID,
+            'number.max': messages.PRODUCTION_PROTOCOL.DUE_WINDOW_TOO_LARGE,
+            'number.integer': messages.PRODUCTION_PROTOCOL.DUE_WINDOW_INTEGER,
+        }),
     firstDayOffset: Joi.number().integer().min(0).max(2147483646),
     lastDayOffset: Joi.number().integer().min(0).max(2147483646),
     recurrenceAnchorOffset: Joi.number().integer().min(0).max(2147483646),
@@ -178,12 +183,11 @@ const update = {
     }).or(...Object.keys(header)).custom(validateContentVersion).unknown(false),
 };
 
-/** Cancellation requires the current content token and a nonblank reason for the status history. */
-const cancel = {
+/** Deleting an unpublished draft requires its current revision. */
+const remove = {
     params: protocolParams,
     body: Joi.object({
         revision: Joi.string().pattern(/^[a-f0-9]{64}$/).required(),
-        reason: Joi.string().trim().max(2000).required(),
     }).unknown(false),
 };
 
@@ -212,7 +216,7 @@ module.exports = {
     detail,
     create,
     update,
-    cancel,
+    remove,
     submit,
     templates,
     templateDetail,

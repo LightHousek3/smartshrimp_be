@@ -4,11 +4,14 @@ const { quantityComparison, timingComparison, TIMING } = require('./protocolExec
 
 const DAY_MS = 86400000;
 const calendarAt = (anchor, day) => new Date(Date.parse(anchor) + (day - 1) * DAY_MS).toISOString().slice(0, 10);
+/** Count stocking as day one using Vietnam calendar dates rather than elapsed 24-hour periods. */
 const cultureDay = (stockingDate, at) => stockingDate
     ? Math.round((Date.parse(dateInVietnam(at)) - Date.parse(stockingDate.toISOString().slice(0, 10))) / DAY_MS) + 1 : null;
+/** Use the treatment start for treatment days and the stocking date for production culture days. */
 const anchorOf = protocol => protocol.protocolType === 'TREATMENT'
     ? protocol.treatmentStartAt && dateInVietnam(protocol.treatmentStartAt)
     : protocol.season.stockingDate?.toISOString().slice(0, 10);
+/** Combine the prescription day and planned local time into an absolute Vietnam-time occurrence. */
 const scheduledAtDay = (protocol, item, day) => {
     const anchor = anchorOf(protocol);
     return anchor && item.plannedTime ? new Date(`${calendarAt(anchor, day)}T${item.plannedTime.toISOString().slice(11, 23)}+07:00`) : null;
@@ -23,6 +26,35 @@ const occurrenceRange = item => {
     return { first, last: count ? first + (count - 1) * interval : null, count };
 };
 
+/** The full prescription, including unmaterialized occurrences, defines its last deadline. */
+const courseEndsAt = protocol => {
+    if (!anchorOf(protocol) || !protocol.items?.length) return null;
+    let last = -Infinity;
+    for (const item of protocol.items) {
+        const range = occurrenceRange(item);
+        if (!range.count) continue;
+        const scheduled = scheduledAtDay(protocol, item, range.last);
+        if (!scheduled || !Number.isInteger(item.dueAtMinutes) || item.dueAtMinutes < 10) return null;
+        last = Math.max(last, scheduled.getTime() + item.dueAtMinutes * 60000);
+    }
+    return Number.isFinite(new Date(last).getTime()) ? new Date(last) : null;
+};
+
+/** Locate the next real occurrence without expanding a potentially long prescription. */
+const nextOccurrences = (protocol, at) => {
+    const today = cultureDay(protocol.season.stockingDate, at);
+    if (!today) return [];
+    return protocol.items.flatMap(item => {
+        const { first, last, count } = occurrenceRange(item);
+        if (!count || !item.plannedTime) return [];
+        let day = first + Math.max(0, Math.ceil((today - first) / item.repeatIntervalDays)) * item.repeatIntervalDays;
+        let scheduledAt = scheduledAtDay(protocol, item, day);
+        if (scheduledAt < at) { day += item.repeatIntervalDays; scheduledAt = scheduledAtDay(protocol, item, day); }
+        return day <= last ? [{ item, doc: day, scheduledAt }] : [];
+    }).sort((a, b) => a.scheduledAt - b.scheduledAt);
+};
+
+/** Generate the three-day treatment window from its calendar anchor, retaining slots still within their deadline. */
 const treatmentOccurrences = (protocol, now) => {
     if (!protocol.treatmentStartAt) return [];
     const today = Date.parse(dateInVietnam(now));
@@ -70,4 +102,4 @@ const courseCoverage = (protocol, schedules, now = new Date()) => {
         complete: expectedCount > 0 && acceptedCount === expectedCount };
 };
 
-module.exports = { cultureDay, anchorOf, scheduledAtDay, occurrenceRange, treatmentOccurrences, courseCoverage };
+module.exports = { cultureDay, anchorOf, scheduledAtDay, occurrenceRange, treatmentOccurrences, courseCoverage, courseEndsAt, nextOccurrences };

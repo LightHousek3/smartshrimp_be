@@ -21,8 +21,8 @@ module.exports = {
         relatedCaseId: uuid, aiDiagnosisId: uuid, attachments,
     }) },
     respond: { params, query: Joi.object({}), body: Joi.object({
-        responseType: Joi.string().valid(...TECHNICIAN_RESPONSE_TYPES).required(),
+        responseType: Joi.string().valid(...TECHNICIAN_RESPONSE_TYPES).default('NORMAL'),
         message: text(CASE_LIMITS.TEXT).required(), attachments,
-        expectedUpdatedAt: Joi.date().iso().required(),
+        replyToResponseId: uuid,
     }) },
 };

@@ -1,9 +1,8 @@
 const ApiError = require('./ApiError');
 const { messages, PRODUCT_REGULATORY_TYPE } = require('../constants');
-const { checkIngredients, requireUsableIngredients } = require('./inventorySubstances');
+const { requireUsableIngredients } = require('./inventorySubstances');
 
-const classifiedTypes = Object.values(PRODUCT_REGULATORY_TYPE)
-    .filter((type) => type !== PRODUCT_REGULATORY_TYPE.UNCLASSIFIED);
+const classifiedTypes = Object.values(PRODUCT_REGULATORY_TYPE);
 
 const receiptPrefixes = {
     [PRODUCT_REGULATORY_TYPE.FEED]: '01-',
@@ -29,15 +28,18 @@ const complianceConsistencyIssue = (compliance) => {
     const registration = typeof compliance.registrationNumber === 'string'
         ? compliance.registrationNumber.trim() : '';
     const expectedPrefix = receiptPrefixes[compliance.regulatoryType];
-    if (registration && ((expectedPrefix
-        && (!registration.startsWith(expectedPrefix) || registration.length === expectedPrefix.length))
-        || (compliance.regulatoryType === PRODUCT_REGULATORY_TYPE.MEDICINE
-            && /^(?:01|02|03)-/u.test(registration)))) {
-        return messages.MATERIAL_COMPLIANCE.REGISTRATION_TYPE_MISMATCH;
+    if (registration && expectedPrefix && (!new RegExp(`^${expectedPrefix}[0-9]{6}$`, 'u').test(registration)
+        || registration.endsWith('-000000'))) {
+        return messages.MATERIAL_COMPLIANCE.REGISTRATION_FORMAT(expectedPrefix);
+    }
+    if (registration && compliance.regulatoryType === PRODUCT_REGULATORY_TYPE.MEDICINE
+        && /^(?:01|02|03)-/u.test(registration)) {
+        return messages.MATERIAL_COMPLIANCE.MEDICINE_REGISTRATION_FORMAT;
     }
     return null;
 };
 
+/** Check required catalog and declaration facts without inferring legal approval. */
 const isCompleteInventoryProduct = (product) => {
     const compliance = product?.compliance;
     const textPresent = (value) => typeof value === 'string' && value.trim().length > 0;
@@ -52,19 +54,9 @@ const isCompleteInventoryProduct = (product) => {
         && Number(compliance.withdrawalDays) >= 0);
 };
 
-/**
- * Completeness confirms Owner-supplied facts, not independent regulatory verification.
- * Explicit false and zero are valid facts; at least one label image is required.
- */
-const isInventoryProductReviewable = (product) => isCompleteInventoryProduct(product)
-    && checkIngredients(product.compliance.ingredientsText).status === 'not_detected'
-    && !complianceConsistencyIssue(product.compliance);
-
-/**
- * Operational callers check essential facts even when a reviewed record already exists.
- */
+/** Validate declared label facts at catalog creation, amendment and restoration. */
 const requireCompleteInventoryProduct = (product) => {
-    requireUsableIngredients(product?.compliance?.ingredientsText);
+    requireUsableIngredients([product?.name, product?.description, product?.compliance?.ingredientsText].filter(Boolean).join('\n'));
     if (!hasLabelImages(product)) throw ApiError.badRequest(messages.INVENTORY.LABEL_IMAGE_REQUIRED);
     if (!isCompleteInventoryProduct(product)) {
         throw ApiError.badRequest(messages.INVENTORY.INCOMPLETE_PRODUCT);
@@ -74,5 +66,5 @@ const requireCompleteInventoryProduct = (product) => {
 };
 
 module.exports = {
-    requireCompleteInventoryProduct, isInventoryProductReviewable, complianceConsistencyIssue, hasLabelImages,
+    requireCompleteInventoryProduct, complianceConsistencyIssue, hasLabelImages,
 };
