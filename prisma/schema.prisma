@@ -966,6 +966,7 @@ model Task {
   completedAt        DateTime?          @map("completed_at") @db.Timestamptz(6)
   cancelledAt        DateTime?          @map("cancelled_at") @db.Timestamptz(6)
   cancellationReason String?            @map("cancellation_reason") @db.VarChar(500)
+  evidenceUrls       String[]           @default([]) @map("evidence_urls")
   farm               Farm               @relation(fields: [farmId], references: [id], onDelete: Restrict)
   season             AquacultureSeason? @relation(fields: [seasonId], references: [id], onDelete: Restrict)
   assignee           Account            @relation("TaskAssignee", fields: [assignedTo], references: [id], onDelete: Restrict)
