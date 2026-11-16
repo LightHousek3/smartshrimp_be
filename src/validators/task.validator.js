@@ -29,6 +29,18 @@ module.exports = {
     }) },
     progress: { params, body: Joi.object({
         status: Joi.string().valid('IN_PROGRESS', 'COMPLETED').required(),
+        evidenceUrls: Joi.when('status', {
+            is: 'COMPLETED',
+            then: Joi.array().max(TASK_LIMITS.EVIDENCE_IMAGES).unique().items(
+                Joi.string().uri({ scheme: ['https'] }).max(TASK_LIMITS.EVIDENCE_URL),
+            ).messages({
+                'array.max': messages.TASK.INVALID_EVIDENCE,
+                'array.unique': messages.TASK.INVALID_EVIDENCE,
+                'string.uri': messages.TASK.INVALID_EVIDENCE,
+                'string.max': messages.TASK.INVALID_EVIDENCE,
+            }),
+            otherwise: Joi.forbidden().messages({ 'any.unknown': messages.TASK.EVIDENCE_ON_COMPLETION_ONLY }),
+        }),
     }) },
     options: { query: Joi.object({ farmId: uuid }) },
     create: { body: Joi.object({ ...fields, title: fields.title.required(),

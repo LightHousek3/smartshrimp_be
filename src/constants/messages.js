@@ -403,6 +403,8 @@ const messages = {
         INVALID_TRANSITION:
             'Trạng thái nhiệm vụ đã thay đổi hoặc không cho phép thao tác này. Vui lòng tải lại.',
         COMPLETED_NOTIFICATION: 'Kỹ thuật viên đã hoàn thành nhiệm vụ.',
+        INVALID_EVIDENCE: 'Chọn tối đa 5 ảnh minh chứng.',
+        EVIDENCE_ON_COMPLETION_ONLY: 'Chỉ được gửi ảnh minh chứng khi hoàn thành nhiệm vụ.',
         NOT_FOUND: 'Không tìm thấy nhiệm vụ.',
         TERMINAL: 'Nhiệm vụ đã hoàn thành hoặc đã hủy, không thể thay đổi.',
         CONFLICT: 'Nhiệm vụ hoặc phân công đã thay đổi. Vui lòng tải lại.',

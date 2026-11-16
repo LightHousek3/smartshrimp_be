@@ -11,11 +11,13 @@ const listSelect = {
 const detailSelect = {
     ...listSelect, description: true, farmId: true, seasonId: true,
     assignedTo: true, startedAt: true, completedAt: true,
-    cancellationReason: true, createdAt: true, assigner: { select: identity },
+    cancellationReason: true, evidenceUrls: true, createdAt: true, assigner: { select: identity },
     season: { select: { id: true, name: true, pond: { select: { id: true, name: true } } } },
     farm: { select: { id: true, name: true } },
 };
+/** Expose the display identity without returning the account's private fields. */
 const nameOf = (account) => account && ({ id: account.id, name: account.fullName || account.email });
+/** Flatten the season context while preserving the selected task and evidence fields. */
 const present = ({ assignee, assigner, season, ...row }) => ({
     ...row,
     ...(assignee !== undefined && { assignee: nameOf(assignee) }),
@@ -23,8 +25,11 @@ const present = ({ assignee, assigner, season, ...row }) => ({
     ...(season !== undefined && { season: season ? { id: season.id, name: season.name } : null,
         pond: season?.pond ?? null }),
 });
+/** Restrict task reads and mutations to farms owned by the authenticated owner. */
 const scope = (ownerId) => ({ farm: { ownerId } });
+/** Only active owned farms can receive new assignments. */
 const activeFarm = (ownerId) => ({ ownerId, status: FARM_STATUS.ACTIVE });
+/** Require an active technician managed by the owner when resolving assignments. */
 const technician = (ownerId) => ({ managedByOwnerId: ownerId, role: 'TECHNICIAN', status: 'ACTIVE' });
 
 /**
@@ -125,6 +130,7 @@ const mutate = async (operation) => {
         throw error;
     }
 };
+/** Persist an assignee notification on the same client as the task mutation. */
 const notify = (tx, task, type, content) => tx.notification.create({ data: {
     accountId: task.assignedTo, title: task.title, type, content, referenceType: 'task', referenceId: task.id,
 }, select: { id: true, accountId: true } });
@@ -152,6 +158,7 @@ const createTask = (ownerId, input) => mutate(async (tx) => {
     return { task: await getTask(ownerId, row.id, tx), notification };
 });
 
+/** Compare nullable fields and timestamps consistently when detecting owner edits. */
 const comparable = (value) => value instanceof Date ? value.toISOString() : value ?? null;
 
 /**
@@ -233,7 +240,7 @@ const listAssignedTasks = async (accountId, { group = 'TODO', page = 1, limit = 
 const getAssignedTask = async (accountId, taskId, client = prisma) => {
     const row = await client.task.findFirst({ where: { id: taskId, assignedTo: accountId },
         select: { ...assignedListSelect, description: true, startedAt: true, createdAt: true,
-            cancellationReason: true, assigner: { select: identity }, assignee: { select: identity },
+            cancellationReason: true, evidenceUrls: true, assigner: { select: identity }, assignee: { select: identity },
             farm: { select: { id: true, name: true } },
             season: { select: { id: true, name: true, pond: { select: { id: true, name: true } },
                 personnelAssignments: { where: { accountId, role: 'TECHNICIAN', unassignedAt: null },
@@ -248,9 +255,10 @@ const getAssignedTask = async (accountId, taskId, client = prisma) => {
 /**
  * Advance exactly one step using server time. Serializable isolation and the
  * state/assignee predicate reject racing starts, edits and cancellations.
- * Completion notification commits together with the transition.
+ * Optional evidence and the owner notification commit with completion. A rejected
+ * transition never attaches photos or changes previously recorded milestones.
  */
-const updateAssignedTaskStatus = (accountId, taskId, { status }) => mutate(async (tx) => {
+const updateAssignedTaskStatus = (accountId, taskId, { status, evidenceUrls = [] }) => mutate(async (tx) => {
     const current = await tx.task.findFirst({ where: { id: taskId, assignedTo: accountId },
         select: { id: true, title: true, status: true, startedAt: true,
             farm: { select: { ownerId: true } } } });
@@ -262,7 +270,8 @@ const updateAssignedTaskStatus = (accountId, taskId, { status }) => mutate(async
     const now = new Date();
     const timestamp = status === 'IN_PROGRESS' ? 'startedAt' : 'completedAt';
     const result = await tx.task.updateMany({ where: { id: taskId, assignedTo: accountId,
-        status: expected }, data: { status, [timestamp]: now } });
+        status: expected }, data: { status, [timestamp]: now,
+        ...(status === 'COMPLETED' && { evidenceUrls }) } });
     if (result.count !== 1) throw new ApiError(httpStatus.CONFLICT, messages.TASK.CONFLICT);
     const notification = status === 'COMPLETED' ? await tx.notification.create({ data: {
         accountId: current.farm.ownerId, title: current.title, type: 'TASK_COMPLETED',
