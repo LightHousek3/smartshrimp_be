@@ -14,6 +14,11 @@ const nullableText = (max) => Joi.string().trim().max(max)
     .custom((value) => value || null);
 const fields = {
     name: Joi.string().trim().replace(/\s+/gu, ' ')
+        .label('Tên nhà cung cấp')
+        .messages({
+            'any.required': 'Vui lòng nhập tên nhà cung cấp.',
+            'string.empty': 'Vui lòng nhập tên nhà cung cấp.',
+        })
         .min(1)
         .max(255),
     contactName: nullableText(255),

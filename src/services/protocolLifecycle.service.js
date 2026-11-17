@@ -494,8 +494,8 @@ const notifyCourseEnd = async (tx, protocol, season, notices, at) => {
                 content: `${protocol.title}: ${
                     treatment
                         ? continuation
-                            ? 'Đã có đợt điều trị tiếp theo được duyệt; áp dụng theo mốc Expert đã đặt.'
-                            : 'Expert cần quyết định chăm sóc tiếp theo. Phác đồ nuôi đang tạm hoãn.'
+                            ? 'Đã có đợt điều trị tiếp theo được duyệt; áp dụng theo mốc chuyên gia đã đặt.'
+                            : 'Chuyên gia cần quyết định chăm sóc tiếp theo. Phác đồ nuôi đang tạm hoãn.'
                         : 'Không tự kéo dài lịch vận hành.'
                 }`,
             },
@@ -826,7 +826,7 @@ const stop = async (
         const notification = await tx.notification.create({
             data: {
                 accountId,
-                title: 'Expert đã dừng phác đồ điều trị',
+                title: 'Chuyên gia đã dừng phác đồ điều trị',
                 content: `${protocol.title}: ${reason.trim()}`,
                 type: 'TREATMENT_PROTOCOL_ABORTED',
                 referenceType: 'disease_case',

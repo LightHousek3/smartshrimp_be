@@ -100,7 +100,11 @@ const productFields = {
     }).min(1),
     imageUrls: Joi.array().items(Joi.string().trim().uri({ scheme: ['https'] })
         .max(2048)).unique()
-        .min(1).max(3),
+        .min(1).max(3).label('Ảnh nhãn vật tư')
+        .messages({
+            'array.min': messages.INVENTORY.LABEL_IMAGE_REQUIRED,
+            'array.max': messages.INVENTORY.LABEL_IMAGE_LIMIT,
+        }),
     imageUrl: Joi.string().trim().uri({ scheme: ['https'] })
         .max(2048),
 };
@@ -176,7 +180,12 @@ const createProduct = {
             containsAntibiotic: Joi.boolean().required(),
             withdrawalDays: Joi.number().min(0).max(9999.999).precision(3).strict().required(),
         }).required(),
-    }).xor('imageUrl', 'imageUrls').custom(validateConversion),
+    }).xor('imageUrl', 'imageUrls')
+        .messages({
+            'object.missing': messages.INVENTORY.LABEL_IMAGE_REQUIRED,
+            'object.xor': messages.INVENTORY.IMAGE_FIELDS_CONFLICT,
+        })
+        .custom(validateConversion),
 };
 
 /**
@@ -247,7 +256,7 @@ const recordStockTransaction = {
                 return helpers.error('any.only');
             }
             return value;
-        }),
+        }).label('Thông tin giao dịch kho'),
 };
 
 /**
@@ -274,7 +283,7 @@ const getInventoryHistory = {
         .and('referenceType', 'referenceId')
         .custom((value, helpers) => {
             if (value.createdFrom && value.createdTo && value.createdFrom > value.createdTo) {
-                return helpers.message({ custom: 'createdFrom must not be after createdTo' });
+                return helpers.error('date.range');
             }
             return value;
         }),

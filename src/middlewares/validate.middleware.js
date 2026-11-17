@@ -2,6 +2,16 @@ const Joi = require('joi');
 const { ApiError, pick } = require('../utils');
 const { httpStatus } = require('../constants');
 const validationMessages = require('../constants/validationMessages');
+const validationLabels = require('../constants/validationLabels');
+
+// Replace only the label supplied by Joi; keep explicit human-readable schema labels intact.
+const displayMessage = (detail) => {
+    const label = detail.context?.label;
+    if (!label) return detail.message;
+    const field = label.replace(/\[\d+\]/g, '').split('.').at(-1);
+    const translated = validationLabels[field];
+    return translated ? detail.message.replaceAll(label, translated) : detail.message;
+};
 
 /**
  * Validate request against a Joi schema.
@@ -26,7 +36,7 @@ const validate = (schema) => (req, res, next) => {
         .validate(object);
 
     if (error) {
-        const errorMessage = error.details.map((detail) => detail.message).join(', ');
+        const errorMessage = error.details.map(displayMessage).join(', ');
         return next(new ApiError(httpStatus.BAD_REQUEST, errorMessage));
     }
 
