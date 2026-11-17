@@ -12,7 +12,10 @@ const authTransaction = require('../utils/authTransaction');
 
 const MAX_FAILED_ATTEMPTS = 5;
 const activeChallengeWhere = (accountId, purpose) => ({
-    accountId, purpose, consumedAt: null, supersededAt: null,
+    accountId,
+    purpose,
+    consumedAt: null,
+    supersededAt: null,
 });
 const hash = (value, pepper) => crypto.createHmac('sha256', pepper).update(value).digest('hex');
 const hashOtp = (code) => hash(code, config.email.otpPepper);
@@ -34,10 +37,16 @@ const requestOtp = async (email, purpose) => {
         const where = activeChallengeWhere(account.id, purpose);
         const current = await transaction.emailVerificationChallenge.findFirst({ where });
         if (current?.resendAvailableAt > now) return null;
-        await transaction.emailVerificationChallenge.updateMany({ where, data: { supersededAt: now } });
+        await transaction.emailVerificationChallenge.updateMany({
+            where,
+            data: { supersededAt: now },
+        });
         const challenge = await transaction.emailVerificationChallenge.create({
             data: {
-                accountId: account.id, purpose, codeHash: hashOtp(code), createdAt: now,
+                accountId: account.id,
+                purpose,
+                codeHash: hashOtp(code),
+                createdAt: now,
                 expiresAt: addMinutes(now, config.email.verificationExpiresMinutes),
                 resendAvailableAt: new Date(now.getTime() + config.email.resendDelaySeconds * 1000),
             },
@@ -75,10 +84,11 @@ const verifyOtp = async (email, code, purpose) => {
             where: activeChallengeWhere(account.id, purpose),
         });
         if (!challenge || challenge.verifiedAt) return { error: createAuthError('INVALID_OTP') };
-        const invalidate = () => transaction.emailVerificationChallenge.updateMany({
-            where: { id: challenge.id, consumedAt: null, supersededAt: null },
-            data: { supersededAt: now },
-        });
+        const invalidate = () =>
+            transaction.emailVerificationChallenge.updateMany({
+                where: { id: challenge.id, consumedAt: null, supersededAt: null },
+                data: { supersededAt: now },
+            });
         if (challenge.expiresAt <= now) {
             await invalidate();
             return { error: createAuthError('OTP_EXPIRED') };
@@ -97,8 +107,11 @@ const verifyOtp = async (email, code, purpose) => {
                 },
             });
             // Return instead of throwing so failed attempts are committed.
-            return { error: createAuthError(attempts >= MAX_FAILED_ATTEMPTS
-                ? 'OTP_ATTEMPTS_EXCEEDED' : 'INVALID_OTP') };
+            return {
+                error: createAuthError(
+                    attempts >= MAX_FAILED_ATTEMPTS ? 'OTP_ATTEMPTS_EXCEEDED' : 'INVALID_OTP',
+                ),
+            };
         }
         const stateError = accountStateError(account, purpose);
         if (stateError) {
@@ -108,11 +121,16 @@ const verifyOtp = async (email, code, purpose) => {
         const actionToken = crypto.randomBytes(32).toString('base64url');
         const result = await transaction.emailVerificationChallenge.updateMany({
             where: {
-                id: challenge.id, verifiedAt: null, consumedAt: null, supersededAt: null,
-                expiresAt: { gt: now }, failedAttempts: { lt: MAX_FAILED_ATTEMPTS },
+                id: challenge.id,
+                verifiedAt: null,
+                consumedAt: null,
+                supersededAt: null,
+                expiresAt: { gt: now },
+                failedAttempts: { lt: MAX_FAILED_ATTEMPTS },
             },
             data: {
-                verifiedAt: now, actionTokenHash: hashActionToken(actionToken),
+                verifiedAt: now,
+                actionTokenHash: hashActionToken(actionToken),
                 actionTokenExpiresAt: addMinutes(now, config.email.actionTokenExpiresMinutes),
             },
         });
@@ -124,12 +142,19 @@ const verifyOtp = async (email, code, purpose) => {
 
 const findActionChallenge = async (database, actionToken, purpose) => {
     const challenge = await database.emailVerificationChallenge.findUnique({
-        where: { actionTokenHash: hashActionToken(actionToken) }, include: { account: true },
+        where: { actionTokenHash: hashActionToken(actionToken) },
+        include: { account: true },
     });
-    if (!challenge || challenge.purpose !== purpose || !challenge.verifiedAt
-        || challenge.consumedAt || challenge.supersededAt || !challenge.actionTokenExpiresAt
-        || challenge.actionTokenExpiresAt <= new Date()
-        || !VERIFICATION_ROLES.includes(challenge.account.role)) {
+    if (
+        !challenge ||
+        challenge.purpose !== purpose ||
+        !challenge.verifiedAt ||
+        challenge.consumedAt ||
+        challenge.supersededAt ||
+        !challenge.actionTokenExpiresAt ||
+        challenge.actionTokenExpiresAt <= new Date() ||
+        !VERIFICATION_ROLES.includes(challenge.account.role)
+    ) {
         throw createAuthError('INVALID_ACTION_TOKEN');
     }
     return challenge;
@@ -153,7 +178,10 @@ const completeVerification = async (purpose, { actionToken, password, fullName, 
         }
         const consumed = await transaction.emailVerificationChallenge.updateMany({
             where: {
-                id: challenge.id, verifiedAt: { not: null }, consumedAt: null, supersededAt: null,
+                id: challenge.id,
+                verifiedAt: { not: null },
+                consumedAt: null,
+                supersededAt: null,
                 actionTokenExpiresAt: { gt: now },
             },
             data: { consumedAt: now },
@@ -162,12 +190,20 @@ const completeVerification = async (purpose, { actionToken, password, fullName, 
         const activation = purpose === VERIFICATION_PURPOSE.ACCOUNT_ACTIVATION;
         const updated = await transaction.account.updateMany({
             where: {
-                id: account.id, role: account.role,
+                id: account.id,
+                role: account.role,
                 status: activation ? ACCOUNT_STATUS.PENDING_ACTIVATION : ACCOUNT_STATUS.ACTIVE,
-                passwordHash: account.passwordHash, activatedAt: account.activatedAt,
+                passwordHash: account.passwordHash,
+                activatedAt: account.activatedAt,
             },
             data: activation
-                ? { fullName, phone: phone ?? null, passwordHash, status: ACCOUNT_STATUS.ACTIVE, activatedAt: now }
+                ? {
+                      fullName,
+                      phone: phone ?? null,
+                      passwordHash,
+                      status: ACCOUNT_STATUS.ACTIVE,
+                      activatedAt: now,
+                  }
                 : { passwordHash },
         });
         if (updated.count !== 1) throw createAuthError('VERIFICATION_CONFLICT', 409);
@@ -175,16 +211,21 @@ const completeVerification = async (purpose, { actionToken, password, fullName, 
             where: { accountId: account.id, consumedAt: null, supersededAt: null },
             data: { supersededAt: now },
         });
-        await tokenService.revokeAllAccountTokens(account.id, transaction);
+        if (!activation) {
+            await tokenService.revokeAllAccountTokens(account.id, transaction);
+        }
         let notification;
         if (activation && account.managedByOwnerId) {
             notification = await transaction.notification.create({
                 data: {
-                    accountId: account.managedByOwnerId, title: 'Nhân sự đã kích hoạt tài khoản',
+                    accountId: account.managedByOwnerId,
+                    title: 'Nhân sự đã kích hoạt tài khoản',
                     content: `${fullName} đã kích hoạt tài khoản và có thể được phân công vào vụ nuôi.`,
                     type: NOTIFICATION_TYPE.MANAGED_ACCOUNT_ACTIVATED,
-                    referenceType: 'account', referenceId: account.id,
-                }, select: { id: true },
+                    referenceType: 'account',
+                    referenceId: account.id,
+                },
+                select: { id: true },
             });
         }
         return { notification, ownerId: account.managedByOwnerId };
@@ -196,7 +237,9 @@ const completeVerification = async (purpose, { actionToken, password, fullName, 
 };
 
 module.exports = {
-    requestOtp, verifyOtp,
-    activateAccount: (input) => completeVerification(VERIFICATION_PURPOSE.ACCOUNT_ACTIVATION, input),
+    requestOtp,
+    verifyOtp,
+    activateAccount: (input) =>
+        completeVerification(VERIFICATION_PURPOSE.ACCOUNT_ACTIVATION, input),
     resetPassword: (input) => completeVerification(VERIFICATION_PURPOSE.PASSWORD_RESET, input),
 };

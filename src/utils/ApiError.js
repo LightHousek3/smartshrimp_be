@@ -1,3 +1,5 @@
+const messages = require('../constants/messages');
+
 /**
  * Custom API Error class for operational errors
  * @extends Error
@@ -25,42 +27,42 @@ class ApiError extends Error {
     /**
      * Create a 400 Bad Request error
      */
-    static badRequest(message = 'Bad Request') {
+    static badRequest(message = messages.COMMON.BAD_REQUEST) {
         return new ApiError(400, message);
     }
 
     /**
      * Create a 401 Unauthorized error
      */
-    static unauthorized(message = 'Unauthorized') {
+    static unauthorized(message = messages.AUTH.UNAUTHORIZED) {
         return new ApiError(401, message);
     }
 
     /**
      * Create a 403 Forbidden error
      */
-    static forbidden(message = 'Forbidden') {
+    static forbidden(message = messages.AUTH.FORBIDDEN) {
         return new ApiError(403, message);
     }
 
     /**
      * Create a 404 Not Found error
      */
-    static notFound(message = 'Not Found') {
+    static notFound(message = messages.COMMON.NOT_FOUND) {
         return new ApiError(404, message);
     }
 
     /**
      * Create a 409 Conflict error
      */
-    static conflict(message = 'Conflict') {
+    static conflict(message = messages.COMMON.CONFLICT) {
         return new ApiError(409, message);
     }
 
     /**
      * Create a 500 Internal Server Error
      */
-    static internal(message = 'Internal Server Error') {
+    static internal(message = messages.SERVER.INTERNAL_ERROR) {
         return new ApiError(500, message, false);
     }
 }

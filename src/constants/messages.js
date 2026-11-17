@@ -137,26 +137,26 @@ const messages = {
     },
 
     ACCOUNT: {
-        LIST_FETCHED: 'Account list fetched successfully',
-        FETCHED: 'Account details fetched successfully',
-        CREATED: 'Account created successfully',
-        NOT_FOUND: 'Account not found',
-        EMAIL_ALREADY_EXISTS: 'Email is already in use',
-        INVALID_MANAGING_OWNER: 'Managing owner must be a farm owner',
-        OWNER_NOT_ACTIVE: 'Managing owner must be active',
-        ACTIVATION_EMAIL_SENT: 'Activation email sent successfully',
-        ACTIVATION_RESEND_TOO_SOON: 'Please wait before resending the activation email',
-        ACTIVATION_NOT_PENDING: 'Only pending accounts can receive an activation email',
-        ACTIVATION_EMAIL_FAILED: 'Unable to send the activation email',
-        STATUS_UPDATED: 'Account status updated successfully',
-        STATUS_UNCHANGED: 'New status must be different from the current status',
-        STATUS_PENDING_PROTECTED: 'Pending accounts must be activated through email verification',
-        ADMIN_STATUS_PROTECTED: 'Admin account status cannot be changed here',
-        STAFF_HAS_ACTIVE_ASSIGNMENT: 'Assigned staff must be replaced before deactivation',
-        OWNER_HAS_ACTIVE_STAFF: 'Owner staff must be disabled or transferred before deactivation',
-        OWNER_HAS_OPEN_SEASON: 'Owner with an open season cannot be deactivated',
-        ONLY_PENDING_UPDATABLE: 'Only pending accounts can be updated',
-        PENDING_UPDATE_SUCCESS: 'Account updated and activation invitation sent successfully',
+        LIST_FETCHED: 'Lấy danh sách tài khoản thành công',
+        FETCHED: 'Lấy thông tin tài khoản thành công',
+        CREATED: 'Tạo tài khoản thành công',
+        NOT_FOUND: 'Không tìm thấy tài khoản',
+        EMAIL_ALREADY_EXISTS: 'Email này đã được sử dụng',
+        INVALID_MANAGING_OWNER: 'Chủ quản phải là tài khoản Chủ trang trại',
+        OWNER_NOT_ACTIVE: 'Chủ quản phải đang hoạt động',
+        ACTIVATION_EMAIL_SENT: 'Đã gửi lời mời kích hoạt tài khoản',
+        ACTIVATION_NOT_PENDING: 'Chỉ tài khoản chờ kích hoạt mới có thể nhận lời mời',
+        ACTIVATION_EMAIL_FAILED: 'Không thể gửi lời mời kích hoạt. Vui lòng thử lại sau',
+        STATUS_UPDATED: 'Cập nhật trạng thái tài khoản thành công',
+        STATUS_UNCHANGED: 'Trạng thái mới phải khác trạng thái hiện tại',
+        STATUS_PENDING_PROTECTED: 'Tài khoản chờ kích hoạt phải được xác minh qua email',
+        ADMIN_STATUS_PROTECTED: 'Không thể thay đổi trạng thái tài khoản Admin tại đây',
+        STAFF_HAS_ACTIVE_ASSIGNMENT:
+            'Cần thay thế nhân sự đang được phân công trước khi vô hiệu hóa',
+        OWNER_HAS_ACTIVE_STAFF: 'Cần vô hiệu hóa hoặc chuyển nhân sự của chủ trại trước',
+        OWNER_HAS_OPEN_SEASON: 'Không thể vô hiệu hóa chủ trại đang có vụ nuôi mở',
+        ONLY_PENDING_UPDATABLE: 'Chỉ có thể chỉnh sửa email của tài khoản chờ kích hoạt',
+        PENDING_UPDATE_SUCCESS: 'Đã cập nhật email và gửi lại lời mời kích hoạt',
     },
 
     NOTIFICATION: {
@@ -176,22 +176,16 @@ const messages = {
 
     // Auth
     AUTH: {
-        LOGIN_ERRORS: {
-            INVALID_CREDENTIALS: 'Email or password is incorrect',
-            PENDING_ACTIVATION:
-                'Account has not been activated. Please activate your account first',
-            ACCOUNT_BLOCKED: 'Your account has been blocked. Please contact support',
-            ACCOUNT_INACTIVE: 'Your account is inactive. Please contact support',
-            FORBIDDEN: 'You do not have permission to perform this action',
-        },
         LOGIN_SUCCESS: 'Đăng nhập thành công',
         LOGOUT_SUCCESS: 'Đăng xuất thành công',
-        TOKEN_REFRESHED: 'Làm mới token thành công',
+        TOKEN_REFRESHED: 'Gia hạn phiên đăng nhập thành công',
         PENDING_ACTIVATION: 'Tài khoản chưa được kích hoạt. Vui lòng kích hoạt trước',
         ACCOUNT_BLOCKED: 'Tài khoản của bạn đã bị khóa. Vui lòng liên hệ bộ phận hỗ trợ',
         ACCOUNT_INACTIVE: 'Tài khoản đang tạm ngừng sử dụng. Vui lòng liên hệ bộ phận hỗ trợ',
         INVALID_CREDENTIALS: 'Email hoặc mật khẩu không chính xác',
-        INVALID_REFRESH_TOKEN: 'Refresh token không hợp lệ hoặc đã hết hạn',
+        LOGIN_CONFLICT: 'Thông tin tài khoản đã thay đổi trong lúc đăng nhập. Vui lòng thử lại.',
+        INVALID_REFRESH_TOKEN: 'Phiên đăng nhập không hợp lệ hoặc đã hết hạn',
+        ACCESS_TOKEN_EXPIRED: 'Phiên truy cập đã hết hạn. Vui lòng đăng nhập lại',
         UNAUTHORIZED: 'Bạn chưa đăng nhập hoặc phiên đăng nhập không hợp lệ',
         FORBIDDEN: 'Bạn không có quyền thực hiện thao tác này',
         RESEND_TOO_SOON: 'Vui lòng đợi 60 giây trước khi yêu cầu mã OTP mới',
@@ -672,6 +666,12 @@ const messages = {
         RAG_INGESTION_FAILED: 'Xử lý RAG chưa hoàn tất. Vui lòng thử lại xử lý.',
         RAG_REUPLOAD_FILE_MISMATCH:
             'File được chọn không khớp bản gốc. Vui lòng chọn file có cùng nội dung và định dạng ban đầu.',
+    },
+
+    COMMON: {
+        BAD_REQUEST: 'Dữ liệu yêu cầu không hợp lệ',
+        NOT_FOUND: 'Không tìm thấy dữ liệu được yêu cầu',
+        CONFLICT: 'Dữ liệu đã thay đổi hoặc bị trùng lặp',
     },
 
     // Generic CRUD

@@ -3,9 +3,10 @@ const {
     fullNameField,
     passwordField,
     vietnamesePhoneField,
+    emailField,
 } = require('./accountFields.validator');
 
-const email = Joi.string().trim().lowercase().email().max(320).required();
+const email = emailField();
 
 const actionToken = Joi.string()
     .trim()
@@ -13,6 +14,7 @@ const actionToken = Joi.string()
     .messages({ 'string.pattern.base': 'Phiên xác thực không hợp lệ' })
     .min(32)
     .max(128)
+    .label('Phiên xác thực')
     .required();
 
 const newPassword = passwordField();
@@ -21,8 +23,7 @@ const login = {
     body: Joi.object().keys({
         email,
         password: passwordField({ minimumLength: 1 }),
-        // Accept older clients without allowing them to choose the login session ID.
-        deviceId: Joi.string().uuid({ version: 'uuidv4' }).strip(),
+        deviceId: Joi.string().uuid({ version: 'uuidv4' }).label('Mã thiết bị').required(),
     }),
 };
 
@@ -34,6 +35,7 @@ const verifyOtp = {
     body: Joi.object().keys({
         email,
         code: Joi.string()
+            .label('Mã OTP')
             .pattern(/^\d{6}$/)
             .messages({ 'string.pattern.base': 'Mã OTP phải gồm đúng 6 chữ số' })
             .required(),
@@ -58,7 +60,7 @@ const resetPassword = {
 
 const tokenBody = {
     body: Joi.object().keys({
-        refreshToken: Joi.string().trim().max(4096),
+        refreshToken: Joi.string().trim().max(4096).label('Phiên đăng nhập'),
     }),
 };
 

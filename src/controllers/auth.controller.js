@@ -12,8 +12,8 @@ const config = require('../config');
  * POST /auth/login
  */
 const login = asyncHandler(async (req, res) => {
-    const { email, password } = req.body;
-    const { account, tokens } = await authService.login(email, password);
+    const { email, password, deviceId } = req.body;
+    const { account, tokens } = await authService.login(email, password, deviceId);
 
     setRefreshTokenCookie(res, tokens.refreshToken);
 

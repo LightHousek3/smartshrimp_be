@@ -1,13 +1,9 @@
-const crypto = require('crypto');
 const prisma = require('../config/prisma');
-const config = require('../config');
 const { ApiError } = require('../utils');
 const { httpStatus, messages, ACCOUNT_ROLE, ACCOUNT_STATUS } = require('../constants');
 const emailService = require('./email.service');
 const tokenService = require('./token.service');
-const authTransaction = require('../utils/authTransaction');
 
-const ACTIVATION_PURPOSE = 'ACCOUNT_ACTIVATION';
 const OPEN_SEASON_STATUSES = ['PLANNING', 'ACTIVE'];
 
 const ACCOUNT_SELECT = {
@@ -53,14 +49,7 @@ const OWNER_LIST_SELECT = {
     fullName: true,
 };
 
-const buildAccountFilter = ({
-    role,
-    status,
-    managedByOwnerId,
-    search,
-    createdFrom,
-    createdTo,
-}) => {
+const buildAccountFilter = ({ role, status, managedByOwnerId, search, createdFrom, createdTo }) => {
     const where = {
         ...(role && { role }),
         ...(status && { status }),
@@ -103,7 +92,9 @@ const buildAccountOrderBy = (sortBy, sortOrder) => {
 };
 
 const attachManagingOwners = async (accounts) => {
-    const ownerIds = [...new Set(accounts.map((account) => account.managedByOwnerId).filter(Boolean))];
+    const ownerIds = [
+        ...new Set(accounts.map((account) => account.managedByOwnerId).filter(Boolean)),
+    ];
 
     if (ownerIds.length === 0) {
         return accounts.map(({ managedByOwnerId, ...account }) => ({
@@ -183,9 +174,9 @@ const getAccountById = async (accountId) => {
     const [managedByOwner, managedStaffCount] = await Promise.all([
         account.managedByOwnerId
             ? prisma.account.findUnique({
-                where: { id: account.managedByOwnerId },
-                select: OWNER_SUMMARY_SELECT,
-            })
+                  where: { id: account.managedByOwnerId },
+                  select: OWNER_SUMMARY_SELECT,
+              })
             : Promise.resolve(null),
         prisma.account.count({ where: { managedByOwnerId: account.id } }),
     ]);
@@ -214,57 +205,37 @@ const validateManagingOwner = async (database, role, managedByOwnerId) => {
     }
 };
 
-const hashActivationCode = (code) =>
-    crypto.createHmac('sha256', config.email.otpPepper).update(code).digest('hex');
-
-const buildActivationChallenge = async (account, { enforceCooldown = true } = {}) => {
-    const code = crypto.randomInt(0, 1000000).toString().padStart(6, '0');
-    const challenge = await authTransaction(async (transaction) => {
-        const currentAccount = await transaction.account.findUnique({ where: { id: account.id } });
-        if (!currentAccount || currentAccount.status !== ACCOUNT_STATUS.PENDING_ACTIVATION
-            || currentAccount.passwordHash || currentAccount.activatedAt) {
-            throw new ApiError(httpStatus.CONFLICT, messages.ACCOUNT.ACTIVATION_NOT_PENDING);
-        }
-        const now = new Date();
-        const where = { accountId: account.id, purpose: ACTIVATION_PURPOSE, consumedAt: null, supersededAt: null };
-        const active = await transaction.emailVerificationChallenge.findFirst({ where });
-        if (enforceCooldown && active?.resendAvailableAt > now) {
-            throw new ApiError(httpStatus.TOO_MANY_REQUESTS, messages.ACCOUNT.ACTIVATION_RESEND_TOO_SOON);
-        }
-        await transaction.emailVerificationChallenge.updateMany({ where, data: { supersededAt: now } });
-        return transaction.emailVerificationChallenge.create({
-            data: {
-                accountId: account.id, purpose: ACTIVATION_PURPOSE, codeHash: hashActivationCode(code), createdAt: now,
-                expiresAt: new Date(now.getTime() + config.email.verificationExpiresMinutes * 60000),
-                resendAvailableAt: new Date(now.getTime() + config.email.resendDelaySeconds * 1000),
-            }, select: { id: true, expiresAt: true, resendAvailableAt: true },
-        });
-    });
-    return { code, challenge };
+/** Send an invitation only; verification codes are requested by the recipient. */
+const sendActivationEmail = async (account) => {
+    const current = await findPendingActivationAccount(account.id);
+    try {
+        await emailService.sendAccountActivationEmail({ email: current.email, role: current.role });
+    } catch (_) {
+        throw new ApiError(
+            httpStatus.SERVICE_UNAVAILABLE,
+            messages.ACCOUNT.ACTIVATION_EMAIL_FAILED,
+        );
+    }
+    return { email: current.email };
 };
 
-const sendActivationEmail = async (account, options) => {
-    const { code, challenge } = await buildActivationChallenge(account, options);
-
+/** Report committed account changes even when invitation delivery fails. */
+const inviteSavedAccount = async (account) => {
     try {
-        await emailService.sendAccountActivationEmail({
-            email: account.email,
-            role: account.role,
-            code,
-        });
+        const activation = await sendActivationEmail(account);
+        return { ...account, activation, activationEmailSent: true };
     } catch (error) {
-        await prisma.emailVerificationChallenge.updateMany({
-            where: { id: challenge.id, consumedAt: null, supersededAt: null },
-            data: { supersededAt: new Date() },
-        });
-        throw new ApiError(httpStatus.SERVICE_UNAVAILABLE, messages.ACCOUNT.ACTIVATION_EMAIL_FAILED);
+        // The account transaction has already committed. Report that fact so an
+        // administrator can resend the invitation instead of retrying creation.
+        if (
+            error instanceof ApiError &&
+            error.statusCode === httpStatus.SERVICE_UNAVAILABLE &&
+            error.message === messages.ACCOUNT.ACTIVATION_EMAIL_FAILED
+        ) {
+            return { ...account, activation: null, activationEmailSent: false };
+        }
+        throw error;
     }
-
-    return {
-        email: account.email,
-        expiresAt: challenge.expiresAt,
-        resendAvailableAt: challenge.resendAvailableAt,
-    };
 };
 
 const createAccount = async ({ email, role, managedByOwnerId }, adminId) => {
@@ -301,19 +272,7 @@ const createAccount = async ({ email, role, managedByOwnerId }, adminId) => {
         throw error;
     }
 
-    try {
-        const activation = await sendActivationEmail(account, { enforceCooldown: false });
-        return { ...account, activation, activationEmailSent: true };
-    } catch (error) {
-        // The account transaction has already committed. Report that fact so an
-        // administrator can resend the invitation instead of retrying creation.
-        if (error instanceof ApiError
-            && error.statusCode === httpStatus.SERVICE_UNAVAILABLE
-            && error.message === messages.ACCOUNT.ACTIVATION_EMAIL_FAILED) {
-            return { ...account, activation: null, activationEmailSent: false };
-        }
-        throw error;
-    }
+    return inviteSavedAccount(account);
 };
 
 const findPendingActivationAccount = async (accountId) => {
@@ -335,7 +294,7 @@ const findPendingActivationAccount = async (accountId) => {
 
 /**
  * Reissue an activation invitation link for an account still awaiting activation.
- * Enforces cooldown timers and revokes pending challenge tokens before resending.
+ * Invitation delivery does not invalidate an OTP already requested by the recipient.
  */
 const resendActivation = async (accountId) =>
     sendActivationEmail(await findPendingActivationAccount(accountId));
@@ -363,9 +322,25 @@ const updatePendingAccount = async (accountId, { email }) => {
     let updatedAccount;
     try {
         updatedAccount = await prisma.$transaction(async (transaction) => {
-            return transaction.account.update({
-                where: { id: accountId },
+            const changed = await transaction.account.updateMany({
+                where: {
+                    id: accountId,
+                    email: account.email,
+                    status: ACCOUNT_STATUS.PENDING_ACTIVATION,
+                },
                 data: { email: normalizedEmail },
+            });
+            if (changed.count !== 1) {
+                throw ApiError.conflict(messages.ACCOUNT.ONLY_PENDING_UPDATABLE);
+            }
+            if (normalizedEmail !== account.email) {
+                await transaction.emailVerificationChallenge.updateMany({
+                    where: { accountId, consumedAt: null, supersededAt: null },
+                    data: { supersededAt: new Date() },
+                });
+            }
+            return transaction.account.findUnique({
+                where: { id: accountId },
                 select: ACCOUNT_SELECT,
             });
         });
@@ -376,9 +351,7 @@ const updatePendingAccount = async (accountId, { email }) => {
         throw error;
     }
 
-    const activation = await sendActivationEmail(updatedAccount, { enforceCooldown: false });
-
-    return { ...updatedAccount, activation };
+    return inviteSavedAccount(updatedAccount);
 };
 
 const countOpenOwnerSeasons = async (database, ownerId) => {
@@ -501,4 +474,3 @@ module.exports = {
     updatePendingAccount,
     updateAccountStatus,
 };
-

@@ -1,6 +1,7 @@
 const Joi = require('joi');
 
 const ACCOUNT_FIELD_RULES = Object.freeze({
+    emailMaxLength: 254,
     fullNameMinLength: 2,
     fullNameMaxLength: 50,
     passwordMinLength: 6,
@@ -20,6 +21,16 @@ const normalizeVietnamesePhone = (value) => {
 };
 
 const validationError = (helpers, message) => helpers.message({ 'any.custom': message });
+
+const emailField = () =>
+    Joi.string()
+        .trim()
+        .lowercase()
+        .email({ tlds: { allow: false }, allowUnicode: false })
+        .max(ACCOUNT_FIELD_RULES.emailMaxLength)
+        .label('Email')
+        .messages({ 'string.email': 'Email không hợp lệ.' })
+        .required();
 
 const fullNameField = ({ required = false } = {}) => {
     let schema = Joi.string().custom((value, helpers) => {
@@ -47,6 +58,7 @@ const fullNameField = ({ required = false } = {}) => {
         return normalized;
     });
 
+    schema = schema.label('Họ và tên');
     if (required) schema = schema.required();
     return schema;
 };
@@ -60,6 +72,7 @@ const vietnamesePhoneField = ({ required = false, allowNull = false } = {}) => {
         return normalized;
     });
 
+    schema = schema.label('Số điện thoại');
     if (allowNull) schema = schema.allow(null);
     if (required) schema = schema.required();
     return schema;
@@ -67,6 +80,7 @@ const vietnamesePhoneField = ({ required = false, allowNull = false } = {}) => {
 
 const passwordField = ({ minimumLength = ACCOUNT_FIELD_RULES.passwordMinLength } = {}) =>
     Joi.string()
+        .label('Mật khẩu')
         .custom((value, helpers) => {
             if (characterCount(value) < minimumLength) {
                 return validationError(helpers, `Mật khẩu phải có ít nhất ${minimumLength} ký tự`);
@@ -97,6 +111,7 @@ const getPasswordStrength = (password) => {
 };
 
 module.exports = {
+    emailField,
     ACCOUNT_FIELD_RULES,
     FULL_NAME_PATTERN,
     VIETNAMESE_MOBILE_PATTERN,

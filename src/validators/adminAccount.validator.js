@@ -1,18 +1,11 @@
 const Joi = require('joi');
 const { ACCOUNT_ROLE, ACCOUNT_STATUS } = require('../constants');
+const { emailField } = require('./accountFields.validator');
 
 const accountId = Joi.string().uuid({ version: 'uuidv4' });
-const creatableRoles = [
-    ACCOUNT_ROLE.FARM_OWNER,
-    ACCOUNT_ROLE.TECHNICIAN,
-    ACCOUNT_ROLE.EXPERT,
-];
+const creatableRoles = [ACCOUNT_ROLE.FARM_OWNER, ACCOUNT_ROLE.TECHNICIAN, ACCOUNT_ROLE.EXPERT];
 const staffRoles = [ACCOUNT_ROLE.TECHNICIAN, ACCOUNT_ROLE.EXPERT];
-const changeableStatuses = [
-    ACCOUNT_STATUS.ACTIVE,
-    ACCOUNT_STATUS.INACTIVE,
-    ACCOUNT_STATUS.BLOCKED,
-];
+const changeableStatuses = [ACCOUNT_STATUS.ACTIVE, ACCOUNT_STATUS.INACTIVE, ACCOUNT_STATUS.BLOCKED];
 
 const getListAccount = {
     query: Joi.object()
@@ -44,8 +37,10 @@ const getAccount = {
 
 const createAccount = {
     body: Joi.object().keys({
-        email: Joi.string().trim().lowercase().email().max(320).required(),
-        role: Joi.string().valid(...creatableRoles).required(),
+        email: emailField(),
+        role: Joi.string()
+            .valid(...creatableRoles)
+            .required(),
         managedByOwnerId: Joi.when('role', {
             is: Joi.valid(...staffRoles),
             then: accountId.required(),
@@ -65,7 +60,7 @@ const updatePendingAccount = {
         accountId: accountId.required(),
     }),
     body: Joi.object().keys({
-        email: Joi.string().trim().lowercase().email().max(320).required(),
+        email: emailField(),
     }),
 };
 
@@ -89,4 +84,3 @@ module.exports = {
     updatePendingAccount,
     updateAccountStatus,
 };
-

@@ -1,5 +1,4 @@
 const bcrypt = require('bcryptjs');
-const crypto = require('crypto');
 const prisma = require('../config/prisma');
 const { ApiError } = require('../utils');
 const { httpStatus, messages, ACCOUNT_STATUS } = require('../constants');
@@ -34,7 +33,7 @@ const withoutPassword = ({ passwordHash, ...account }) => account;
  * Password validity is checked before account status so an attacker cannot use
  * this endpoint to discover the status of an account without its password.
  */
-const login = async (email, password) => {
+const login = async (email, password, deviceId) => {
     const account = await prisma.account.findUnique({
         where: { email },
         select: LOGIN_ACCOUNT_SELECT,
@@ -45,24 +44,31 @@ const login = async (email, password) => {
         : false;
 
     if (!account || !passwordMatches) {
-        throw new ApiError(httpStatus.UNAUTHORIZED, messages.AUTH.LOGIN_ERRORS.INVALID_CREDENTIALS);
+        throw new ApiError(httpStatus.UNAUTHORIZED, messages.AUTH.INVALID_CREDENTIALS);
     }
 
     if (account.status !== ACCOUNT_STATUS.ACTIVE) {
         const key = ACCOUNT_STATUS_ERRORS[account.status] || 'FORBIDDEN';
-        throw Object.assign(new ApiError(httpStatus.FORBIDDEN, messages.AUTH.LOGIN_ERRORS[key]), {
+        throw Object.assign(new ApiError(httpStatus.FORBIDDEN, messages.AUTH[key]), {
             errorCode: `AUTH_${key}`,
         });
     }
 
     const loginAt = new Date();
-    const deviceId = crypto.randomUUID();
 
     return prisma.$transaction(async (transaction) => {
-        await transaction.account.update({
-            where: { id: account.id },
+        // Serialize same-account logins and reject credentials changed during password verification.
+        const updated = await transaction.account.updateMany({
+            where: {
+                id: account.id,
+                passwordHash: account.passwordHash,
+                status: ACCOUNT_STATUS.ACTIVE,
+            },
             data: { lastLoginAt: loginAt },
         });
+        if (updated.count !== 1) {
+            throw ApiError.conflict(messages.AUTH.LOGIN_CONFLICT);
+        }
         const tokens = await tokenService.generateAuthTokens(account, deviceId, transaction);
         return { account: withoutPassword({ ...account, lastLoginAt: loginAt }), tokens };
     });
