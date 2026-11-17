@@ -51,7 +51,70 @@ const getNotificationReferenceContext = async (accountId, notificationId, role) 
     const type = notification.referenceType?.trim().toLowerCase();
     const scope = seasonScope(accountId, role);
     switch (type) {
+        case 'inventory_product':
         case 'product': {
+            if (role === ACCOUNT_ROLE.EXPERT) {
+                const product = await prisma.product.findFirst({
+                    where: { id },
+                    select: { farmId: true },
+                });
+                if (!product) return {};
+                // A material can be used by several seasons; never pick an arbitrary season.
+                const seasons = await prisma.aquacultureSeason.findMany({
+                    where: {
+                        AND: [
+                            scope,
+                            { pond: { farmId: product.farmId } },
+                            { status: { in: ['PLANNING', 'ACTIVE'] } },
+                            {
+                                OR: [
+                                    { schedules: { some: { productId: id, status: 'PLANNED' } } },
+                                    {
+                                        protocols: {
+                                            some: {
+                                                status: { in: ['DRAFT', 'PENDING_APPROVAL', 'APPROVED', 'ACTIVE', 'PAUSED'] },
+                                                items: { some: { productId: id } },
+                                            },
+                                        },
+                                    },
+                                ],
+                            },
+                        ],
+                    },
+                    select: {
+                        id: true,
+                        name: true,
+                        pond: { select: { name: true, farm: { select: { name: true } } } },
+                        protocols: {
+                            where: {
+                                status: { in: ['DRAFT', 'PENDING_APPROVAL', 'APPROVED', 'ACTIVE', 'PAUSED'] },
+                                items: { some: { productId: id } },
+                            },
+                            select: { protocolType: true },
+                        },
+                        schedules: {
+                            where: { productId: id, status: 'PLANNED' },
+                            select: { protocolItem: { select: { protocol: { select: { protocolType: true } } } } },
+                        },
+                    },
+                    orderBy: [{ updatedAt: 'desc' }, { id: 'desc' }],
+                });
+                return {
+                    relatedSeasons: seasons.flatMap((season) => {
+                        const uses = [...season.protocols,
+                            ...season.schedules.map((schedule) => schedule.protocolItem.protocol)];
+                        const tabs = new Set(uses.map((protocol) =>
+                            protocol.protocolType === 'TREATMENT' ? 'diseases' : 'protocols'));
+                        return [...tabs].map((tab) => ({
+                            seasonId: season.id,
+                            name: season.name,
+                            pondName: season.pond.name,
+                            farmName: season.pond.farm.name,
+                            tab,
+                        }));
+                    }),
+                };
+            }
             if (role !== ACCOUNT_ROLE.FARM_OWNER) return {};
             const product = await prisma.product.findFirst({
                 where: { id, farm: { ownerId: accountId } },
@@ -118,9 +181,14 @@ const getNotificationReferenceContext = async (accountId, notificationId, role) 
         case 'treatment_protocol': {
             const protocol = await prisma.protocol.findFirst({
                 where: { id, season: scope },
-                select: { season: { select: seasonSelect } },
+                select: { diseaseCaseId: true, season: { select: seasonSelect } },
             });
-            return seasonContext(protocol?.season);
+            return {
+                ...seasonContext(protocol?.season),
+                ...(role === ACCOUNT_ROLE.EXPERT && protocol?.diseaseCaseId
+                    ? { diseaseCaseId: protocol.diseaseCaseId }
+                    : {}),
+            };
         }
         case 'disease_case': {
             const disease = await prisma.diseaseCase.findFirst({
