@@ -1,5 +1,5 @@
 const prisma = require('../config/prisma');
-const { ApiError } = require('../utils');
+const { ApiError, localizeNotification } = require('../utils');
 const { httpStatus, messages, NOTIFICATION_TYPE } = require('../constants');
 const { emitNotification } = require('../realtime/notification.socket');
 
@@ -109,7 +109,7 @@ const getListNotification = async (accountId, {
     const notifications = hasNextPage ? rows.slice(0, limit) : rows;
 
     return {
-        notifications,
+        notifications: notifications.map(localizeNotification),
         meta: {
             limit,
             totalResults,
@@ -126,7 +126,7 @@ const createNotification = async (data) => {
         select: NOTIFICATION_SELECT,
     });
     emitNotification(data.accountId, 'notification:new', { id: notification.id });
-    return notification;
+    return localizeNotification(notification);
 };
 
 const getNotificationById = async (accountId, notificationId) => {
@@ -155,7 +155,7 @@ const getNotificationById = async (accountId, notificationId) => {
             readAt: notification.readAt,
         });
     }
-    return notification;
+    return localizeNotification(notification);
 };
 
 const markAllAsRead = async (accountId) => {

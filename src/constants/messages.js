@@ -309,8 +309,9 @@ const messages = {
             'Lô đã được dùng. Cần đối chiếu chuyên môn, không tự thay đổi bằng chứng hạn dùng',
         SUPPLIER_NAME_REQUIRED: 'Vui lòng chọn nhà cung cấp trong danh bạ của chủ trại',
         PRODUCT_BLOCKED: 'Sản phẩm đang bị chặn, không được sử dụng trong phác đồ.',
-        IMAGE_FIELDS_CONFLICT: 'Chỉ cung cấp imageUrl hoặc imageUrls trong một yêu cầu',
-        LABEL_IMAGE_REQUIRED: 'Mỗi vật tư phải có ít nhất 1 ảnh nhãn và tối đa 3 ảnh',
+        IMAGE_FIELDS_CONFLICT: 'Vui lòng gửi ảnh nhãn vật tư theo một định dạng duy nhất.',
+        LABEL_IMAGE_REQUIRED: 'Vui lòng thêm ít nhất 1 ảnh nhãn vật tư trước khi lưu.',
+        LABEL_IMAGE_LIMIT: 'Mỗi vật tư chỉ được thêm tối đa 3 ảnh nhãn.',
         PRODUCT_ARCHIVE_REASON: (name) => `Ngừng sử dụng vật tư ${name}`,
         SCHEDULES_CANCELLED_TITLE: 'Lịch vận hành đã bị hủy do ngừng vật tư',
         SCHEDULES_CANCELLED_CONTENT: (name, count) =>
@@ -420,6 +421,12 @@ const messages = {
             seasonId: 'Vụ nuôi',
             assignedTo: 'Kỹ thuật viên',
         },
+        PRIORITY_LABELS: {
+            LOW: 'Thấp',
+            NORMAL: 'Bình thường',
+            HIGH: 'Cao',
+            URGENT: 'Khẩn cấp',
+        },
     },
 
     ASSIGNED_SEASON: {
@@ -464,7 +471,7 @@ const messages = {
         PARTIAL_EXHAUSTED:
             'Thu tỉa phải còn tôm trong ao. Nếu thu hết, vui lòng chọn thu hoạch cuối.',
         EARLY_WARNING: (days, typicalDays) =>
-            `Lưu ý: thu hoạch sau ${days} ngày nuôi, sớm hơn chu kỳ tham khảo ${typicalDays} ngày của loài. Owner cân nhắc theo tình trạng thực tế; bản ghi vẫn hợp lệ.`,
+            `Lưu ý: thu hoạch sau ${days} ngày nuôi, sớm hơn chu kỳ tham khảo ${typicalDays} ngày của loài. Chủ trại cân nhắc theo tình trạng thực tế; bản ghi vẫn hợp lệ.`,
         RECORDED_TITLE: 'Đã ghi nhận thu tỉa',
         COMPLETED_TITLE: 'Vụ nuôi đã hoàn tất thu hoạch',
         RECORDED_CONTENT: (name, weight, isFinal) =>
@@ -817,7 +824,7 @@ const messages = {
         CALCULATION_CHANGED: 'Căn cứ tính lượng thay đổi hoặc không còn hợp lệ.',
         ACTIVATION_BLOCKED: 'Phác đồ điều trị chưa thể bắt đầu',
         ACTIVATION_BLOCKED_CONTENT: (title) =>
-            `${title}: chưa thể kích hoạt. Kiểm tra phân công Expert, trạng thái ca, vật tư và cấu hình liệu trình.`,
+            `${title}: chưa thể kích hoạt. Kiểm tra phân công chuyên gia, trạng thái ca, vật tư và cấu hình liệu trình.`,
     },
 
     // Server

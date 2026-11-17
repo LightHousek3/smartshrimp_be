@@ -3,6 +3,7 @@ const logger = require('../config/logger');
 const messaging = require('./firebaseMessaging.service');
 const policy = require('../utils/pushNotificationPolicy');
 const limits = require('../constants/pushNotification');
+const { localizeNotification } = require('../utils');
 const { cleared } = require('./pushDevice.service');
 
 const ready = (now) => ({
@@ -16,37 +17,40 @@ const short = (text, size) =>
         .join('');
 
 /** Keep the same notification identity across retries; the provider accepting it is not a read receipt. */
-const message = (notification, tokens, expiry, now) => ({
-    fids: tokens,
-    notification: {
-        title: short(notification.title, 100),
-        body: short(notification.content || 'Bạn có thông báo mới trên SmartShrimp.', 240),
-    },
-    data: {
-        notificationId: notification.id,
-        accountId: notification.accountId,
-        expiresAt: expiry.toISOString(),
-    },
-    android: {
-        priority: 'high',
-        ttl: Math.max(1000, expiry - now),
+const message = (storedNotification, tokens, expiry, now) => {
+    const notification = localizeNotification(storedNotification);
+    return {
+        fids: tokens,
         notification: {
-            channelId: limits.channelId,
-            icon: 'ic_stat_smartshrimp',
-            tag: notification.id,
-            sound: 'default',
+            title: short(notification.title, 100),
+            body: short(notification.content || 'Bạn có thông báo mới trên SmartShrimp.', 240),
         },
-    },
-    apns: {
-        headers: {
-            'apns-push-type': 'alert',
-            'apns-priority': '10',
-            'apns-expiration': String(Math.floor(expiry.getTime() / 1000)),
-            'apns-collapse-id': notification.id,
+        data: {
+            notificationId: notification.id,
+            accountId: notification.accountId,
+            expiresAt: expiry.toISOString(),
         },
-        payload: { aps: { sound: 'default', threadId: 'smartshrimp' } },
-    },
-});
+        android: {
+            priority: 'high',
+            ttl: Math.max(1000, expiry - now),
+            notification: {
+                channelId: limits.channelId,
+                icon: 'ic_stat_smartshrimp',
+                tag: notification.id,
+                sound: 'default',
+            },
+        },
+        apns: {
+            headers: {
+                'apns-push-type': 'alert',
+                'apns-priority': '10',
+                'apns-expiration': String(Math.floor(expiry.getTime() / 1000)),
+                'apns-collapse-id': notification.id,
+            },
+            payload: { aps: { sound: 'default', threadId: 'smartshrimp' } },
+        },
+    };
+};
 
 /** Claim with a lease and attempt fence so an abandoned sender cannot overwrite its successor. */
 const processNotification = async (row, now = new Date()) => {

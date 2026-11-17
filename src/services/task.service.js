@@ -160,6 +160,8 @@ const createTask = (ownerId, input) => mutate(async (tx) => {
 
 /** Compare nullable fields and timestamps consistently when detecting owner edits. */
 const comparable = (value) => value instanceof Date ? value.toISOString() : value ?? null;
+const displayChange = (key, value) =>
+    key === 'priority' ? messages.TASK.PRIORITY_LABELS[value] || 'Không xác định' : value ?? '—';
 
 /**
  * Recheck ownership/state and calculate actual changes for the assignee notification only.
@@ -190,7 +192,7 @@ const changeTask = (ownerId, taskId, input, cancelling = false) => mutate(async 
     const updated = { ...current, ...data };
     const content = cancelling ? messages.TASK.CANCELLED_NOTIFICATION(input.reason) :
         messages.TASK.UPDATED_NOTIFICATION(Object.entries(changes).map(([key, value]) =>
-            `${messages.TASK.FIELD_LABELS[key] || key}: ${value.before ?? '—'} → ${value.after ?? '—'}`).join('; '));
+            `${messages.TASK.FIELD_LABELS[key] || key}: ${displayChange(key, value.before)} → ${displayChange(key, value.after)}`).join('; '));
     const notification = await notify(tx, updated, 'TASK_UPDATED', content);
     return { task: await getTask(ownerId, taskId, tx), notification };
 });

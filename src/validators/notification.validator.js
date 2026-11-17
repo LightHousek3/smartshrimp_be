@@ -23,10 +23,10 @@ const getListNotification = {
         })
         .custom((value, helpers) => {
             if (value.cursor && value.page) {
-                return helpers.message({ custom: '"cursor" cannot be combined with "page"' });
+                return helpers.error('pagination.exclusive');
             }
             if (value.createdFrom && value.createdTo && value.createdFrom > value.createdTo) {
-                return helpers.message({ custom: '"createdFrom" must not be after "createdTo"' });
+                return helpers.error('date.range');
             }
             return value;
         }),

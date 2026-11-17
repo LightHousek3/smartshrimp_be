@@ -1,4 +1,5 @@
 const ApiError = require('./ApiError');
+const { localizeNotification } = require('./notificationText');
 const asyncHandler = require('./asyncHandler');
 const pick = require('./pick');
 const ResponseHandler = require('./responseHandler');
@@ -26,6 +27,7 @@ const {
 const recognitionResult = require('./aiRecognition');
 
 module.exports = {
+    localizeNotification,
     recognitionResult,
     assertProtocolHarvestCoverage,
     productionSchedule,

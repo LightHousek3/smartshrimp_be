@@ -25,6 +25,8 @@ module.exports = Object.freeze({
     'date.format': '{{#label}} không đúng định dạng ngày giờ.',
     'date.min': '{{#label}} không được trước {{#limit}}.',
     'date.max': '{{#label}} không được sau {{#limit}}.',
+    'date.range': 'Ngày bắt đầu không được sau ngày kết thúc.',
+    'pagination.exclusive': 'Chỉ chọn một cách phân trang.',
     'array.base': '{{#label}} phải là danh sách.',
     'array.min': '{{#label}} phải có ít nhất {{#limit}} phần tử.',
     'array.max': '{{#label}} không được vượt quá {{#limit}} phần tử.',

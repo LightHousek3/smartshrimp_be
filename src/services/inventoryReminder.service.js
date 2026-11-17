@@ -52,7 +52,7 @@ const remindProduct = async (productId, now = new Date()) => {
                         : remainingDays === 0
                           ? 'Lô vật tư hết hạn hôm nay'
                           : 'Lô vật tư sắp hết hạn',
-                content: `${product.name}, lô ${lot}: ${state}. Tồn sổ được giữ nguyên; Owner quyết định sử dụng, trả hàng hoặc tiêu hủy theo nghiệp vụ kho.`,
+                content: `${product.name}, lô ${lot}: ${state}. Tồn sổ được giữ nguyên; chủ trại quyết định sử dụng, trả hàng hoặc tiêu hủy theo nghiệp vụ kho.`,
                 createdAt: now,
             });
             if (saved) notifications.push(saved);
