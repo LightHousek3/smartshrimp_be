@@ -1,5 +1,6 @@
 const nodemailer = require('nodemailer');
 const config = require('../config');
+const logger = require('../config/logger');
 const { VERIFICATION_PURPOSE, ACCOUNT_ROLE } = require('../constants');
 
 const BRAND_NAME = 'SmartShrimp';
@@ -31,8 +32,7 @@ const ACTIVATION_INVITE_CONTENT = {
     subject: 'Lời mời kích hoạt tài khoản SmartShrimp',
     title: 'Bạn được mời kích hoạt tài khoản',
     greeting: 'Chào mừng bạn đến với SmartShrimp,',
-    intro: 'Quản trị viên đã khởi tạo tài khoản cho bạn. Vui lòng mở SmartShrimp, nhập mã OTP bên dưới để xác minh email, sau đó hoàn tất hồ sơ và thiết lập mật khẩu đăng nhập.',
-    note: 'Nếu bạn không rõ về lời mời này, vui lòng liên hệ với quản trị viên đã cấp tài khoản.',
+    intro: 'Quản trị viên đã khởi tạo tài khoản cho bạn. Vui lòng mở liên kết kích hoạt bên dưới để xác minh email, hoàn tất hồ sơ và thiết lập mật khẩu đăng nhập.',
     actionName: 'kích hoạt tài khoản',
 };
 
@@ -79,17 +79,21 @@ const buildTextEmail = ({ code, content, expiresMinutes, instructions = '' }) =>
         content.greeting,
         content.intro,
         instructions,
-        `Mã OTP để ${content.actionName} của bạn là ${code}.`,
-        `Mã có hiệu lực trong ${expiresMinutes} phút.`,
-        'Vui lòng không chia sẻ mã này với bất kỳ ai.',
-        content.note,
+        ...(code
+            ? [
+                  `Mã OTP để ${content.actionName} của bạn là ${code}.`,
+                  `Mã có hiệu lực trong ${expiresMinutes} phút.`,
+                  'Vui lòng không chia sẻ mã này với bất kỳ ai.',
+              ]
+            : []),
+        ...(content.note ? [content.note] : []),
         `${BRAND_NAME} Team`,
     ]
         .filter(Boolean)
         .join('\n\n');
 
 const buildHtmlEmail = ({ code, content, expiresMinutes, instructions = '' }) => {
-    const safeCode = escapeHtml(code);
+    const safeCode = code ? escapeHtml(code) : '';
 
     return `<!doctype html>
 <html lang="vi">
@@ -117,7 +121,9 @@ const buildHtmlEmail = ({ code, content, expiresMinutes, instructions = '' }) =>
               ${instructions}
             </td>
           </tr>
-          <tr>
+          ${
+              code
+                  ? `<tr>
             <td style="padding:22px 32px 18px 32px;">
               <table role="presentation" width="100%" cellspacing="0" cellpadding="0" style="width:100%;background:#eefaf6;border:1px solid #bfe7db;border-radius:14px;font-family:${EMAIL_FONT_FAMILY};font-size:16px;line-height:1.625;">
                 <tr>
@@ -129,11 +135,13 @@ const buildHtmlEmail = ({ code, content, expiresMinutes, instructions = '' }) =>
                 </tr>
               </table>
             </td>
-          </tr>
+          </tr>`
+                  : ''
+          }
           <tr>
             <td style="padding:0 32px 30px 32px;">
-              <p style="margin:0 0 12px 0;font-size:14px;line-height:23px;color:#5d786f;">Vì lý do bảo mật, vui lòng không chia sẻ mã này với bất kỳ ai. SmartShrimp sẽ không bao giờ yêu cầu bạn cung cấp OTP qua điện thoại hoặc tin nhắn riêng.</p>
-              <p style="margin:0;font-size:14px;line-height:23px;color:#5d786f;">${escapeHtml(content.note)}</p>
+              ${code ? '<p style="margin:0 0 12px 0;font-size:14px;line-height:23px;color:#5d786f;">Vì lý do bảo mật, vui lòng không chia sẻ mã này với bất kỳ ai. SmartShrimp sẽ không bao giờ yêu cầu bạn cung cấp OTP qua điện thoại hoặc tin nhắn riêng.</p>' : ''}
+              ${content.note ? `<p style="margin:0;font-size:14px;line-height:23px;color:#5d786f;">${escapeHtml(content.note)}</p>` : ''}
             </td>
           </tr>
           <tr>
@@ -167,7 +175,7 @@ const buildInvitationInstructions = ({ email, role }) => {
     const mobile = 'smartshrimp://' + path;
     const useApp = [ACCOUNT_ROLE.FARM_OWNER, ACCOUNT_ROLE.TECHNICIAN].includes(role);
     const fallback = 'Chưa cài App hoặc đang dùng máy tính?';
-    const prefill = 'Email đã được điền sẵn. Nhập mã OTP trong email này để xác minh.';
+    const prefill = 'Hãy yêu cầu mã xác minh tại màn hình kích hoạt để tiếp tục.';
     const appLink = useApp
         ? `Đã cài App trên điện thoại? <a href="${escapeHtml(mobile)}">Mở ứng dụng SmartShrimp</a><br>`
         : '';
@@ -183,27 +191,31 @@ const buildInvitationInstructions = ({ email, role }) => {
     };
 };
 
-const sendOtp = async ({ email, code, purpose }) => {
-    await getTransporter().sendMail({
-        from: config.email.from,
-        to: email,
-        ...buildOtpEmail({ code, purpose }),
-    });
+/** Keep SMTP diagnostics separate from recipient details and verification secrets. */
+const sendEmail = async (email, content) => {
+    try {
+        await getTransporter().sendMail({
+            from: config.email.from,
+            to: email,
+            ...content,
+        });
+    } catch (error) {
+        const code = /^[A-Z0-9_]{1,64}$/.test(error?.code) ? error.code : 'UNKNOWN';
+        const responseCode = Number.isInteger(error?.responseCode) ? error.responseCode : 'unknown';
+        logger.error(`Email delivery failed: code=${code} responseCode=${responseCode}`);
+        throw error;
+    }
 };
 
-const buildActivationInviteEmail = ({ email, role, code }) =>
+const sendOtp = ({ email, code, purpose }) => sendEmail(email, buildOtpEmail({ code, purpose }));
+
+const buildActivationInviteEmail = ({ email, role }) =>
     buildEmail({
-        code,
         content: ACTIVATION_INVITE_CONTENT,
         instructions: buildInvitationInstructions({ email, role }),
     });
 
-const sendAccountActivationEmail = async ({ email, role, code }) => {
-    await getTransporter().sendMail({
-        from: config.email.from,
-        to: email,
-        ...buildActivationInviteEmail({ email, role, code }),
-    });
-};
+const sendAccountActivationEmail = ({ email, role }) =>
+    sendEmail(email, buildActivationInviteEmail({ email, role }));
 
 module.exports = { buildOtpEmail, buildActivationInviteEmail, sendOtp, sendAccountActivationEmail };

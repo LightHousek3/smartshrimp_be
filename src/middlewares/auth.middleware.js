@@ -61,7 +61,7 @@ const authenticate = async (req, res, next) => {
         next();
     } catch (error) {
         if (error instanceof jwt.TokenExpiredError) {
-            return next(ApiError.unauthorized('Access token expired'));
+            return next(ApiError.unauthorized(messages.AUTH.ACCESS_TOKEN_EXPIRED));
         }
 
         if (error instanceof jwt.JsonWebTokenError) {
@@ -72,17 +72,19 @@ const authenticate = async (req, res, next) => {
     }
 };
 
-const authorize = (...roles) => (req, res, next) => {
-    if (!req.account) {
-        return next(ApiError.unauthorized(messages.AUTH.UNAUTHORIZED));
-    }
+const authorize =
+    (...roles) =>
+    (req, res, next) => {
+        if (!req.account) {
+            return next(ApiError.unauthorized(messages.AUTH.UNAUTHORIZED));
+        }
 
-    if (!roles.includes(req.account.role)) {
-        return next(ApiError.forbidden(messages.AUTH.FORBIDDEN));
-    }
+        if (!roles.includes(req.account.role)) {
+            return next(ApiError.forbidden(messages.AUTH.FORBIDDEN));
+        }
 
-    return next();
-};
+        return next();
+    };
 
 const optionalAuth = async (req, res, next) => {
     try {

@@ -1,7 +1,7 @@
 const config = require('../config');
 const logger = require('../config/logger');
 const { ApiError } = require('../utils');
-const { httpStatus } = require('../constants');
+const { httpStatus, messages } = require('../constants');
 
 /**
  * Convert non-ApiError to ApiError
@@ -11,7 +11,7 @@ const errorConverter = (err, req, res, next) => {
 
     if (!(error instanceof ApiError)) {
         const statusCode = error.statusCode || httpStatus.INTERNAL_SERVER_ERROR;
-        const message = error.message || 'Internal Server Error';
+        const message = error.message || messages.SERVER.INTERNAL_ERROR;
         error = new ApiError(statusCode, message, false, err.stack);
     }
 
@@ -24,10 +24,12 @@ const errorConverter = (err, req, res, next) => {
 const errorHandler = (err, req, res, next) => {
     let { statusCode, message } = err;
 
-    // In production, hide internal error details
-    if (config.env === 'production' && !err.isOperational) {
-        statusCode = httpStatus.INTERNAL_SERVER_ERROR;
-        message = 'Internal Server Error';
+    // Client messages remain safe and localized; diagnostic details belong in logs.
+    if (!err.isOperational) {
+        message =
+            statusCode === httpStatus.BAD_REQUEST
+                ? messages.COMMON.BAD_REQUEST
+                : messages.SERVER.INTERNAL_ERROR;
     }
 
     // Log error
@@ -57,7 +59,7 @@ const errorHandler = (err, req, res, next) => {
  * Handle 404 - Route not found
  */
 const notFoundHandler = (req, res, next) => {
-    next(new ApiError(httpStatus.NOT_FOUND, `Route ${req.originalUrl} not found`));
+    next(ApiError.notFound());
 };
 
 module.exports = {

@@ -1,6 +1,7 @@
 const Joi = require('joi');
 const { ApiError, pick } = require('../utils');
 const { httpStatus } = require('../constants');
+const validationMessages = require('../constants/validationMessages');
 
 /**
  * Validate request against a Joi schema.
@@ -17,13 +18,15 @@ const validate = (schema) => (req, res, next) => {
     const object = pick(req, Object.keys(validSchema));
 
     const { value, error } = Joi.compile(validSchema)
-        .prefs({ errors: { label: 'key' }, abortEarly: false })
+        .prefs({
+            errors: { label: 'key', wrap: { label: false } },
+            messages: validationMessages,
+            abortEarly: false,
+        })
         .validate(object);
 
     if (error) {
-        const errorMessage = error.details
-            .map((detail) => detail.message)
-            .join(', ');
+        const errorMessage = error.details.map((detail) => detail.message).join(', ');
         return next(new ApiError(httpStatus.BAD_REQUEST, errorMessage));
     }
 
