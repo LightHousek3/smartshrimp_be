@@ -8,7 +8,7 @@ let modePromise;
 let modeExpires = 0;
 
 /**
- * Detect schema capability; incomplete legacy facts are marked separately in V2 DTOs.
+ * Detect schema capability; incomplete legacy facts are marked separately in response data.
  */
 const isV2 = () => {
     if (!modePromise || Date.now() >= modeExpires) {
@@ -28,7 +28,7 @@ const isV2 = () => {
 };
 
 /**
- * Reject writes while the connected schema lacks required V2 inventory fields.
+ * Reject writes while the connected schema lacks required inventory fields.
  */
 const requireV2 = async () => {
     if (!(await isV2())) {
@@ -63,8 +63,7 @@ const flags = {
  * Apply ownership checks.
  */
 const requireFarm = async (farmId, ownerId) => {
-    const [farm] =
-        await prisma.$queryRaw`SELECT id, name FROM farms f
+    const [farm] = await prisma.$queryRaw`SELECT id, name FROM farms f
             WHERE id=${farmId}::uuid AND owner_id=${ownerId}::uuid
                 AND NOT COALESCE((to_jsonb(f)->>'is_deleted')::boolean, false)`;
     if (!farm) {
@@ -126,7 +125,7 @@ const productDto = (row, balances, includeLots = false) => {
 };
 
 /**
- * Read legacy columns through JSON so missing V2 columns are never selected.
+ * Read legacy columns through JSON so missing inventory columns are never selected.
  */
 const productRows = (farmId, ownerId, productId) =>
     prisma.$queryRaw(Prisma.sql`
@@ -184,7 +183,7 @@ const getProducts = async (farmId, ownerId, query) => {
 };
 
 /**
- * Read an owned legacy product and its receipt layers without inventing V2 facts.
+ * Read an owned legacy product and its receipt layers without inventing missing facts.
  */
 const getProduct = async (farmId, productId, ownerId) => {
     const farm = await requireFarm(farmId, ownerId);

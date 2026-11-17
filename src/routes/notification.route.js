@@ -6,11 +6,32 @@ const { ACCOUNT_ROLE } = require('../constants');
 
 const router = express.Router();
 
-router.use(authenticate, authorize(
-    ACCOUNT_ROLE.TECHNICIAN,
-    ACCOUNT_ROLE.EXPERT,
-    ACCOUNT_ROLE.FARM_OWNER,
-));
+router.use(
+    authenticate,
+    authorize(ACCOUNT_ROLE.TECHNICIAN, ACCOUNT_ROLE.EXPERT, ACCOUNT_ROLE.FARM_OWNER),
+);
+
+/**
+ * @route   PUT /api/v1/notifications/devices
+ * @desc    Register the push endpoint for an authenticated device session
+ * @access  Technician, Expert, Owner
+ */
+router.put(
+    '/devices',
+    validate(notificationValidator.registerDevice),
+    notificationController.registerDevice,
+);
+
+/**
+ * @route   DELETE /api/v1/notifications/devices/:deviceId
+ * @desc    Remove the push endpoint owned by the authenticated account
+ * @access  Technician, Expert, Owner
+ */
+router.delete(
+    '/devices/:deviceId',
+    validate(notificationValidator.unregisterDevice),
+    notificationController.unregisterDevice,
+);
 
 /**
  * @route   GET /api/v1/notifications
@@ -28,14 +49,11 @@ router.get(
  * @desc    Mark all unread notifications owned by the authenticated account as read
  * @access  Technician, Expert, Owner
  */
-router.patch(
-    '/read-all',
-    notificationController.markAllAsRead,
-);
+router.patch('/read-all', notificationController.markAllAsRead);
 
 /**
- * @route   GET /api/v1/notifications/:notificationId
- * @desc    Get an owned notification and record its first read time
+ * @route   GET /api/v1/notifications/:notificationId/reference-context
+ * @desc    Resolve an owned notification's destination within the account's scope
  * @access  Technician, Expert, Owner
  */
 router.get(
@@ -44,6 +62,11 @@ router.get(
     notificationController.getReferenceContext,
 );
 
+/**
+ * @route   GET /api/v1/notifications/:notificationId
+ * @desc    Load an owned notification for the detail drawer and record its first read time
+ * @access  Technician, Expert, Owner
+ */
 router.get(
     '/:notificationId',
     validate(notificationValidator.getNotification),

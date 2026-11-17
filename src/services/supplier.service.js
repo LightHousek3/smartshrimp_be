@@ -99,8 +99,10 @@ const findSupplier = async (client, ownerId, supplierId) => {
 const requireSelectableSupplier = async (client, ownerId, supplierId, manufacturerOnly = false) => {
     await client.$queryRaw`SELECT id FROM suppliers WHERE id = ${supplierId}::uuid AND owner_id = ${ownerId}::uuid FOR SHARE`;
     const supplier = await findSupplier(client, ownerId, supplierId);
-    if (supplier.status !== 'active'
-        || (manufacturerOnly && !['MANUFACTURER', 'BOTH'].includes(supplier.supplierType))) {
+    if (
+        supplier.status !== 'active' ||
+        (manufacturerOnly && !['MANUFACTURER', 'BOTH'].includes(supplier.supplierType))
+    ) {
         throw new ApiError(httpStatus.CONFLICT, messages.SUPPLIER.NOT_SELECTABLE);
     }
     return supplier;
@@ -139,20 +141,23 @@ const requireUniqueName = async (client, ownerId, name, excludedId) => {
     }
 };
 
-const writeData = ({
-    status, isActive, ...data
-}) => ({
+const writeData = ({ status, isActive, ...data }) => ({
     ...data,
-    ...(status !== undefined ? { status: status.toLowerCase() }
-        : isActive !== undefined ? { status: isActive ? 'active' : 'inactive' } : {}),
+    ...(status !== undefined
+        ? { status: status.toLowerCase() }
+        : isActive !== undefined
+          ? { status: isActive ? 'active' : 'inactive' }
+          : {}),
 });
 
 /**
- * List active and inactive directory entries; canDelete includes every V2 FK reference.
+ * List active and inactive directory entries; deletion eligibility includes every foreign-key reference.
  */
-const getSuppliers = async (farmId, ownerId, {
-    page = 1, limit = 100, search = '', supplierType, status,
-} = {}) => {
+const getSuppliers = async (
+    farmId,
+    ownerId,
+    { page = 1, limit = 100, search = '', supplierType, status } = {},
+) => {
     await requireOwnedFarm(prisma, farmId, ownerId);
     const where = {
         ownerId,
@@ -245,9 +250,7 @@ const getSupplier = async (farmId, supplierId, ownerId) => {
             ...product,
             farmName: farm.name,
         })),
-        receipts: balances.map(({
-            product, quantity, ...balance
-        }) => ({
+        receipts: balances.map(({ product, quantity, ...balance }) => ({
             ...balance,
             productName: product.name,
             farmId: product.farmId,
@@ -261,87 +264,99 @@ const getSupplier = async (farmId, supplierId, ownerId) => {
 /**
  * ownerId is always taken from the session, never from the supplied body or farm.
  */
-const createSupplier = (farmId, data, ownerId) => writeSupplier(async (client) => {
-    await requireOwnedFarm(client, farmId, ownerId);
-    await requireUniqueName(client, ownerId, data.name);
-    const supplier = await client.supplier.create({
-        data: {
-            ...writeData(data),
-            ownerId,
-            updatedAt: new Date(),
-        },
-        select: SUPPLIER_SELECT,
+const createSupplier = (farmId, data, ownerId) =>
+    writeSupplier(async (client) => {
+        await requireOwnedFarm(client, farmId, ownerId);
+        await requireUniqueName(client, ownerId, data.name);
+        const supplier = await client.supplier.create({
+            data: {
+                ...writeData(data),
+                ownerId,
+                updatedAt: new Date(),
+            },
+            select: SUPPLIER_SELECT,
+        });
+        return normalizeSupplier(supplier, new Map([[supplier.id, true]]));
     });
-    return normalizeSupplier(supplier, new Map([[supplier.id, true]]));
-});
 
 /**
  * Inactivation leaves existing stock usable; business references freeze the name and role.
  * Even without orders, removing the manufacturer role must preserve existing manufacturer links.
  */
-const updateSupplier = (farmId, supplierId, input, ownerId) => writeSupplier(async (client) => {
-    await requireOwnedFarm(client, farmId, ownerId);
-    await client.$queryRaw`SELECT id FROM suppliers WHERE id = ${supplierId}::uuid AND owner_id = ${ownerId}::uuid FOR UPDATE`;
-    const current = await findSupplier(client, ownerId, supplierId);
-    const { expectedUpdatedAt, ...data } = input;
-    const changesIdentity = (data.name !== undefined && data.name !== current.name)
-        || (data.supplierType !== undefined && data.supplierType !== current.supplierType);
-    if (changesIdentity && (await deletionHints(client, ownerId)).identityLocked.has(supplierId)) {
-        throw new ApiError(httpStatus.CONFLICT, messages.SUPPLIER.IDENTITY_LOCKED);
-    }
-    if (data.name) {
-        await requireUniqueName(client, ownerId, data.name, supplierId);
-    }
-    if (data.supplierType === 'DISTRIBUTOR') {
-        const [references] = await client.$queryRaw(Prisma.sql`
+const updateSupplier = (farmId, supplierId, input, ownerId) =>
+    writeSupplier(async (client) => {
+        await requireOwnedFarm(client, farmId, ownerId);
+        await client.$queryRaw`SELECT id FROM suppliers WHERE id = ${supplierId}::uuid AND owner_id = ${ownerId}::uuid FOR UPDATE`;
+        const current = await findSupplier(client, ownerId, supplierId);
+        const { expectedUpdatedAt, ...data } = input;
+        const changesIdentity =
+            (data.name !== undefined && data.name !== current.name) ||
+            (data.supplierType !== undefined && data.supplierType !== current.supplierType);
+        if (
+            changesIdentity &&
+            (await deletionHints(client, ownerId)).identityLocked.has(supplierId)
+        ) {
+            throw new ApiError(httpStatus.CONFLICT, messages.SUPPLIER.IDENTITY_LOCKED);
+        }
+        if (data.name) {
+            await requireUniqueName(client, ownerId, data.name, supplierId);
+        }
+        if (data.supplierType === 'DISTRIBUTOR') {
+            const [references] = await client.$queryRaw(Prisma.sql`
             SELECT EXISTS(SELECT 1 FROM products WHERE manufacturer_id = ${supplierId}::uuid)
                 OR EXISTS(SELECT 1 FROM production_protocol_template_items WHERE recommended_manufacturer_id = ${supplierId}::uuid)
                 OR EXISTS(SELECT 1 FROM protocol_items WHERE recommended_manufacturer_id = ${supplierId}::uuid) AS used`);
-        if (references.used) {
-            throw new ApiError(httpStatus.CONFLICT, messages.SUPPLIER.MANUFACTURER_REFERENCED);
+            if (references.used) {
+                throw new ApiError(httpStatus.CONFLICT, messages.SUPPLIER.MANUFACTURER_REFERENCED);
+            }
         }
-    }
-    const result = await client.supplier.updateMany({
-        where: {
-            id: supplierId,
-            ownerId,
-            updatedAt: versionRange(expectedUpdatedAt),
-        },
-        data: {
-            ...writeData(data),
-            updatedAt: new Date(),
-        },
+        const result = await client.supplier.updateMany({
+            where: {
+                id: supplierId,
+                ownerId,
+                updatedAt: versionRange(expectedUpdatedAt),
+            },
+            data: {
+                ...writeData(data),
+                updatedAt: new Date(),
+            },
+        });
+        if (result.count !== 1) {
+            throw new ApiError(httpStatus.CONFLICT, messages.SUPPLIER.CHANGE_CONFLICT);
+        }
+        return normalizeSupplier(
+            await findSupplier(client, ownerId, supplierId),
+            await deletionHints(client, ownerId),
+        );
     });
-    if (result.count !== 1) {
-        throw new ApiError(httpStatus.CONFLICT, messages.SUPPLIER.CHANGE_CONFLICT);
-    }
-    return normalizeSupplier(await findSupplier(client, ownerId, supplierId), await deletionHints(client, ownerId));
-});
 
 /**
  * Hard-delete only an unreferenced directory record; database FKs arbitrate racing references.
  */
-const deleteSupplier = (farmId, supplierId, ownerId) => writeSupplier(async (client) => {
-    await requireOwnedFarm(client, farmId, ownerId);
-    await client.$queryRaw`SELECT id FROM suppliers WHERE id = ${supplierId}::uuid AND owner_id = ${ownerId}::uuid FOR UPDATE`;
-    await findSupplier(client, ownerId, supplierId);
-    if (!(await deletionHints(client, ownerId)).get(supplierId)) {
-        throw new ApiError(httpStatus.CONFLICT, messages.SUPPLIER.HAS_REFERENCES);
-    }
-    const result = await client.supplier.deleteMany({
-        where: {
-            id: supplierId,
-            ownerId,
-        },
+const deleteSupplier = (farmId, supplierId, ownerId) =>
+    writeSupplier(async (client) => {
+        await requireOwnedFarm(client, farmId, ownerId);
+        await client.$queryRaw`SELECT id FROM suppliers WHERE id = ${supplierId}::uuid AND owner_id = ${ownerId}::uuid FOR UPDATE`;
+        await findSupplier(client, ownerId, supplierId);
+        if (!(await deletionHints(client, ownerId)).get(supplierId)) {
+            throw new ApiError(httpStatus.CONFLICT, messages.SUPPLIER.HAS_REFERENCES);
+        }
+        const result = await client.supplier.deleteMany({
+            where: {
+                id: supplierId,
+                ownerId,
+            },
+        });
+        if (result.count !== 1) {
+            throw new ApiError(httpStatus.CONFLICT, messages.SUPPLIER.CHANGE_CONFLICT);
+        }
     });
-    if (result.count !== 1) {
-        throw new ApiError(httpStatus.CONFLICT, messages.SUPPLIER.CHANGE_CONFLICT);
-    }
-});
 
 module.exports = {
-    getSuppliers: async (...args) => (await legacyRead.isV2() ? getSuppliers : legacyRead.getSuppliers)(...args),
-    getSupplier: async (...args) => (await legacyRead.isV2() ? getSupplier : legacyRead.getSupplier)(...args),
+    getSuppliers: async (...args) =>
+        ((await legacyRead.isV2()) ? getSuppliers : legacyRead.getSuppliers)(...args),
+    getSupplier: async (...args) =>
+        ((await legacyRead.isV2()) ? getSupplier : legacyRead.getSupplier)(...args),
     createSupplier: legacyRead.guardWrite(createSupplier),
     updateSupplier: legacyRead.guardWrite(updateSupplier),
     deleteSupplier: legacyRead.guardWrite(deleteSupplier),

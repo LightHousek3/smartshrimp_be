@@ -4,13 +4,23 @@ const prisma = require('../config/prisma');
 const config = require('../config');
 const { emitNotification } = require('../realtime');
 const {
-    ApiError, stockQuantity, vietnamDate, assertMaterialSafety, productionProtocolV2: v2, productionSchedule: scheduleRules,
+    ApiError,
+    stockQuantity,
+    vietnamDate,
+    assertMaterialSafety,
+    protocolStructure: structure,
+    productionSchedule: scheduleRules,
 } = require('../utils');
 const withdrawal = require('./harvestWithdrawal.service');
-const { materialSelect, assertOperationalMaterial, assertApprovedMaterial } = require('./productionProtocolReview.service');
+const {
+    materialSelect,
+    assertOperationalMaterial,
+    assertApprovedMaterial,
+} = require('./productionProtocolReview.service');
 const lifecycle = require('./protocolLifecycle.service');
 const { courseEndsAt } = require('../utils/protocolTimeline');
 const { latestHarvestAt } = require('./harvest.service');
+const { timingComparison, TIMING } = require('../utils/protocolExecution');
 const {
     messages,
     PERSONNEL_ROLE,
@@ -24,38 +34,66 @@ const {
 } = require('../constants');
 
 const toNumber = (val) => (val == null ? null : Number(val));
-const ITEM_STORAGE_SELECT = { productionMealId: true, dailyDoseIncrement: true,
-    recurrenceAnchorDay: true, doseAnchorDay: true, materialSnapshot: true };
+const ITEM_STORAGE_SELECT = {
+    productionMealId: true,
+    dailyDoseIncrement: true,
+    recurrenceAnchorDay: true,
+    doseAnchorDay: true,
+    materialSnapshot: true,
+};
 
 /** Present saved material facts and quantities without exposing internal scheduling metadata. */
 const formatSchedule = (s) => {
     if (!s) return s;
     const material = s.protocolItem?.materialSnapshot;
-    const publicItem = s.protocolItem && Object.fromEntries(Object.entries(s.protocolItem).filter(([key]) =>
-        !Object.hasOwn(ITEM_STORAGE_SELECT, key)));
+    const publicItem =
+        s.protocolItem &&
+        Object.fromEntries(
+            Object.entries(s.protocolItem).filter(
+                ([key]) => !Object.hasOwn(ITEM_STORAGE_SELECT, key),
+            ),
+        );
     return {
         ...s,
-        ...(material && s.product && material.id === s.product.id && { product: { ...s.product,
-            name: material.name, category: material.category, unit: material.unit } }),
+        ...(material &&
+            s.product &&
+            material.id === s.product.id && {
+                product: {
+                    ...s.product,
+                    name: material.name,
+                    category: material.category,
+                    unit: material.unit,
+                },
+            }),
         plannedQuantity: toNumber(s.plannedQuantity),
         doseValueSnapshot: toNumber(s.doseValueSnapshot),
         basisQuantity: toNumber(s.basisQuantity),
-        protocolItem: s.protocolItem ? {
-            ...publicItem,
-            protocol: s.protocolItem.protocol ? {
-                ...s.protocolItem.protocol,
-                allowedVariancePct: toNumber(s.protocolItem.protocol.allowedVariancePct),
-            } : s.protocolItem.protocol,
-        } : s.protocolItem,
-        execution: s.execution ? {
-            ...s.execution,
-            actualQuantity: toNumber(s.execution.actualQuantity),
-        } : s.execution,
-        sourceHealthLog: s.sourceHealthLog ? {
-            ...s.sourceHealthLog,
-            estimatedBiomassKg: toNumber(s.sourceHealthLog.estimatedBiomassKg),
-            avgWeightG: toNumber(s.sourceHealthLog.avgWeightG),
-        } : s.sourceHealthLog,
+        protocolItem: s.protocolItem
+            ? {
+                  ...publicItem,
+                  protocol: s.protocolItem.protocol
+                      ? {
+                            ...s.protocolItem.protocol,
+                            allowedVariancePct: toNumber(
+                                s.protocolItem.protocol.allowedVariancePct,
+                            ),
+                        }
+                      : s.protocolItem.protocol,
+              }
+            : s.protocolItem,
+        execution: s.execution
+            ? {
+                  ...s.execution,
+                  actualQuantity: toNumber(s.execution.actualQuantity),
+              }
+            : s.execution,
+        sourceHealthLog: s.sourceHealthLog
+            ? {
+                  ...s.sourceHealthLog,
+                  estimatedBiomassKg: toNumber(s.sourceHealthLog.estimatedBiomassKg),
+                  avgWeightG: toNumber(s.sourceHealthLog.avgWeightG),
+              }
+            : s.sourceHealthLog,
     };
 };
 
@@ -97,7 +135,9 @@ const listSchedules = async (technicianId, seasonId, query = {}) => {
 
     // Match the generator's freshness policy; future/voided measurements cannot authorize a dose.
     const now = new Date();
-    const freshSince = new Date(now.getTime() - PRODUCTION_PROTOCOL_LIMITS.biomassMaxAgeHours * 3600000);
+    const freshSince = new Date(
+        now.getTime() - PRODUCTION_PROTOCOL_LIMITS.biomassMaxAgeHours * 3600000,
+    );
     const recentBiomassLog = await prisma.shrimpHealthLog.findFirst({
         where: {
             seasonId,
@@ -344,31 +384,40 @@ const notifyInsufficientInventory = async (technicianId, scheduleId) => {
         await tx.$queryRaw`SELECT id FROM operation_schedules WHERE id = ${scheduleId}::uuid FOR UPDATE`;
         const schedule = await tx.operationSchedule.findUnique({
             where: { id: scheduleId },
-            select: { season: { select: { pond: { select: { farm: { select: { ownerId: true } } } } } } },
+            select: {
+                season: { select: { pond: { select: { farm: { select: { ownerId: true } } } } } },
+            },
         });
         if (!schedule) return [];
         const ownerId = schedule.season.pond.farm.ownerId;
         const saved = [];
         for (const accountId of new Set([ownerId, technicianId])) {
             const where = {
-                accountId, type: NOTIFICATION_TYPE.INVENTORY_INSUFFICIENT,
-                referenceType: 'operation_schedule', referenceId: scheduleId,
+                accountId,
+                type: NOTIFICATION_TYPE.INVENTORY_INSUFFICIENT,
+                referenceType: 'operation_schedule',
+                referenceId: scheduleId,
             };
             // A planned occurrence needs one shortage alert per recipient, even when the request is retried.
             if (await tx.notification.findFirst({ where, select: { id: true } })) continue;
-            saved.push(await tx.notification.create({
-                data: {
-                    ...where,
-                    title: messages.OPERATION.INSUFFICIENT_INVENTORY_TITLE,
-                    content: messages.OPERATION.INSUFFICIENT_INVENTORY_CONTENT,
-                },
-                select: { id: true, accountId: true },
-            }));
+            saved.push(
+                await tx.notification.create({
+                    data: {
+                        ...where,
+                        title: messages.OPERATION.INSUFFICIENT_INVENTORY_TITLE,
+                        content: messages.OPERATION.INSUFFICIENT_INVENTORY_CONTENT,
+                    },
+                    select: { id: true, accountId: true },
+                }),
+            );
         }
         return saved;
     });
     for (const notice of notices) {
-        emitNotification(notice.accountId, 'notification:new', { id: notice.id, referenceId: scheduleId });
+        emitNotification(notice.accountId, 'notification:new', {
+            id: notice.id,
+            referenceId: scheduleId,
+        });
     }
 };
 
@@ -378,7 +427,10 @@ const notifyInsufficientInventory = async (technicianId, scheduleId) => {
  * A matching idempotent retry returns the saved execution without a second stock deduction.
  */
 const executeSchedule = async (technicianId, scheduleId, payload) => {
-    const pointer = await prisma.operationSchedule.findUnique({ where: { id: scheduleId }, select: { seasonId: true } });
+    const pointer = await prisma.operationSchedule.findUnique({
+        where: { id: scheduleId },
+        select: { seasonId: true },
+    });
     if (!pointer) throw ApiError.notFound(messages.OPERATION.NOT_FOUND);
     const actual = new Prisma.Decimal(payload.actualQuantity);
     if (!actual.isFinite() || actual.lte(0) || actual.decimalPlaces() > 9) {
@@ -387,185 +439,343 @@ const executeSchedule = async (technicianId, scheduleId, payload) => {
     for (let attempt = 0; attempt < 3; attempt++) {
         try {
             const notifications = [];
-            const result = await prisma.$transaction(async (tx) => {
-                // Shared order with harvest: season -> schedule -> actual product -> receipt layers.
-                await tx.$queryRaw`SELECT id FROM aquaculture_seasons WHERE id = ${pointer.seasonId}::uuid FOR UPDATE`;
-                // A delayed worker must not leave a superseded production slot executable.
-                notifications.push(...await lifecycle.reconcile(tx, pointer.seasonId));
-                await tx.$queryRaw`SELECT id FROM operation_schedules WHERE id = ${scheduleId}::uuid FOR UPDATE`;
-                const schedule = await tx.operationSchedule.findUnique({
-                    where: { id: scheduleId },
-                    include: {
-                        season: { include: { pond: { select: { farmId: true, farm: { select: { ownerId: true, status: true } } } } } },
-                        protocolItem: { select: { ...ITEM_STORAGE_SELECT, operationType: true, doseBasis: true, doseValue: true,
-                            doseUnit: true, startDayOffset: true, endDayOffset: true, repeatIntervalDays: true, mealNumber: true, instructions: true,
-                            dueAtMinutes: true,
-                            protocol: { select: { id: true, contentVersion: true, allowedVariancePct: true, protocolType: true, diseaseCaseId: true, status: true, treatmentStartAt: true, items: true } } } },
-                    },
-                });
-                if (!schedule) throw ApiError.notFound(messages.OPERATION.NOT_FOUND);
-                const assignment = await tx.seasonPersonnelAssignment.findFirst({
-                    where: { seasonId: schedule.seasonId, accountId: technicianId, role: PERSONNEL_ROLE.TECHNICIAN, unassignedAt: null,
-                        account: { role: 'TECHNICIAN', status: 'ACTIVE', managedByOwnerId: schedule.season.pond.farm.ownerId } },
-                    select: { id: true },
-                });
-                if (!assignment) throw ApiError.forbidden(messages.OPERATION.NOT_ASSIGNED_TECHNICIAN);
-                const targetProductId = payload.actualProductId || schedule.productId;
-                if (!targetProductId) throw ApiError.badRequest(messages.HARVEST.WITHDRAWAL_PRODUCT_NOT_READY);
-                const existing = await tx.operationExecution.findUnique({
-                    where: { idempotencyKey: payload.idempotencyKey },
-                    include: { actualProduct: { select: { id: true, name: true, unit: true } } },
-                });
-                if (existing) {
-                    if (existing.scheduleId !== scheduleId || existing.executedBy !== technicianId
-                        || existing.actualProductId !== targetProductId || !actual.equals(existing.actualQuantity)
-                        || (payload.executedAt && existing.executedAt.getTime() !== new Date(payload.executedAt).getTime())
-                        || (existing.note || null) !== (payload.note || null)
-                        || (existing.varianceReason || null) !== (payload.varianceReason || null)) {
-                        throw ApiError.conflict(messages.OPERATION.EXECUTION_CONFLICT);
+            const result = await prisma.$transaction(
+                async (tx) => {
+                    // Shared order with harvest: season -> schedule -> actual product -> receipt layers.
+                    await tx.$queryRaw`SELECT id FROM aquaculture_seasons WHERE id = ${pointer.seasonId}::uuid FOR UPDATE`;
+                    // A delayed worker must not leave a superseded production slot executable.
+                    notifications.push(...(await lifecycle.reconcile(tx, pointer.seasonId)));
+                    await tx.$queryRaw`SELECT id FROM operation_schedules WHERE id = ${scheduleId}::uuid FOR UPDATE`;
+                    const schedule = await tx.operationSchedule.findUnique({
+                        where: { id: scheduleId },
+                        include: {
+                            season: {
+                                include: {
+                                    pond: {
+                                        select: {
+                                            farmId: true,
+                                            farm: { select: { ownerId: true, status: true } },
+                                        },
+                                    },
+                                },
+                            },
+                            protocolItem: {
+                                select: {
+                                    ...ITEM_STORAGE_SELECT,
+                                    operationType: true,
+                                    doseBasis: true,
+                                    doseValue: true,
+                                    doseUnit: true,
+                                    startDayOffset: true,
+                                    endDayOffset: true,
+                                    repeatIntervalDays: true,
+                                    mealNumber: true,
+                                    instructions: true,
+                                    dueAtMinutes: true,
+                                    protocol: {
+                                        select: {
+                                            id: true,
+                                            allowedVariancePct: true,
+                                            protocolType: true,
+                                            diseaseCaseId: true,
+                                            status: true,
+                                            treatmentStartAt: true,
+                                            items: true,
+                                        },
+                                    },
+                                },
+                            },
+                        },
+                    });
+                    if (!schedule) throw ApiError.notFound(messages.OPERATION.NOT_FOUND);
+                    const assignment = await tx.seasonPersonnelAssignment.findFirst({
+                        where: {
+                            seasonId: schedule.seasonId,
+                            accountId: technicianId,
+                            role: PERSONNEL_ROLE.TECHNICIAN,
+                            unassignedAt: null,
+                            account: {
+                                role: 'TECHNICIAN',
+                                status: 'ACTIVE',
+                                managedByOwnerId: schedule.season.pond.farm.ownerId,
+                            },
+                        },
+                        select: { id: true },
+                    });
+                    if (!assignment)
+                        throw ApiError.forbidden(messages.OPERATION.NOT_ASSIGNED_TECHNICIAN);
+                    const targetProductId = payload.actualProductId || schedule.productId;
+                    if (!targetProductId)
+                        throw ApiError.badRequest(messages.HARVEST.WITHDRAWAL_PRODUCT_NOT_READY);
+                    const existing = await tx.operationExecution.findUnique({
+                        where: { idempotencyKey: payload.idempotencyKey },
+                        include: {
+                            actualProduct: { select: { id: true, name: true, unit: true } },
+                        },
+                    });
+                    if (existing) {
+                        if (
+                            existing.scheduleId !== scheduleId ||
+                            existing.executedBy !== technicianId ||
+                            existing.actualProductId !== targetProductId ||
+                            !actual.equals(existing.actualQuantity) ||
+                            (payload.executedAt &&
+                                existing.executedAt.getTime() !==
+                                    new Date(payload.executedAt).getTime()) ||
+                            (existing.note || null) !== (payload.note || null) ||
+                            (existing.varianceReason || null) !== (payload.varianceReason || null)
+                        ) {
+                            throw ApiError.conflict(messages.OPERATION.EXECUTION_CONFLICT);
+                        }
+                        return { ...existing, actualQuantity: Number(existing.actualQuantity) };
                     }
-                    return { ...existing, actualQuantity: Number(existing.actualQuantity) };
-                }
-                if (schedule.season.status !== SEASON_STATUS.ACTIVE) throw ApiError.badRequest(messages.OPERATION.SEASON_NOT_ACTIVE);
-                if (schedule.status !== OPERATION_STATUS.PLANNED) throw ApiError.conflict(messages.OPERATION.SCHEDULE_NOT_PLANNED);
-                const protocol = schedule.protocolItem.protocol;
-                const end = protocol.contentVersion === 2 ? courseEndsAt({ ...protocol, season: schedule.season }) : null;
-                const replacementStart = await lifecycle.nextTreatmentStart(tx, schedule.seasonId, protocol.id);
-                if (replacementStart && new Date() >= replacementStart) throw ApiError.conflict(messages.TREATMENT_PROTOCOL.REPLACEMENT_DUE);
-                if (protocol.contentVersion === 2 && (!end || new Date() > end)) {
-                    throw ApiError.conflict(messages.TREATMENT_PROTOCOL.RECORDING_CLOSED);
-                }
-                const approvedMaterial = schedule.protocolItem.materialSnapshot;
-                if (protocol.protocolType === 'TREATMENT' && !await tx.diseaseCase.count({ where: {
-                    id: protocol.diseaseCaseId, seasonId: schedule.seasonId, status: 'IN_TREATMENT',
-                } })) throw ApiError.conflict(messages.TREATMENT_PROTOCOL.STATE);
-                if (protocol.protocolType === 'PRODUCTION' && await lifecycle.productionBlocked(tx, schedule.seasonId)) {
-                    throw ApiError.conflict(messages.PRODUCTION_PROTOCOL.STATE);
-                }
-                if (!v2.isV2(protocol) && protocol.status !== PROTOCOL_STATUS.APPROVED
-                    && !(protocol.protocolType === 'TREATMENT' && protocol.status === PROTOCOL_STATUS.ACTIVE)) {
-                    throw ApiError.conflict(messages.PRODUCTION_PROTOCOL.STATE);
-                }
-                if (v2.isV2(schedule.protocolItem.protocol)) {
-                    v2.assertItemMetadata(schedule.protocolItem);
-                    if (!approvedMaterial || targetProductId !== schedule.productId) throw ApiError.conflict(messages.PRODUCTION_PROTOCOL.MATERIAL_LOCKED);
-                    if (protocol.status !== PROTOCOL_STATUS.ACTIVE || schedule.season.pond.farm.status !== FARM_STATUS.ACTIVE) {
+                    if (schedule.season.status !== SEASON_STATUS.ACTIVE)
+                        throw ApiError.badRequest(messages.OPERATION.SEASON_NOT_ACTIVE);
+                    if (schedule.status !== OPERATION_STATUS.PLANNED)
+                        throw ApiError.conflict(messages.OPERATION.SCHEDULE_NOT_PLANNED);
+                    const protocol = schedule.protocolItem.protocol;
+                    const end = courseEndsAt({ ...protocol, season: schedule.season });
+                    const replacementStart = await lifecycle.nextTreatmentStart(
+                        tx,
+                        schedule.seasonId,
+                        protocol.id,
+                    );
+                    if (replacementStart && new Date() >= replacementStart)
+                        throw ApiError.conflict(messages.TREATMENT_PROTOCOL.REPLACEMENT_DUE);
+                    if (!end || new Date() > end) {
+                        throw ApiError.conflict(messages.TREATMENT_PROTOCOL.RECORDING_CLOSED);
+                    }
+                    const approvedMaterial = schedule.protocolItem.materialSnapshot;
+                    if (
+                        protocol.protocolType === 'TREATMENT' &&
+                        !(await tx.diseaseCase.count({
+                            where: {
+                                id: protocol.diseaseCaseId,
+                                seasonId: schedule.seasonId,
+                                status: 'IN_TREATMENT',
+                            },
+                        }))
+                    )
+                        throw ApiError.conflict(messages.TREATMENT_PROTOCOL.STATE);
+                    if (
+                        protocol.protocolType === 'PRODUCTION' &&
+                        (await lifecycle.productionBlocked(tx, schedule.seasonId))
+                    ) {
                         throw ApiError.conflict(messages.PRODUCTION_PROTOCOL.STATE);
                     }
-                    if (['PER_KG_BIOMASS', 'PERCENT_BIOMASS'].includes(schedule.doseBasisSnapshot ?? schedule.protocolItem.doseBasis)) {
+                    structure.assertItemMetadata(schedule.protocolItem);
+                    if (!approvedMaterial || targetProductId !== schedule.productId)
+                        throw ApiError.conflict(messages.PRODUCTION_PROTOCOL.MATERIAL_LOCKED);
+                    if (
+                        protocol.status !== PROTOCOL_STATUS.ACTIVE ||
+                        schedule.season.pond.farm.status !== FARM_STATUS.ACTIVE
+                    ) {
+                        throw ApiError.conflict(messages.PRODUCTION_PROTOCOL.STATE);
+                    }
+                    if (
+                        ['PER_KG_BIOMASS', 'PERCENT_BIOMASS'].includes(
+                            schedule.doseBasisSnapshot ?? schedule.protocolItem.doseBasis,
+                        )
+                    ) {
                         // A row lock also detects a void committed after this Serializable snapshot began.
                         if (schedule.sourceHealthLogId) {
                             await tx.$queryRaw`SELECT id FROM shrimp_health_logs WHERE id = ${schedule.sourceHealthLogId}::uuid AND season_id = ${schedule.seasonId}::uuid FOR SHARE`;
                         }
-                        const source = schedule.sourceHealthLogId && await tx.shrimpHealthLog.findFirst({
-                            where: { id: schedule.sourceHealthLogId, seasonId: schedule.seasonId, isVoided: false },
-                        });
-                        // The season lock serializes this check with source voiding and schedule generation.
-                        // Freshness is measured at the saved occurrence, preserving retrospective execution.
-                        const actualAt = payload.executedAt ? new Date(payload.executedAt) : new Date();
-                        const harvestedAt = await latestHarvestAt(tx, schedule.seasonId, actualAt);
-                        if (!source || !scheduleRules.biomassAt([source], schedule.scheduledAt, new Date(), config.productionProtocol.biomassMaxAgeHours, harvestedAt)) {
-                            throw ApiError.conflict(messages.PRODUCTION_PROTOCOL.BIOMASS_SOURCE_INVALID);
-                        }
-                    }
-                }
-                const planned = new Prisma.Decimal(schedule.plannedQuantity);
-                const variance = actual.minus(planned).abs().div(planned).mul(100);
-                if (variance.gt(0) && !payload.varianceReason?.trim()) {
-                    throw ApiError.badRequest(messages.OPERATION.VARIANCE_REASON_REQUIRED);
-                }
-                const executedAt = payload.executedAt ? new Date(payload.executedAt) : new Date();
-                const days = await withdrawal.prepareExecution(tx, schedule.seasonId, targetProductId, schedule.operationType, executedAt, protocol);
-                const executionId = crypto.randomUUID();
-                if (targetProductId) {
-                    await tx.$queryRaw`SELECT id FROM products WHERE id = ${targetProductId}::uuid FOR UPDATE`;
-                    const product = await tx.product.findFirst({
-                        where: { id: targetProductId, farmId: schedule.season.pond.farmId },
-                        ...(approvedMaterial ? { select: materialSelect } : { include: { compliance: true } }),
-                    });
-                    if (!product) throw ApiError.badRequest(messages.HARVEST.WITHDRAWAL_PRODUCT_NOT_READY);
-                    if (product.status !== 'ACTIVE') throw ApiError.badRequest(messages.HARVEST.WITHDRAWAL_PRODUCT_NOT_READY);
-                    if (approvedMaterial) {
-                        assertOperationalMaterial(product, schedule.protocolItem, schedule.season.pond.farmId, schedule.season.pond.farm.ownerId,
-                            { ...protocol, season: schedule.season });
-                        assertApprovedMaterial(product, approvedMaterial);
-                    } else {
-                        assertMaterialSafety({ ...product, productCompliance: product.compliance },
-                            schedule.operationType !== OPERATION_TYPE.FEEDING, null,
-                            { production: protocol?.protocolType !== 'TREATMENT' });
-                    }
-                    const requested = stockQuantity(actual, schedule.unit, product);
-                    const balances = await tx.inventoryBalance.findMany({
-                        where: { productId: targetProductId, quantity: { gt: 0 }, receivedAt: { lte: executedAt }, expiryDate: { gte: vietnamDate(executedAt) } },
-                        orderBy: [{ expiryDate: 'asc' }, { receivedAt: 'asc' }, { id: 'asc' }],
-                    });
-                    const available = balances.reduce((total, balance) => total.add(balance.quantity), new Prisma.Decimal(0));
-                    if (available.lt(requested)) throw ApiError.badRequest(messages.OPERATION.INSUFFICIENT_INVENTORY);
-                    let remaining = requested;
-                    const groupId = crypto.randomUUID();
-                    for (const balance of balances) {
-                        if (remaining.lte(0)) break;
-                        const deduction = Prisma.Decimal.min(remaining, balance.quantity);
-                        const changed = await tx.inventoryBalance.updateMany({
-                            where: { id: balance.id, productId: targetProductId, quantity: { gte: deduction } },
-                            data: { quantity: { decrement: deduction } },
-                        });
-                        if (changed.count !== 1) throw ApiError.conflict(messages.OPERATION.EXECUTION_CONFLICT);
-                        await tx.inventoryTransaction.create({
-                            data: {
-                                transactionGroupId: groupId,
-                                productId: targetProductId,
-                                inventoryBalanceId: balance.id,
+                        const evidence = await tx.shrimpHealthLog.findMany({
+                            where: {
                                 seasonId: schedule.seasonId,
-                                transactionType: 'STOCK_OUT',
-                                quantity: deduction,
-                                unitSnapshot: product.unit,
-                                totalAmount: deduction.mul(balance.unitPrice).toDecimalPlaces(2),
-                                referenceType: 'operation_execution',
-                                referenceId: executionId,
-                                reason: 'Xuất kho vận hành ao nuôi',
-                                performedBy: technicianId,
-                                idempotencyKey: crypto.randomUUID(),
+                                isVoided: false,
+                                recordedAt: { lte: schedule.scheduledAt },
+                                createdAt: { lte: schedule.scheduledAt },
                             },
                         });
-                        remaining = remaining.minus(deduction);
+                        // The season lock serializes this check with source voiding and schedule generation.
+                        // Source freshness follows the scheduled occurrence while the protocol remains effective.
+                        const actualAt = payload.executedAt
+                            ? new Date(payload.executedAt)
+                            : new Date();
+                        const harvestedAt = await latestHarvestAt(tx, schedule.seasonId, actualAt);
+                        const source = scheduleRules.biomassAt(
+                            evidence,
+                            schedule.scheduledAt,
+                            new Date(),
+                            config.productionProtocol.biomassMaxAgeHours,
+                            harvestedAt,
+                        );
+                        if (!source || source.id !== schedule.sourceHealthLogId) {
+                            throw ApiError.conflict(
+                                messages.PRODUCTION_PROTOCOL.BIOMASS_SOURCE_INVALID,
+                            );
+                        }
                     }
-                }
-                // Processing may wait on stock locks; a backdated payload never extends the live plan.
-                if (end && new Date() > end) throw ApiError.conflict(messages.TREATMENT_PROTOCOL.RECORDING_CLOSED);
-                if (replacementStart && new Date() >= replacementStart) throw ApiError.conflict(messages.TREATMENT_PROTOCOL.REPLACEMENT_DUE);
-                const execution = await tx.operationExecution.create({
-                    data: {
-                        id: executionId,
-                        scheduleId,
-                        actualProductId: targetProductId,
-                        actualQuantity: actual,
-                        withdrawalDaysSnapshot: days,
-                        executedBy: technicianId,
-                        idempotencyKey: payload.idempotencyKey,
+                    const planned = new Prisma.Decimal(schedule.plannedQuantity);
+                    const variance = actual.minus(planned).abs().div(planned).mul(100);
+                    if (variance.gt(0) && !payload.varianceReason?.trim()) {
+                        throw ApiError.badRequest(messages.OPERATION.VARIANCE_REASON_REQUIRED);
+                    }
+                    const executedAt = payload.executedAt
+                        ? new Date(payload.executedAt)
+                        : new Date();
+                    const days = await withdrawal.prepareExecution(
+                        tx,
+                        schedule.seasonId,
+                        targetProductId,
+                        schedule.operationType,
                         executedAt,
-                        note: payload.note || null,
-                        varianceReason: payload.varianceReason || null,
-                    },
-                    include: { actualProduct: { select: { id: true, name: true, unit: true } } },
-                });
-                const completed = await tx.operationSchedule.updateMany({ where: { id: scheduleId, status: 'PLANNED' }, data: { status: 'COMPLETED' } });
-                if (completed.count !== 1) throw ApiError.conflict(messages.OPERATION.EXECUTION_CONFLICT);
-                if (protocol.contentVersion === 2) notifications.push(...await lifecycle.reconcile(tx, schedule.seasonId));
-                return { ...execution, actualQuantity: Number(execution.actualQuantity) };
-            }, { isolationLevel: 'Serializable', maxWait: 5000, timeout: config.productionProtocol.transactionTimeoutMs });
+                        protocol,
+                    );
+                    const executionId = crypto.randomUUID();
+                    if (targetProductId) {
+                        await tx.$queryRaw`SELECT id FROM products WHERE id = ${targetProductId}::uuid FOR UPDATE`;
+                        const product = await tx.product.findFirst({
+                            where: { id: targetProductId, farmId: schedule.season.pond.farmId },
+                            ...(approvedMaterial
+                                ? { select: { ...materialSelect, minAlertQuantity: true } }
+                                : { include: { compliance: true } }),
+                        });
+                        if (!product)
+                            throw ApiError.badRequest(
+                                messages.HARVEST.WITHDRAWAL_PRODUCT_NOT_READY,
+                            );
+                        if (product.status !== 'ACTIVE')
+                            throw ApiError.badRequest(
+                                messages.HARVEST.WITHDRAWAL_PRODUCT_NOT_READY,
+                            );
+                        if (approvedMaterial) {
+                            assertOperationalMaterial(
+                                product,
+                                schedule.protocolItem,
+                                schedule.season.pond.farmId,
+                                schedule.season.pond.farm.ownerId,
+                                { ...protocol, season: schedule.season },
+                            );
+                            assertApprovedMaterial(product, approvedMaterial);
+                        } else {
+                            assertMaterialSafety(
+                                { ...product, productCompliance: product.compliance },
+                                schedule.operationType !== OPERATION_TYPE.FEEDING,
+                                null,
+                                { production: protocol?.protocolType !== 'TREATMENT' },
+                            );
+                        }
+                        const requested = stockQuantity(actual, schedule.unit, product);
+                        const balances = await tx.inventoryBalance.findMany({
+                            where: {
+                                productId: targetProductId,
+                                quantity: { gt: 0 },
+                                receivedAt: { lte: executedAt },
+                                expiryDate: { gte: vietnamDate(executedAt) },
+                            },
+                            orderBy: [{ expiryDate: 'asc' }, { receivedAt: 'asc' }, { id: 'asc' }],
+                        });
+                        const available = balances.reduce(
+                            (total, balance) => total.add(balance.quantity),
+                            new Prisma.Decimal(0),
+                        );
+                        if (available.lt(requested))
+                            throw ApiError.badRequest(messages.OPERATION.INSUFFICIENT_INVENTORY);
+                        let remaining = requested;
+                        const groupId = crypto.randomUUID();
+                        for (const balance of balances) {
+                            if (remaining.lte(0)) break;
+                            const deduction = Prisma.Decimal.min(remaining, balance.quantity);
+                            const changed = await tx.inventoryBalance.updateMany({
+                                where: {
+                                    id: balance.id,
+                                    productId: targetProductId,
+                                    quantity: { gte: deduction },
+                                },
+                                data: { quantity: { decrement: deduction } },
+                            });
+                            if (changed.count !== 1)
+                                throw ApiError.conflict(messages.OPERATION.EXECUTION_CONFLICT);
+                            await tx.inventoryTransaction.create({
+                                data: {
+                                    transactionGroupId: groupId,
+                                    productId: targetProductId,
+                                    inventoryBalanceId: balance.id,
+                                    seasonId: schedule.seasonId,
+                                    transactionType: 'STOCK_OUT',
+                                    quantity: deduction,
+                                    unitSnapshot: product.unit,
+                                    totalAmount: deduction
+                                        .mul(balance.unitPrice)
+                                        .toDecimalPlaces(2),
+                                    referenceType: 'operation_execution',
+                                    referenceId: executionId,
+                                    reason: 'Xuất kho vận hành ao nuôi',
+                                    performedBy: technicianId,
+                                    idempotencyKey: crypto.randomUUID(),
+                                },
+                            });
+                            remaining = remaining.minus(deduction);
+                        }
+                        notifications.push(
+                            ...(await require('./inventory.service').notifyStockChange(
+                                tx,
+                                product,
+                                { seasonIds: [schedule.seasonId] },
+                            )),
+                        );
+                    }
+                    // Processing may wait on stock locks; a backdated payload never extends the live plan.
+                    if (end && new Date() > end)
+                        throw ApiError.conflict(messages.TREATMENT_PROTOCOL.RECORDING_CLOSED);
+                    if (replacementStart && new Date() >= replacementStart)
+                        throw ApiError.conflict(messages.TREATMENT_PROTOCOL.REPLACEMENT_DUE);
+                    const execution = await tx.operationExecution.create({
+                        data: {
+                            id: executionId,
+                            scheduleId,
+                            actualProductId: targetProductId,
+                            actualQuantity: actual,
+                            withdrawalDaysSnapshot: days,
+                            executedBy: technicianId,
+                            idempotencyKey: payload.idempotencyKey,
+                            executedAt,
+                            note: payload.note || null,
+                            varianceReason: payload.varianceReason || null,
+                        },
+                        include: {
+                            actualProduct: { select: { id: true, name: true, unit: true } },
+                        },
+                    });
+                    const completed = await tx.operationSchedule.updateMany({
+                        where: { id: scheduleId, status: 'PLANNED' },
+                        data: { status: 'COMPLETED' },
+                    });
+                    if (completed.count !== 1)
+                        throw ApiError.conflict(messages.OPERATION.EXECUTION_CONFLICT);
+                    notifications.push(...(await lifecycle.reconcile(tx, schedule.seasonId)));
+                    return { ...execution, actualQuantity: Number(execution.actualQuantity) };
+                },
+                {
+                    isolationLevel: 'Serializable',
+                    maxWait: 5000,
+                    timeout: config.productionProtocol.transactionTimeoutMs,
+                },
+            );
             for (const notification of notifications) {
-                try { emitNotification(notification.accountId, 'notification:new', { id: notification.id }); } catch {
+                try {
+                    emitNotification(notification.accountId, 'notification:new', {
+                        id: notification.id,
+                    });
+                } catch {
                     // The execution and persisted notices remain committed if socket delivery fails.
                 }
             }
             return result;
         } catch (error) {
-            const retryable = error.code === 'P2034'
-                || (error.code === 'P2010' && ['40001', '40P01'].includes(error.meta?.code));
+            const retryable =
+                error.code === 'P2034' ||
+                (error.code === 'P2010' && ['40001', '40P01'].includes(error.meta?.code));
             if (retryable && attempt < 2) continue;
-            if (retryable || ['P2002', 'P2028'].includes(error.code)) throw ApiError.conflict(messages.OPERATION.EXECUTION_CONFLICT);
-            if (error instanceof ApiError && error.message === messages.OPERATION.INSUFFICIENT_INVENTORY) {
+            if (retryable || ['P2002', 'P2028'].includes(error.code))
+                throw ApiError.conflict(messages.OPERATION.EXECUTION_CONFLICT);
+            if (
+                error instanceof ApiError &&
+                error.message === messages.OPERATION.INSUFFICIENT_INVENTORY
+            ) {
                 await notifyInsufficientInventory(technicianId, scheduleId);
             }
             throw error;
@@ -592,19 +802,30 @@ const getSeasonStats = async (technicianId, seasonId) => {
 
     const now = new Date();
 
-    const [total, planned, completed, cancelled, overdue] = await Promise.all([
+    const [total, planned, completed, cancelled, pending] = await Promise.all([
         prisma.operationSchedule.count({ where: { seasonId } }),
         prisma.operationSchedule.count({ where: { seasonId, status: OPERATION_STATUS.PLANNED } }),
         prisma.operationSchedule.count({ where: { seasonId, status: OPERATION_STATUS.COMPLETED } }),
         prisma.operationSchedule.count({ where: { seasonId, status: OPERATION_STATUS.CANCELLED } }),
-        prisma.operationSchedule.count({
+        prisma.operationSchedule.findMany({
             where: {
                 seasonId,
                 status: OPERATION_STATUS.PLANNED,
                 scheduledAt: { lt: now },
+                protocolItem: { protocol: { status: 'ACTIVE' } },
+            },
+            select: {
+                scheduledAt: true,
+                status: true,
+                protocolItem: { select: { dueAtMinutes: true } },
             },
         }),
     ]);
+
+    const overdue = pending.filter(
+        (row) =>
+            timingComparison(row, row.protocolItem.dueAtMinutes, now).status === TIMING.OVERDUE,
+    ).length;
 
     // Grouping by operationType and status
     const typeGroups = await prisma.operationSchedule.groupBy({
@@ -634,7 +855,8 @@ const getSeasonStats = async (technicianId, seasonId) => {
     }
 
     const activeTotal = total - cancelled;
-    const completionRate = activeTotal > 0 ? Number(((completed / activeTotal) * 100).toFixed(2)) : 0;
+    const completionRate =
+        activeTotal > 0 ? Number(((completed / activeTotal) * 100).toFixed(2)) : 0;
 
     return {
         total,

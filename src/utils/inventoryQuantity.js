@@ -28,16 +28,22 @@ const units = {
 };
 
 /**
- * Convert an execution quantity to stock units with decimal arithmetic and V2 scale.
+ * Convert an execution quantity to stock units with decimal arithmetic and stock-unit precision.
  */
 const stockQuantity = (actual, sourceUnit, product) => {
     const quantity = new Prisma.Decimal(actual);
-    if (!Object.values(PRODUCT_UNIT).includes(product.unit)
-        || !Object.hasOwn(units, sourceUnit) && !packagedUnits.includes(sourceUnit)) {
+    if (
+        !Object.values(PRODUCT_UNIT).includes(product.unit) ||
+        (!Object.hasOwn(units, sourceUnit) && !packagedUnits.includes(sourceUnit))
+    ) {
         throw ApiError.badRequest(messages.INVENTORY.INCOMPATIBLE_EXECUTION_UNIT);
     }
-    if (packagedUnits.includes(product.unit) && (!Object.hasOwn(units, product.conversionUnit)
-        || !product.conversionQuantity || new Prisma.Decimal(product.conversionQuantity).lte(0))) {
+    if (
+        packagedUnits.includes(product.unit) &&
+        (!Object.hasOwn(units, product.conversionUnit) ||
+            !product.conversionQuantity ||
+            new Prisma.Decimal(product.conversionQuantity).lte(0))
+    ) {
         throw ApiError.badRequest(messages.INVENTORY.INVALID_CONVERSION);
     }
     if (!quantity.isFinite() || quantity.lte(0)) {
@@ -46,7 +52,9 @@ const stockQuantity = (actual, sourceUnit, product) => {
     let result = quantity;
     if (sourceUnit !== product.unit) {
         const source = units[sourceUnit];
-        const targetUnit = packagedUnits.includes(product.unit) ? product.conversionUnit : product.unit;
+        const targetUnit = packagedUnits.includes(product.unit)
+            ? product.conversionUnit
+            : product.unit;
         const target = units[targetUnit];
         if (!source || !target || source.family !== target.family) {
             throw ApiError.badRequest(messages.INVENTORY.INCOMPATIBLE_EXECUTION_UNIT);
@@ -67,12 +75,16 @@ const stockQuantity = (actual, sourceUnit, product) => {
  * Expiry dates are inclusive calendar days in Vietnam, independent of the API host timezone.
  */
 const vietnamDate = (instant) => {
-    const parts = Object.fromEntries(new Intl.DateTimeFormat('en-GB', {
-        timeZone: 'Asia/Ho_Chi_Minh',
-        year: 'numeric',
-        month: '2-digit',
-        day: '2-digit',
-    }).formatToParts(instant).map(({ type, value }) => [type, value]));
+    const parts = Object.fromEntries(
+        new Intl.DateTimeFormat('en-GB', {
+            timeZone: 'Asia/Ho_Chi_Minh',
+            year: 'numeric',
+            month: '2-digit',
+            day: '2-digit',
+        })
+            .formatToParts(instant)
+            .map(({ type, value }) => [type, value]),
+    );
     return new Date(`${parts.year}-${parts.month}-${parts.day}T00:00:00.000Z`);
 };
 

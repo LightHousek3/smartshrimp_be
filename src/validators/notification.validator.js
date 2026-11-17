@@ -1,13 +1,9 @@
 const Joi = require('joi');
 const { NOTIFICATION_TYPE } = require('../constants');
+const push = require('../constants/pushNotification');
 
-const notificationId = Joi.string().uuid({ version: 'uuidv4' });
-const notificationGroup = Joi.string().valid(
-    'disease',
-    'protocol',
-    'season',
-    'system',
-);
+const notificationId = Joi.string().uuid({ version: ['uuidv4', 'uuidv5'] });
+const notificationGroup = Joi.string().valid('disease', 'protocol', 'season', 'system');
 const notificationParams = Joi.object().keys({
     notificationId: notificationId.required(),
 });
@@ -40,7 +36,26 @@ const getNotification = {
     params: notificationParams,
 };
 
+const registerDevice = {
+    body: Joi.object({
+        deviceId: Joi.string().uuid({ version: 'uuidv4' }).required(),
+        token: Joi.string()
+            .min(1)
+            .max(push.tokenLimit)
+            .pattern(/^[\x21-\x7e]+$/)
+            .required(),
+        platform: Joi.string().valid('android', 'ios').required(),
+    }).unknown(false),
+};
+const unregisterDevice = {
+    params: Joi.object({ deviceId: Joi.string().uuid({ version: 'uuidv4' }).required() }).unknown(
+        false,
+    ),
+};
+
 module.exports = {
+    registerDevice,
+    unregisterDevice,
     getListNotification,
     getNotification,
 };

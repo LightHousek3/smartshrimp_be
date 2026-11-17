@@ -23,8 +23,10 @@ if (missingEnvVars.length > 0) {
 
 const BASE_URL = (process.env.APP_BASE_URL || '').replace(/\/+$/, '');
 const API_PREFIX = `/${(process.env.API_PREFIX || '/api/v1').replace(/^\/+|\/+$/g, '')}`;
-const WEB_BASE_URL = (process.env.WEB_BASE_URL
-    || (process.env.NODE_ENV !== 'production' ? 'http://localhost:5173' : '')).replace(/\/+$/, '');
+const WEB_BASE_URL = (
+    process.env.WEB_BASE_URL ||
+    (process.env.NODE_ENV !== 'production' ? 'http://localhost:5173' : '')
+).replace(/\/+$/, '');
 if (!/^https?:\/\//i.test(WEB_BASE_URL)) {
     throw new Error('WEB_BASE_URL must be an absolute HTTP(S) URL; it is required in production.');
 }
@@ -103,29 +105,45 @@ const config = {
     security: {
         bcryptSaltRounds: parseInt(process.env.BCRYPT_SALT_ROUNDS, 10) || 12,
     },
+
+    jobs: {
+        shutdownTimeoutMs: 30000,
+    },
+
     productionProtocol: {
-        v2Enabled: process.env.PRODUCTION_PROTOCOL_V2_ENABLED === 'true',
-        templateApplyEnabled: process.env.PRODUCTION_PROTOCOL_TEMPLATE_APPLY_ENABLED === 'true',
-        scheduleWorkerEnabled: process.env.PRODUCTION_PROTOCOL_SCHEDULE_WORKER_ENABLED === 'true',
-        workerIntervalMs: Math.max(10000, Number(process.env.PRODUCTION_PROTOCOL_WORKER_INTERVAL_MS) || 60000),
+        workerIntervalMs: Math.max(
+            10000,
+            Number(process.env.PRODUCTION_PROTOCOL_WORKER_INTERVAL_MS) || 60000,
+        ),
         transactionTimeoutMs: 60000,
         biomassMaxAgeHours: PRODUCTION_PROTOCOL_LIMITS.biomassMaxAgeHours,
     },
+
     ai: {
         serviceUrl: (process.env.AI_SERVICE_URL || '').replace(/\/+$/, ''),
         apiKey: process.env.AI_API_KEY,
         timeoutMs: parseInt(process.env.AI_REQUEST_TIMEOUT_MS, 10) || 120000,
     },
+
     goong: {
         apiKey: process.env.GOONG_API_KEY,
     },
+
     ocr: {
         apiKey: (process.env.OCR_GEMINI_API_KEY || '').trim(),
         model: (process.env.GEMINI_MODEL || 'gemini-3.5-flash-lite').trim(),
-        timeoutMs: Math.min(60000, Math.max(5000, parseInt(process.env.OCR_TIMEOUT_MS, 10) || 45000)),
+        timeoutMs: Math.min(
+            60000,
+            Math.max(5000, parseInt(process.env.OCR_TIMEOUT_MS, 10) || 45000),
+        ),
         dailyLimit: Math.max(1, parseInt(process.env.OCR_DAILY_LIMIT, 10) || 100),
-        imageCloudName: (process.env.OCR_CLOUDINARY_CLOUD_NAME || process.env.CLOUDINARY_CLOUD_NAME || '').trim(),
+        imageCloudName: (
+            process.env.OCR_CLOUDINARY_CLOUD_NAME ||
+            process.env.CLOUDINARY_CLOUD_NAME ||
+            ''
+        ).trim(),
     },
+
     rag: {
         serviceUrl: (process.env.RAG_SERVICE_URL || '').replace(/\/+$/, ''),
         internalApiKey: process.env.RAG_INTERNAL_API_KEY,
@@ -133,10 +151,15 @@ const config = {
         ingestionTimeoutMs: parseInt(process.env.RAG_INGESTION_TIMEOUT_MS, 10) || 300000,
         workerIntervalMs: Math.max(1000, parseInt(process.env.RAG_WORKER_INTERVAL_MS, 10) || 5000),
     },
+
     cloudinary: {
         cloudName: process.env.CLOUDINARY_CLOUD_NAME,
         apiKey: process.env.CLOUDINARY_API_KEY,
         apiSecret: process.env.CLOUDINARY_API_SECRET,
+    },
+
+    firebase: {
+        projectId: (process.env.FIREBASE_PROJECT_ID || '').trim(),
     },
 };
 

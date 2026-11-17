@@ -221,6 +221,7 @@ enum DoseBasis {
 }
 
 enum ScheduleCancellationType {
+  CALCULATION_CHANGED @map("calculation_changed")
   PROTOCOL_COMPLETED @map("protocol_completed")
   PROTOCOL_SUPERSEDED @map("protocol_superseded")
   TREATMENT_ABORTED   @map("treatment_aborted")
@@ -367,6 +368,10 @@ model Notification {
   createdAt     DateTime         @default(now()) @map("created_at") @db.Timestamptz(6)
   account       Account          @relation(fields: [accountId], references: [id], onDelete: Cascade)
 
+  pushStatus        String    @default("skipped") @map("push_status") @db.VarChar(12)
+  pushAttempts      Int       @default(0) @map("push_attempts") @db.SmallInt
+  pushNextAttemptAt DateTime? @map("push_next_attempt_at") @db.Timestamptz(6)
+
   @@map("notifications")
 }
 
@@ -399,6 +404,10 @@ model RefreshToken {
   revokedAt DateTime? @map("revoked_at") @db.Timestamptz(6)
   createdAt DateTime  @default(now()) @map("created_at") @db.Timestamptz(6)
   account   Account   @relation(fields: [accountId], references: [id], onDelete: Cascade)
+
+  pushToken          String?   @map("push_token")
+  pushPlatform       String?   @map("push_platform") @db.VarChar(10)
+  pushTokenUpdatedAt  DateTime? @map("push_token_updated_at") @db.Timestamptz(6)
 
   @@map("refresh_tokens")
 }
@@ -660,10 +669,8 @@ model Protocol {
   items                ProtocolItem[]
   statusHistory        ProtocolStatusHistory[]
   treatmentStartAt     DateTime?                   @map("treatment_start_at") @db.Timestamptz(6)
-  contentVersion          Int                      @default(1) @map("content_version") @db.SmallInt
-  sourceTemplateVersionNo Int?                     @map("source_template_version_no")
   sourceTemplateSnapshot  Json?                    @map("source_template_snapshot") @db.JsonB
-  productionStructure     Json?                    @map("production_structure") @db.JsonB
+  productionStructure     Json                     @default("{\"structureVersion\":1,\"stages\":[]}") @map("production_structure") @db.JsonB
   sourceTemplate       ProductionProtocolTemplate? @relation(fields: [sourceTemplateId], references: [id], onDelete: Restrict)
 
   @@map("protocols")
@@ -690,8 +697,6 @@ model ProtocolItem {
   protocolId                String                        @map("protocol_id") @db.Uuid
   operationType             OperationType                 @map("operation_type")
   productId                 String?                       @map("product_id") @db.Uuid
-  recommendedProductName    String?                       @map("recommended_product_name") @db.VarChar(255)
-  recommendedCategory       ProductCategory?              @map("recommended_category")
   recommendedProductDetails Json?                         @map("recommended_product_details") @db.JsonB
   recommendedManufacturerId String?                       @map("recommended_manufacturer_id") @db.Uuid
   startDayOffset            Int                           @map("start_day_offset")
@@ -840,6 +845,7 @@ model Product {
   conversionQuantity    Decimal?               @map("conversion_quantity") @db.Decimal(14, 4)
   conversionUnit        ConversionUnit?        @map("conversion_unit")
   minAlertQuantity      Decimal                @default(0) @map("min_alert_quantity") @db.Decimal(14, 3)
+  lowStockAlertedAt      DateTime?              @map("low_stock_alerted_at") @db.Timestamptz(6)
   description           String?                @db.VarChar(500)
   recommendationReason  String?                @map("recommendation_reason") @db.VarChar(500)
   imageUrls             String[]               @default([]) @map("image_urls")

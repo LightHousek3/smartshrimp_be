@@ -8,7 +8,7 @@ const { requireCompleteInventoryProduct } = require('./inventoryProductReadiness
 const { stockQuantity, vietnamDate } = require('./inventoryQuantity');
 const { assertTemplateDose } = require('./protocolTemplateRules');
 const { applicationRuns } = require('./templateApplicationDays');
-const productionProtocolV2 = require('./productionProtocolV2');
+const protocolStructure = require('./protocolStructure');
 const productionSchedule = require('./productionSchedule');
 const { assertProtocolHarvestCoverage } = require('./productionProtocol');
 const {
@@ -17,15 +17,19 @@ const {
     assessTemplateProposal,
     productFromRecommendation,
 } = require('./materialCompliance');
-const { searchSubstances, checkIngredients, requireUsableIngredients } = require('./inventorySubstances');
+const {
+    searchSubstances,
+    checkIngredients,
+    requireUsableIngredients,
+} = require('./inventorySubstances');
 
-const recognitionResult = require('./aiRecognition'); 
+const recognitionResult = require('./aiRecognition');
 
 module.exports = {
     recognitionResult,
     assertProtocolHarvestCoverage,
     productionSchedule,
-    productionProtocolV2,
+    protocolStructure,
     assertTemplateDose,
     applicationRuns,
     getMaterialSafety,

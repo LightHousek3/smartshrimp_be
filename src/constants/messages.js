@@ -442,9 +442,9 @@ const messages = {
             'Số thu thực tế và số còn lại vượt ước tính hiện có. Vui lòng nhập lý do hiệu chỉnh ước tính.',
         SCHEDULE_COMPLETED_REASON: 'Vụ nuôi đã hoàn tất thu hoạch cuối.',
         WITHDRAWAL_UNVERIFIED_WARNING:
-            'Chưa kiểm tra thời gian ngừng thuốc: dữ liệu snapshot S07/S08 chưa được kích hoạt. Bản ghi này không xác nhận đã đủ thời gian ngừng thuốc.',
+            'Chưa đủ dữ liệu xác nhận thời gian ngừng thuốc. Vui lòng kiểm tra lịch sử dùng vật tư trước khi thu hoạch.',
         WITHDRAWAL_UNKNOWN:
-            'Có lần dùng thuốc chưa xác định thời gian ngừng thuốc. Cần rà soát snapshot trước khi thu hoạch.',
+            'Có lần dùng thuốc chưa xác định thời gian ngừng thuốc. Cần kiểm tra hồ sơ vật tư tại thời điểm thực dùng trước khi thu hoạch.',
         WITHDRAWAL_ACTIVE: 'Chưa đủ thời gian ngừng thuốc tại thời điểm thu hoạch đã chọn.',
         WITHDRAWAL_PRODUCT_NOT_READY:
             'Vật tư thực dùng chưa có hồ sơ đã đối chiếu hoặc chưa xác định thời gian ngừng thuốc.',
@@ -553,8 +553,6 @@ const messages = {
         DUE_WINDOW_INVALID: 'Khoảng thực hiện cần ít nhất 10 phút kể từ giờ dự kiến.',
         HARVEST_COVERAGE: (minimumDoc) =>
             `DOC kết thúc phác đồ nuôi phải lớn hơn hoặc bằng DOC ${minimumDoc} (ngày dự kiến thu hoạch của vụ nuôi).`,
-        V2_REQUIRED:
-            'Phác đồ này cần phiên bản hỗ trợ đầy đủ dữ liệu V2. Vui lòng tải lại hoặc cập nhật ứng dụng.',
         TEMPLATE_CHANGED:
             'Mẫu đã thay đổi hoặc chưa có phiên bản nguồn hợp lệ. Vui lòng nạp lại mẫu.',
         APPLICATION_DAYS:
@@ -566,7 +564,7 @@ const messages = {
         MATERIAL_CHANGED:
             'Vật tư đã thay đổi nhà sản xuất, quy cách hoặc hồ sơ sau duyệt. Cần phác đồ được duyệt lại trước khi tạo hoặc thực thi lịch mới.',
         MATERIAL_LOCKED:
-            'Lịch V2 phải dùng đúng vật tư Owner đã chọn. Vui lòng yêu cầu duyệt lại phác đồ nếu cần đổi vật tư.',
+            'Lịch phải dùng đúng vật tư Chủ trang trại đã duyệt. Vui lòng yêu cầu duyệt lại phác đồ nếu cần đổi vật tư.',
         MATERIAL_RESOLUTION:
             'Vật tư thay thế phải thuộc cùng trang trại, đúng loại và tương thích đơn vị với đề xuất.',
         SCHEDULE_WAITING:
@@ -577,7 +575,7 @@ const messages = {
             VOLUME_MISSING: 'thiếu thể tích ao hợp lệ',
             BASIS_OUT_OF_RANGE: 'sinh khối hoặc thể tích vượt giới hạn dữ liệu lịch',
             BIOMASS_MISSING_OR_STALE:
-                'thiếu nguồn sinh khối hợp lệ trong 7 ngày (168 giờ) trước cữ dự kiến',
+                'cữ cần nguồn sinh khối mới hoặc còn đại diện trong 7 ngày (168 giờ); KTV cần cân mẫu và cập nhật nhật ký sức khỏe',
             DOSE_INVALID: 'quy tắc liều không hợp lệ',
             QUANTITY_OUT_OF_RANGE: 'lượng vật tư vượt giới hạn hoặc quá nhỏ',
             MATERIAL_UNRESOLVED: 'vật tư chưa được xác nhận',
@@ -590,17 +588,10 @@ const messages = {
         BIOMASS_SOURCE_INVALID:
             'Nguồn sinh khối của lịch không còn hợp lệ. Vui lòng kiểm tra nhật ký sức khỏe và yêu cầu lập lại lịch.',
         BIOMASS_SOURCE_VOIDED:
-            'Đã hủy lịch vì bản ghi sinh khối nguồn bị hủy. Cần phác đồ được duyệt lại để lập lịch thay thế.',
-        SCHEDULE_GENERATION_ERROR: (protocolId, detail) =>
-            `Production schedule generation failed; protocolId=${protocolId}; ${detail}; retrying on the next cycle.`,
-        SCHEDULE_WORKER_ERROR: (cursor, detail) =>
-            `Production schedule worker failed; cursor=${cursor ?? 'none'}; ${detail}; retrying on the next tick.`,
-        SCHEDULE_DELIVERY_ERROR: (protocolId, detail) =>
-            `Production schedule warning realtime delivery failed after commit; protocolId=${protocolId}; ${detail}.`,
-        SCHEMA_NOT_READY:
-            'Database chưa sẵn sàng cho phác đồ V2. Vui lòng hoàn tất migration đã được duyệt.',
+            'Đã hủy lịch phụ thuộc bản ghi sinh khối bị hủy. Lịch tương lai được tính lại khi có nguồn hợp lệ; không cần duyệt lại phác đồ nếu chỉ định không đổi.',
+        SCHEMA_NOT_READY: 'Hệ thống chưa thể lưu phác đồ. Vui lòng liên hệ quản trị viên.',
         STORED_CONTENT_INVALID:
-            'Dữ liệu cấu trúc hoặc liều của phác đồ V2 không đầy đủ. Vui lòng kiểm tra dữ liệu trước khi tiếp tục.',
+            'Nội dung phác đồ chưa đầy đủ hoặc không hợp lệ. Vui lòng kiểm tra các giai đoạn, cữ và liều lượng.',
         PENDING_NOTIFICATION_CONTENT: (title, versionNo, seasonName, pondName, farmName) =>
             `Phác đồ "${title}" (v${versionNo}) của vụ ${seasonName}, ao ${pondName}, trang trại ${farmName} đang chờ chủ trại duyệt.`,
         PENDING_NOTIFICATION_TITLE: 'Phác đồ đang chờ duyệt',
@@ -610,8 +601,6 @@ const messages = {
         SUBMIT_INCOMPLETE:
             'Cần có ít nhất một hạng mục và giờ thực hiện cho mọi cữ trước khi gửi duyệt.',
         TEMPLATE_NOT_FOUND: 'Không tìm thấy phác đồ mẫu phù hợp trong trang trại.',
-        TEMPLATE_V2_APPLICATION_UNAVAILABLE:
-            'Chức năng áp dụng mẫu vào vụ nuôi hiện chưa khả dụng. Anh/chị vẫn có thể tạo, xem và chỉnh sửa mẫu; hồ sơ vật tư, liều và lịch chỉ được chuyển sang vụ khi luồng áp dụng hỗ trợ đầy đủ.',
         CREATED: 'Đã lưu bản nháp phác đồ.',
         UPDATED: 'Đã lưu phác đồ.',
         CANCELLED: 'Đã hủy hoặc thu hồi phác đồ chưa áp dụng.',
@@ -811,8 +800,6 @@ const messages = {
             `Phác đồ nuôi đã hết lịch lúc ${at.toLocaleString('vi-VN', { timeZone: 'Asia/Ho_Chi_Minh' })}. Hãy lập phác đồ nuôi mới cho vụ này.`,
         CARE_PRODUCTION_UNAPPROVED:
             'Phác đồ nuôi mới chưa được duyệt. Hãy kiểm tra bản đang soạn hoặc chờ Owner duyệt trước khi cho chạy tiếp.',
-        CARE_PRODUCTION_LEGACY:
-            'Phác đồ nuôi cũ chưa đủ dữ liệu để xác định lịch tiếp theo. Hãy kiểm tra và lập phiên bản phù hợp trước khi tiếp tục.',
         CARE_TREATMENT_DUE:
             'Phác đồ điều trị đã tới mốc bắt đầu nhưng chưa thể kích hoạt. Hãy xử lý kế hoạch điều trị trước khi cho nuôi tiếp.',
         CARE_PRODUCTION_INVALID:
@@ -822,6 +809,15 @@ const messages = {
         CARE_CALCULATION_INVALID:
             'Chưa thể tính lượng cho lịch nuôi tiếp theo. Hãy kiểm tra căn cứ tính liều của phác đồ.',
         HOLD_CHANGED: 'Quyết định tạm hoãn đã thay đổi. Vui lòng tải lại ca bệnh.',
+    },
+
+    JOBS: {
+        STORAGE_NOT_READY:
+            'Hệ thống chưa thể cập nhật lịch vận hành. Vui lòng liên hệ quản trị viên.',
+        CALCULATION_CHANGED: 'Căn cứ tính lượng thay đổi hoặc không còn hợp lệ.',
+        ACTIVATION_BLOCKED: 'Phác đồ điều trị chưa thể bắt đầu',
+        ACTIVATION_BLOCKED_CONTENT: (title) =>
+            `${title}: chưa thể kích hoạt. Kiểm tra phân công Expert, trạng thái ca, vật tư và cấu hình liệu trình.`,
     },
 
     // Server

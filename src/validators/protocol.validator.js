@@ -15,7 +15,9 @@ const list = {
     query: Joi.object({
         seasonId: uuid,
         protocolType: Joi.string().valid(...Object.values(PROTOCOL_TYPE)),
-        status: Joi.string().valid(...Object.values(PROTOCOL_STATUS).filter((s) => s !== PROTOCOL_STATUS.DRAFT)),
+        status: Joi.string().valid(
+            ...Object.values(PROTOCOL_STATUS).filter((s) => s !== PROTOCOL_STATUS.DRAFT),
+        ),
         page: Joi.number().integer().min(1).max(100000).default(1),
         limit: Joi.number().integer().min(1).max(100).default(20),
     }).unknown(false),
@@ -28,29 +30,53 @@ const detail = { params, query: empty };
  * Days are relative to the protocol’s anchor, not client-local timestamps.
  */
 const day = {
-    params: Joi.object({ protocolId: uuid.required(), day: Joi.number().integer().min(1).max(100000).required() }).unknown(false),
+    params: Joi.object({
+        protocolId: uuid.required(),
+        day: Joi.number().integer().min(1).max(100000).required(),
+    }).unknown(false),
     query: empty,
 };
 /**
  * Require both IDs so stock-out facts cannot be requested outside their protocol context.
  */
-const inventory = { params: Joi.object({ protocolId: uuid.required(), scheduleId: uuid.required() }).unknown(false), query: empty };
+const inventory = {
+    params: Joi.object({ protocolId: uuid.required(), scheduleId: uuid.required() }).unknown(false),
+    query: empty,
+};
 /**
  * A rejection needs a trimmed explanation; approval must not carry a stale rejection reason.
  * The service checks ownership, current state and the supplied version in one transaction.
  */
 const review = {
-    params, query: empty,
+    params,
+    query: empty,
     body: Joi.object({
         updatedAt: version,
         decision: Joi.string().valid('APPROVE', 'REJECT').required(),
-        contentVersion: Joi.number().integer().valid(1, 2),
-        materialSelections: Joi.when('decision', { is: 'APPROVE', then: Joi.array().max(1000).unique('itemId').items(
-            Joi.object({ itemId: uuid.required(), productId: uuid.required() }).unknown(false)), otherwise: Joi.forbidden() }),
+        materialSelections: Joi.when('decision', {
+            is: 'APPROVE',
+            then: Joi.array()
+                .max(1000)
+                .unique('itemId')
+                .items(
+                    Joi.object({ itemId: uuid.required(), productId: uuid.required() }).unknown(
+                        false,
+                    ),
+                ),
+            otherwise: Joi.forbidden(),
+        }),
         reason: Joi.when('decision', {
-            is: 'REJECT', then: Joi.string().trim().min(1).max(500).required(), otherwise: Joi.forbidden(),
+            is: 'REJECT',
+            then: Joi.string().trim().min(1).max(500).required(),
+            otherwise: Joi.forbidden(),
         }),
     }).unknown(false),
 };
-const materialOptions = { params, query: Joi.object({ itemId: uuid.required(), search: Joi.string().trim().max(255).allow('').default('') }).unknown(false) };
+const materialOptions = {
+    params,
+    query: Joi.object({
+        itemId: uuid.required(),
+        search: Joi.string().trim().max(255).allow('').default(''),
+    }).unknown(false),
+};
 module.exports = { list, detail, day, inventory, review, materialOptions };

@@ -25,10 +25,14 @@ router.get('/:protocolId', validate(protocolValidator.detail), protocolControlle
 
 /**
  * @route   GET /api/v1/owner/protocols/:protocolId/material-options
- * @desc    Find reviewed catalog materials compatible with an owned V2 prescription
+ * @desc    Find compatible catalog materials for an owned prescription
  * @access  Farm Owner
  */
-router.get('/:protocolId/material-options', validate(protocolValidator.materialOptions), protocolController.materialOptions);
+router.get(
+    '/:protocolId/material-options',
+    validate(protocolValidator.materialOptions),
+    protocolController.materialOptions,
+);
 
 /**
  * @route   GET /api/v1/owner/protocols/:protocolId/days/:day
@@ -42,12 +46,21 @@ router.get('/:protocolId/days/:day', validate(protocolValidator.day), protocolCo
  * @desc    Get inventory transactions for a protocol schedule
  * @access  Farm Owner
  */
-router.get('/:protocolId/schedules/:scheduleId/inventory-transactions', validate(protocolValidator.inventory), protocolController.inventory);
+router.get(
+    '/:protocolId/schedules/:scheduleId/inventory-transactions',
+    validate(protocolValidator.inventory),
+    protocolController.inventory,
+);
 
 /**
  * @route   POST /api/v1/owner/protocols/:protocolId/review
  * @desc    Approve or reject a submitted protocol
  * @access  Farm Owner
  */
-router.post('/:protocolId/review', writeLimiter, validate(protocolValidator.review), protocolController.review);
+router.post(
+    '/:protocolId/review',
+    writeLimiter,
+    validate(protocolValidator.review),
+    protocolController.review,
+);
 module.exports = router;
