@@ -1,8 +1,5 @@
 const prisma = require('../config/prisma');
-const {
-    Prisma,
-    ProductionProtocolTemplateStatus: TemplateStatus,
-} = require('@prisma/client');
+const { Prisma, ProductionProtocolTemplateStatus: TemplateStatus } = require('@prisma/client');
 const {
     ApiError,
     assertTemplateDose,
@@ -15,8 +12,7 @@ const {
 const { messages, FARM_STATUS, PRODUCTION_PROTOCOL_LIMITS } = require('../constants');
 const { materialRevision, assertMaterialRevision } = require('../utils/protocolMaterial');
 
-const notFound = () =>
-    ApiError.notFound(messages.EXPERT_PROTOCOL_TEMPLATE.NOT_FOUND);
+const notFound = () => ApiError.notFound(messages.EXPERT_PROTOCOL_TEMPLATE.NOT_FOUND);
 const activeScope = (ownerId) => ({ farm: { ownerId, status: FARM_STATUS.ACTIVE } });
 // Detached templates remain readable as history but cannot enter any write path.
 const readScope = (account) => ({
@@ -60,9 +56,7 @@ const normalizeCompliance = (details) =>
         ? {
               ...details,
               withdrawalDays:
-                  details.withdrawalDays == null
-                      ? null
-                      : Number(details.withdrawalDays),
+                  details.withdrawalDays == null ? null : Number(details.withdrawalDays),
           }
         : null;
 /** Expose authoring fields together with the catalog revision and declared safety state. */
@@ -70,9 +64,7 @@ const normalizeMaterial = ({ compliance, ...product }) => ({
     ...product,
     ...(product.id && { materialRevision: materialRevision({ ...product, compliance }) }),
     conversionQuantity:
-        product.conversionQuantity == null
-            ? null
-            : Number(product.conversionQuantity),
+        product.conversionQuantity == null ? null : Number(product.conversionQuantity),
     minAlertQuantity: Number(product.minAlertQuantity ?? 0),
     productCompliance: normalizeCompliance(compliance ?? product.productCompliance),
     safety: getMaterialSafety({
@@ -99,9 +91,7 @@ const normalizeHeader = (row, appliedSeasons) => {
         ...header,
         farm: row.farm ?? { id: null, name: messages.EXPERT_PROTOCOL_TEMPLATE.DELETED_FARM },
         allowedVariancePct: Number(row.allowedVariancePct),
-        usedSeasonCount: appliedSeasons.filter(
-            (entry) => entry.sourceTemplateId === row.id
-        ).length,
+        usedSeasonCount: appliedSeasons.filter((entry) => entry.sourceTemplateId === row.id).length,
         canDelete: _count.sourcedProtocols === 0,
     };
 };
@@ -120,11 +110,13 @@ const getTemplates = async (account, query = {}) => {
         ...(query.shrimpType && { shrimpType: query.shrimpType }),
         ...(query.status && { status: query.status }),
         ...(query.search && {
-            AND: [{
-                OR: ['title', 'description'].map((field) => ({
-                    [field]: { contains: query.search, mode: 'insensitive' },
-                })),
-            }],
+            AND: [
+                {
+                    OR: ['title', 'description'].map((field) => ({
+                        [field]: { contains: query.search, mode: 'insensitive' },
+                    })),
+                },
+            ],
         }),
     };
     const [totalResults, rows, farms] = await Promise.all([
@@ -145,7 +137,7 @@ const getTemplates = async (account, query = {}) => {
     const data = rows.length
         ? await applications(
               managedByOwnerId,
-              rows.map(({ id }) => id)
+              rows.map(({ id }) => id),
           )
         : null;
     return {
@@ -177,10 +169,9 @@ const normalizeItem = (item, farmId) => {
         product: {
             ...normalizeMaterial(
                 product ?? {
-                    name: messages.EXPERT_PROTOCOL_TEMPLATE
-                        .MATERIAL_UNAVAILABLE,
+                    name: messages.EXPERT_PROTOCOL_TEMPLATE.MATERIAL_UNAVAILABLE,
                     imageUrls: [],
-                }
+                },
             ),
             ...(!owned && {
                 id: undefined,
@@ -191,7 +182,8 @@ const normalizeItem = (item, farmId) => {
                 materialRevision: materialRevision(product),
             }),
             unavailable: Boolean(
-                product?.deletedProductId || (item.productId && (!owned || product.status !== 'ACTIVE'))
+                product?.deletedProductId ||
+                    (item.productId && (!owned || product.status !== 'ACTIVE')),
             ),
         },
     };
@@ -215,19 +207,12 @@ const readTemplate = async (account, templateId) => {
     if (!row) throw notFound();
     const { items, ...header } = row;
     return {
-        ...normalizeHeader(
-            header,
-            await applications(managedByOwnerId, [templateId])
-        ),
+        ...normalizeHeader(header, await applications(managedByOwnerId, [templateId])),
         // Duration belongs to detail/editor responses; the list has no duration column.
         duration: items.length
             ? {
-                  startDay: Math.min(
-                      ...items.map((item) => item.startDayOfCulture)
-                  ),
-                  endDay: Math.max(
-                      ...items.map((item) => item.endDayOfCulture)
-                  ),
+                  startDay: Math.min(...items.map((item) => item.startDayOfCulture)),
+                  endDay: Math.max(...items.map((item) => item.endDayOfCulture)),
               }
             : null,
         farmLocked: row.farm != null && row._count.sourcedProtocols > 0,
@@ -271,7 +256,7 @@ const getCreationOptions = async ({ managedByOwnerId }) => {
 /** Stock is informational: templates neither reserve inventory nor use availability as compliance evidence. */
 const getMaterials = async (
     { managedByOwnerId },
-    { farmId, group = 'ALL', search, page = 1, limit = 5 }
+    { farmId, group = 'ALL', search, page = 1, limit = 5 },
 ) => {
     const farm =
         managedByOwnerId &&
@@ -279,21 +264,16 @@ const getMaterials = async (
             where: { id: farmId, ownerId: managedByOwnerId, status: FARM_STATUS.ACTIVE },
             select: { id: true },
         }));
-    if (!farm)
-        throw ApiError.notFound(
-            messages.EXPERT_PROTOCOL_TEMPLATE.FARM_NOT_FOUND
-        );
+    if (!farm) throw ApiError.notFound(messages.EXPERT_PROTOCOL_TEMPLATE.FARM_NOT_FOUND);
     const where = {
         farmId,
         status: 'ACTIVE',
         ...(group !== 'ALL' && { category: group }),
         ...(search && {
             OR: [
-                ...['name', 'description', 'recommendationReason'].map(
-                    (field) => ({
-                        [field]: { contains: search, mode: 'insensitive' },
-                    })
-                ),
+                ...['name', 'description', 'recommendationReason'].map((field) => ({
+                    [field]: { contains: search, mode: 'insensitive' },
+                })),
                 {
                     compliance: {
                         is: {
@@ -327,7 +307,7 @@ const getMaterials = async (
               _sum: { quantity: true },
           })
         : [];
-    // V2 receipt layers may share one manufacturer lot number.
+    // Receipt layers may share one manufacturer lot number.
     const stock = new Map();
     for (const balance of balances) {
         const summary = stock.get(balance.productId) ?? {
@@ -338,9 +318,7 @@ const getMaterials = async (
         summary.lotCount += 1;
         stock.set(balance.productId, summary);
     }
-    const manufacturerIds = [
-        ...new Set(rows.map((row) => row.manufacturerId).filter(Boolean)),
-    ];
+    const manufacturerIds = [...new Set(rows.map((row) => row.manufacturerId).filter(Boolean))];
     // Resolve only manufacturers belonging to this Owner, including inactive historical contacts.
     const manufacturers = manufacturerIds.length
         ? await prisma.supplier.findMany({
@@ -361,9 +339,7 @@ const getMaterials = async (
     return {
         materials: rows.map((row) => ({
             ...normalizeMaterial(row),
-            manufacturer: normalizeManufacturer(
-                manufacturerById.get(row.manufacturerId)
-            ),
+            manufacturer: normalizeManufacturer(manufacturerById.get(row.manufacturerId)),
             stockQuantity: Number(stock.get(row.id)?.quantity ?? 0),
             lotCount: stock.get(row.id)?.lotCount ?? 0,
         })),
@@ -386,16 +362,14 @@ const flatten = (stages) =>
                     mealNumber: index + 1,
                     time: meal.time,
                     environment: false,
-                }))
-            )
+                })),
+            ),
         ),
         ...stage.environment.map((item) => ({
             ...item,
             startDay: item.firstDay,
             endDay:
-                item.repeatIntervalDays == null
-                    ? item.firstDay
-                    : (item.lastDay ?? stage.endDay),
+                item.repeatIntervalDays == null ? item.firstDay : (item.lastDay ?? stage.endDay),
             repeatIntervalDays: item.repeatIntervalDays ?? 1,
             mealNumber: null,
             environment: true,
@@ -413,49 +387,30 @@ const requireExpert = async (tx, account) => {
         select: { id: true },
     });
     if (!expert || !account.managedByOwnerId)
-        throw ApiError.forbidden(
-            messages.EXPERT_PROTOCOL_TEMPLATE.EXPERT_ASSIGNMENT_CHANGED
-        );
+        throw ApiError.forbidden(messages.EXPERT_PROTOCOL_TEMPLATE.EXPERT_ASSIGNMENT_CHANGED);
     return expert;
 };
 /** Map concurrent writes and changed references to a conflict without hiding unrelated errors. */
 const mapWriteError = (error) => {
     if (['P2034', 'P2003', 'P2002'].includes(error.code))
-        throw ApiError.conflict(
-            messages.EXPERT_PROTOCOL_TEMPLATE.WRITE_CONFLICT
-        );
+        throw ApiError.conflict(messages.EXPERT_PROTOCOL_TEMPLATE.WRITE_CONFLICT);
     throw error;
 };
 
 /** Atomically validate scope and version, then replace all rules and proposal snapshots in one serializable transaction. */
 const saveTemplate = async (account, body, templateId = null) => {
     if (!account.managedByOwnerId)
-        throw ApiError.forbidden(
-            messages.EXPERT_PROTOCOL_TEMPLATE.EXPERT_UNASSIGNED
-        );
+        throw ApiError.forbidden(messages.EXPERT_PROTOCOL_TEMPLATE.EXPERT_UNASSIGNED);
     const entries = flatten(body.stages);
     if (!['WHITELEG', 'BLACK_TIGER'].includes(body.shrimpType))
-        throw ApiError.badRequest(
-            messages.EXPERT_PROTOCOL_TEMPLATE.SPECIES_REQUIRED
-        );
+        throw ApiError.badRequest(messages.EXPERT_PROTOCOL_TEMPLATE.SPECIES_REQUIRED);
     if (entries.length > 500)
         throw ApiError.badRequest(messages.EXPERT_PROTOCOL_TEMPLATE.ITEM_LIMIT);
-    if (
-        entries.some((item) => item.dailyDoseIncrement > 0) &&
-        !body.referencePostCount
-    )
-        throw ApiError.badRequest(
-            messages.EXPERT_PROTOCOL_TEMPLATE.REFERENCE_POST_COUNT_REQUIRED
-        );
-    const productIds = [
-        ...new Set(entries.map((item) => item.productId).filter(Boolean)),
-    ];
+    if (entries.some((item) => item.dailyDoseIncrement > 0) && !body.referencePostCount)
+        throw ApiError.badRequest(messages.EXPERT_PROTOCOL_TEMPLATE.REFERENCE_POST_COUNT_REQUIRED);
+    const productIds = [...new Set(entries.map((item) => item.productId).filter(Boolean))];
     const manufacturerIds = [
-        ...new Set(
-            entries
-                .map((item) => item.recommendation?.manufacturerId)
-                .filter(Boolean)
-        ),
+        ...new Set(entries.map((item) => item.recommendation?.manufacturerId).filter(Boolean)),
     ];
     try {
         return await prisma.$transaction(
@@ -463,31 +418,27 @@ const saveTemplate = async (account, body, templateId = null) => {
                 await requireExpert(tx, account);
                 let existing;
                 if (templateId) {
-                    existing =
-                        await tx.productionProtocolTemplate.findFirst({
-                            where: {
-                                id: templateId,
-                                ...readScope(account),
-                            },
-                            select: {
-                                versionNo: true,
-                                farmId: true,
-                                _count: { select: { sourcedProtocols: true } },
-                            },
-                        });
+                    existing = await tx.productionProtocolTemplate.findFirst({
+                        where: {
+                            id: templateId,
+                            ...readScope(account),
+                        },
+                        select: {
+                            versionNo: true,
+                            farmId: true,
+                            _count: { select: { sourcedProtocols: true } },
+                        },
+                    });
                     if (!existing) throw notFound();
                     if (existing.versionNo !== body.expectedVersionNo)
-                        throw ApiError.conflict(
-                            messages.EXPERT_PROTOCOL_TEMPLATE.STALE_SAVE
-                        );
+                        throw ApiError.conflict(messages.EXPERT_PROTOCOL_TEMPLATE.STALE_SAVE);
                     if (
                         existing.farmId != null &&
                         existing.farmId !== body.farmId &&
                         existing._count.sourcedProtocols > 0
                     )
                         throw ApiError.conflict(
-                            messages.EXPERT_PROTOCOL_TEMPLATE
-                                .REFERENCED_FARM_LOCKED
+                            messages.EXPERT_PROTOCOL_TEMPLATE.REFERENCED_FARM_LOCKED,
                         );
                 }
                 const farm = await tx.farm.findFirst({
@@ -499,9 +450,7 @@ const saveTemplate = async (account, body, templateId = null) => {
                     select: { id: true },
                 });
                 if (!farm)
-                    throw ApiError.notFound(
-                        messages.EXPERT_PROTOCOL_TEMPLATE.FARM_NOT_FOUND
-                    );
+                    throw ApiError.notFound(messages.EXPERT_PROTOCOL_TEMPLATE.FARM_NOT_FOUND);
                 for (const id of [...productIds].sort()) {
                     await tx.$queryRaw`SELECT id FROM products WHERE id = ${id}::uuid FOR SHARE`;
                 }
@@ -517,8 +466,7 @@ const saveTemplate = async (account, body, templateId = null) => {
                     : [];
                 if (products.length !== productIds.length)
                     throw ApiError.conflict(
-                        messages.EXPERT_PROTOCOL_TEMPLATE
-                            .MATERIAL_UNAVAILABLE_OR_FOREIGN
+                        messages.EXPERT_PROTOCOL_TEMPLATE.MATERIAL_UNAVAILABLE_OR_FOREIGN,
                     );
                 const manufacturers = manufacturerIds.length
                     ? await tx.supplier.findMany({
@@ -542,13 +490,10 @@ const saveTemplate = async (account, body, templateId = null) => {
                     : [];
                 if (manufacturers.length !== manufacturerIds.length)
                     throw ApiError.conflict(
-                        messages.EXPERT_PROTOCOL_TEMPLATE
-                            .MANUFACTURER_UNAVAILABLE_OR_FOREIGN
+                        messages.EXPERT_PROTOCOL_TEMPLATE.MANUFACTURER_UNAVAILABLE_OR_FOREIGN,
                     );
                 const items = entries.map((entry, index) => {
-                    const catalog = products.find(
-                        (row) => row.id === entry.productId
-                    );
+                    const catalog = products.find((row) => row.id === entry.productId);
                     const product = entry.productId
                         ? { ...catalog, productCompliance: catalog.compliance }
                         : entry.recommendation;
@@ -557,23 +502,27 @@ const saveTemplate = async (account, body, templateId = null) => {
                         ? assessTemplateProposal(product, account.id)
                         : null;
                     assertMaterialSafety(
-                        assessment ? {
-                            ...product,
-                            productCompliance: { ...assessment.productCompliance, ...assessment.review },
-                        } : product,
+                        assessment
+                            ? {
+                                  ...product,
+                                  productCompliance: {
+                                      ...assessment.productCompliance,
+                                      ...assessment.review,
+                                  },
+                              }
+                            : product,
                         entry.environment,
-                        entry.instructions
+                        entry.instructions,
                     );
                     const operationType = assertTemplateDose(
                         entry,
                         product,
                         entry.startDay,
-                        entry.environment
+                        entry.environment,
                     );
                     const manufacturer = entry.recommendation?.manufacturerId
                         ? manufacturers.find(
-                              (row) =>
-                                  row.id === entry.recommendation.manufacturerId
+                              (row) => row.id === entry.recommendation.manufacturerId,
                           )
                         : entry.recommendation?.manufacturer;
                     // Persist lowercase SQL enum values in snapshots while preserving uppercase Prisma product enums in the API.
@@ -583,22 +532,20 @@ const saveTemplate = async (account, body, templateId = null) => {
                               productCompliance: assessment.productCompliance,
                               manufacturer: manufacturer
                                   ? Object.fromEntries(
-                                        Object.entries(
-                                            normalizeManufacturer(manufacturer)
-                                        ).filter(([field]) => field !== 'id')
+                                        Object.entries(normalizeManufacturer(manufacturer)).filter(
+                                            ([field]) => field !== 'id',
+                                        ),
                                     )
                                   : null,
                               category: product.category.toLowerCase(),
                               unit: product.unit.toLowerCase(),
-                              conversionUnit:
-                                  product.conversionUnit?.toLowerCase() ?? null,
+                              conversionUnit: product.conversionUnit?.toLowerCase() ?? null,
                           }
                         : null;
                     if (proposed) delete proposed.manufacturerId;
                     return {
                         productId: entry.productId ?? null,
-                        recommendedManufacturerId:
-                            entry.recommendation?.manufacturerId ?? null,
+                        recommendedManufacturerId: entry.recommendation?.manufacturerId ?? null,
                         recommendedProductDetails: proposed
                             ? {
                                   proposed,
@@ -611,13 +558,12 @@ const saveTemplate = async (account, body, templateId = null) => {
                         endDayOfCulture: entry.endDay,
                         mealNumber: entry.mealNumber,
                         repeatIntervalDays: entry.repeatIntervalDays,
-                        plannedTime: new Date(
-                            `1970-01-01T${entry.time}:00.000Z`
-                        ),
+                        plannedTime: new Date(`1970-01-01T${entry.time}:00.000Z`),
                         doseBasis: entry.doseBasis,
                         doseValue: entry.doseValue,
                         dailyDoseIncrement: entry.dailyDoseIncrement ?? 0,
-                        dueAtMinutes: entry.dueAtMinutes ?? PRODUCTION_PROTOCOL_LIMITS.defaultDueAtMinutes,
+                        dueAtMinutes:
+                            entry.dueAtMinutes ?? PRODUCTION_PROTOCOL_LIMITS.defaultDueAtMinutes,
                         doseUnit: entry.doseUnit,
                         instructions: entry.instructions || null,
                         sequenceOrder: index + 1,
@@ -634,20 +580,17 @@ const saveTemplate = async (account, body, templateId = null) => {
                     updatedAt: new Date(),
                 };
                 if (templateId) {
-                    const changed =
-                        await tx.productionProtocolTemplate.updateMany({
-                            where: {
-                                id: templateId,
-                                versionNo: body.expectedVersionNo,
-                                farmId: existing.farmId,
-                                ...readScope(account),
-                            },
-                            data: { ...data, versionNo: { increment: 1 } },
-                        });
+                    const changed = await tx.productionProtocolTemplate.updateMany({
+                        where: {
+                            id: templateId,
+                            versionNo: body.expectedVersionNo,
+                            farmId: existing.farmId,
+                            ...readScope(account),
+                        },
+                        data: { ...data, versionNo: { increment: 1 } },
+                    });
                     if (changed.count !== 1)
-                        throw ApiError.conflict(
-                            messages.EXPERT_PROTOCOL_TEMPLATE.STALE_SAVE
-                        );
+                        throw ApiError.conflict(messages.EXPERT_PROTOCOL_TEMPLATE.STALE_SAVE);
                     // Applied protocols own their snapshots; editing a template never rewrites historical schedules or measurements.
                     await tx.productionProtocolTemplateItem.deleteMany({
                         where: { templateId },
@@ -671,7 +614,7 @@ const saveTemplate = async (account, body, templateId = null) => {
                     select: { id: true, title: true, versionNo: true },
                 });
             },
-            { isolationLevel: Prisma.TransactionIsolationLevel.Serializable }
+            { isolationLevel: Prisma.TransactionIsolationLevel.Serializable },
         );
     } catch (error) {
         return mapWriteError(error);
@@ -698,13 +641,10 @@ const deleteTemplate = async (account, templateId, expectedVersionNo) => {
                 });
                 if (!row) throw notFound();
                 if (row.versionNo !== expectedVersionNo)
-                    throw ApiError.conflict(
-                        messages.EXPERT_PROTOCOL_TEMPLATE.STALE_DELETE
-                    );
+                    throw ApiError.conflict(messages.EXPERT_PROTOCOL_TEMPLATE.STALE_DELETE);
                 if (row._count.sourcedProtocols)
                     throw ApiError.conflict(
-                        messages.EXPERT_PROTOCOL_TEMPLATE
-                            .REFERENCED_DELETE_BLOCKED
+                        messages.EXPERT_PROTOCOL_TEMPLATE.REFERENCED_DELETE_BLOCKED,
                     );
                 await tx.productionProtocolTemplateItem.deleteMany({
                     where: { templateId },
@@ -717,11 +657,9 @@ const deleteTemplate = async (account, templateId, expectedVersionNo) => {
                     },
                 });
                 if (changed.count !== 1)
-                    throw ApiError.conflict(
-                        messages.EXPERT_PROTOCOL_TEMPLATE.DELETE_CONFLICT
-                    );
+                    throw ApiError.conflict(messages.EXPERT_PROTOCOL_TEMPLATE.DELETE_CONFLICT);
             },
-            { isolationLevel: Prisma.TransactionIsolationLevel.Serializable }
+            { isolationLevel: Prisma.TransactionIsolationLevel.Serializable },
         );
     } catch (error) {
         return mapWriteError(error);
@@ -740,27 +678,54 @@ const updateStatus = async (account, templateId, body) => {
                 };
                 const row = await tx.productionProtocolTemplate.findFirst({
                     where,
-                    select: { versionNo: true, farmId: true, items: { include: { product: { select: materialSelect } } } },
+                    select: {
+                        versionNo: true,
+                        farmId: true,
+                        items: { include: { product: { select: materialSelect } } },
+                    },
                 });
                 if (!row) throw notFound();
                 if (row.versionNo !== body.expectedVersionNo)
-                    throw ApiError.conflict(
-                        messages.EXPERT_PROTOCOL_TEMPLATE.STALE_SAVE
-                    );
-                if (body.status === TemplateStatus.active && row.items.some(item => item.recommendedProductDetails?.review?.deletedProductId)) {
+                    throw ApiError.conflict(messages.EXPERT_PROTOCOL_TEMPLATE.STALE_SAVE);
+                if (
+                    body.status === TemplateStatus.active &&
+                    row.items.some(
+                        (item) => item.recommendedProductDetails?.review?.deletedProductId,
+                    )
+                ) {
                     throw ApiError.conflict(messages.INVENTORY.DELETED_MATERIAL_REPLACEMENT);
                 }
                 if (body.status === TemplateStatus.active) {
-                    const ids = [...new Set(row.items.map(item => item.productId).filter(Boolean))].sort();
-                    for (const id of ids) await tx.$queryRaw`SELECT id FROM products WHERE id = ${id}::uuid FOR SHARE`;
+                    const ids = [
+                        ...new Set(row.items.map((item) => item.productId).filter(Boolean)),
+                    ].sort();
+                    for (const id of ids)
+                        await tx.$queryRaw`SELECT id FROM products WHERE id = ${id}::uuid FOR SHARE`;
                     for (const item of row.items) {
-                        const product = item.product ?? productFromRecommendation(item.recommendedProductDetails);
-                        if (!product || item.productId && (product.status !== 'ACTIVE' || product.farmId !== row.farmId)) {
-                            throw ApiError.conflict(messages.INVENTORY.MATERIAL_SELECTION_CHANGED(product?.name));
+                        const product =
+                            item.product ??
+                            productFromRecommendation(item.recommendedProductDetails);
+                        if (
+                            !product ||
+                            (item.productId &&
+                                (product.status !== 'ACTIVE' || product.farmId !== row.farmId))
+                        ) {
+                            throw ApiError.conflict(
+                                messages.INVENTORY.MATERIAL_SELECTION_CHANGED(product?.name),
+                            );
                         }
                         assertMaterialSafety(product, item.mealNumber == null, item.instructions);
-                        assertTemplateDose({ ...item, doseValue: Number(item.doseValue), dailyDoseIncrement: Number(item.dailyDoseIncrement ?? 0),
-                            endDay: item.endDayOfCulture }, product, item.startDayOfCulture, item.mealNumber == null);
+                        assertTemplateDose(
+                            {
+                                ...item,
+                                doseValue: Number(item.doseValue),
+                                dailyDoseIncrement: Number(item.dailyDoseIncrement ?? 0),
+                                endDay: item.endDayOfCulture,
+                            },
+                            product,
+                            item.startDayOfCulture,
+                            item.mealNumber == null,
+                        );
                     }
                 }
                 const result = await tx.productionProtocolTemplate.updateMany({
@@ -772,16 +737,14 @@ const updateStatus = async (account, templateId, body) => {
                     },
                 });
                 if (result.count !== 1)
-                    throw ApiError.conflict(
-                        messages.EXPERT_PROTOCOL_TEMPLATE.STALE_SAVE
-                    );
+                    throw ApiError.conflict(messages.EXPERT_PROTOCOL_TEMPLATE.STALE_SAVE);
                 return {
                     id: templateId,
                     status: body.status,
                     versionNo: body.expectedVersionNo + 1,
                 };
             },
-            { isolationLevel: Prisma.TransactionIsolationLevel.Serializable }
+            { isolationLevel: Prisma.TransactionIsolationLevel.Serializable },
         );
     } catch (error) {
         return mapWriteError(error);

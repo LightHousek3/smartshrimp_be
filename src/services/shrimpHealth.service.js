@@ -1,4 +1,5 @@
 const prisma = require('../config/prisma');
+const { assertCalculationStorage } = require('../utils/jobStorage');
 const { ApiError } = require('../utils');
 const {
     messages,
@@ -98,11 +99,9 @@ const SCOPE_RESOLVERS = {
 
 // Normalization and formatting helpers ----------------------------------------
 
-const toNumberOrNull = (value) =>
-    value === null || value === undefined ? null : Number(value);
+const toNumberOrNull = (value) => (value === null || value === undefined ? null : Number(value));
 
-const toIsoOrNull = (value) =>
-    value === null || value === undefined ? null : value.toISOString();
+const toIsoOrNull = (value) => (value === null || value === undefined ? null : value.toISOString());
 
 const calculateDoc = (stockingDate, recordedAt) => {
     if (!stockingDate || !recordedAt) return null;
@@ -115,7 +114,7 @@ const calculateDoc = (stockingDate, recordedAt) => {
 
 const normalizeLog = (log, stockingDate, accountMap = {}) => {
     const recorder = accountMap[log.recordedBy] || null;
-    const voider = log.voidedBy ? (accountMap[log.voidedBy] || null) : null;
+    const voider = log.voidedBy ? accountMap[log.voidedBy] || null : null;
 
     return {
         id: log.id,
@@ -125,11 +124,18 @@ const normalizeLog = (log, stockingDate, accountMap = {}) => {
         recordedByEmail: recorder?.email || null,
         recordedAt: log.recordedAt.toISOString(),
         dayOfCulture: calculateDoc(stockingDate, log.recordedAt),
-        sampleSize: log.sampleSize !== null && log.sampleSize !== undefined ? Number(log.sampleSize) : null,
+        sampleSize:
+            log.sampleSize !== null && log.sampleSize !== undefined ? Number(log.sampleSize) : null,
         avgWeightG: toNumberOrNull(log.avgWeightG),
         avgLengthCm: toNumberOrNull(log.avgLengthCm),
-        mortalityCount: log.mortalityCount !== null && log.mortalityCount !== undefined ? Number(log.mortalityCount) : 0,
-        estimatedPopulation: log.estimatedPopulation !== null && log.estimatedPopulation !== undefined ? Number(log.estimatedPopulation) : null,
+        mortalityCount:
+            log.mortalityCount !== null && log.mortalityCount !== undefined
+                ? Number(log.mortalityCount)
+                : 0,
+        estimatedPopulation:
+            log.estimatedPopulation !== null && log.estimatedPopulation !== undefined
+                ? Number(log.estimatedPopulation)
+                : null,
         estimatedBiomassKg: toNumberOrNull(log.estimatedBiomassKg),
         healthStatus: log.healthStatus,
         note: log.note || null,
@@ -162,9 +168,9 @@ const fetchAccountMap = async (accountIds) => {
 // Cursor condition ----------------------------------------------------------
 
 const encodeCursor = ({ recordedAt, id }) =>
-    Buffer.from(
-        JSON.stringify({ recordedAt: recordedAt.toISOString(), logId: id }),
-    ).toString('base64url');
+    Buffer.from(JSON.stringify({ recordedAt: recordedAt.toISOString(), logId: id })).toString(
+        'base64url',
+    );
 
 const decodeCursor = (cursor) => {
     try {
@@ -215,34 +221,63 @@ const createShrimpHealthLog = async (accountId, seasonId, data, idempotencyKey =
     }
     // Observations cannot be backdated to previous calendar days in the farm timezone (UTC+7).
     const nowFarm = new Date(Date.now() + FARM_TZ_OFFSET_MS);
-    const startOfTodayFarm = new Date(Date.UTC(
-        nowFarm.getUTCFullYear(),
-        nowFarm.getUTCMonth(),
-        nowFarm.getUTCDate(),
-    ) - FARM_TZ_OFFSET_MS);
+    const startOfTodayFarm = new Date(
+        Date.UTC(nowFarm.getUTCFullYear(), nowFarm.getUTCMonth(), nowFarm.getUTCDate()) -
+            FARM_TZ_OFFSET_MS,
+    );
 
     if (recordedAt.getTime() < startOfTodayFarm.getTime()) {
         throw ApiError.badRequest('Chỉ được ghi nhận sức khỏe tôm trong ngày hôm nay');
     }
 
-    let sampleSize = data.sampleSize !== undefined && data.sampleSize !== null ? Number(data.sampleSize) : null;
-    let avgWeightG = data.avgWeightG !== undefined && data.avgWeightG !== null ? Number(data.avgWeightG) : null;
-    let avgLengthCm = data.avgLengthCm !== undefined && data.avgLengthCm !== null ? Number(data.avgLengthCm) : null;
-    let mortalityCount = data.mortalityCount !== undefined && data.mortalityCount !== null ? Number(data.mortalityCount) : 0;
-    let estimatedPopulation = data.estimatedPopulation !== undefined && data.estimatedPopulation !== null ? Number(data.estimatedPopulation) : null;
-    let estimatedBiomassKg = data.estimatedBiomassKg !== undefined && data.estimatedBiomassKg !== null ? Number(data.estimatedBiomassKg) : null;
+    let sampleSize =
+        data.sampleSize !== undefined && data.sampleSize !== null ? Number(data.sampleSize) : null;
+    let avgWeightG =
+        data.avgWeightG !== undefined && data.avgWeightG !== null ? Number(data.avgWeightG) : null;
+    let avgLengthCm =
+        data.avgLengthCm !== undefined && data.avgLengthCm !== null
+            ? Number(data.avgLengthCm)
+            : null;
+    let mortalityCount =
+        data.mortalityCount !== undefined && data.mortalityCount !== null
+            ? Number(data.mortalityCount)
+            : 0;
+    let estimatedPopulation =
+        data.estimatedPopulation !== undefined && data.estimatedPopulation !== null
+            ? Number(data.estimatedPopulation)
+            : null;
+    let estimatedBiomassKg =
+        data.estimatedBiomassKg !== undefined && data.estimatedBiomassKg !== null
+            ? Number(data.estimatedBiomassKg)
+            : null;
     const healthStatus = data.healthStatus || HEALTH_STATUS.GOOD;
     const note = (data.note || '').trim() || null;
 
     // Estimated live population must not exceed the season initial stocking quantity.
-    const initialQty = season.initialQuantity !== null && season.initialQuantity !== undefined ? Number(season.initialQuantity) : null;
-    if (initialQty && initialQty > 0 && estimatedPopulation !== null && estimatedPopulation > initialQty) {
-        throw ApiError.badRequest(`Ước tính đàn (${estimatedPopulation.toLocaleString('vi-VN')} con) không được vượt quá số lượng giống thả ban đầu (${initialQty.toLocaleString('vi-VN')} con)`);
+    const initialQty =
+        season.initialQuantity !== null && season.initialQuantity !== undefined
+            ? Number(season.initialQuantity)
+            : null;
+    if (
+        initialQty &&
+        initialQty > 0 &&
+        estimatedPopulation !== null &&
+        estimatedPopulation > initialQty
+    ) {
+        throw ApiError.badRequest(
+            `Ước tính đàn (${estimatedPopulation.toLocaleString('vi-VN')} con) không được vượt quá số lượng giống thả ban đầu (${initialQty.toLocaleString('vi-VN')} con)`,
+        );
     }
 
     // Infer biomass from population and mean body weight when an explicit weight is omitted.
-    if (estimatedBiomassKg === null && estimatedPopulation !== null && avgWeightG !== null && estimatedPopulation > 0 && avgWeightG > 0) {
-        estimatedBiomassKg = Math.round((estimatedPopulation * avgWeightG / 1000) * 1000) / 1000;
+    if (
+        estimatedBiomassKg === null &&
+        estimatedPopulation !== null &&
+        avgWeightG !== null &&
+        estimatedPopulation > 0 &&
+        avgWeightG > 0
+    ) {
+        estimatedBiomassKg = Math.round(((estimatedPopulation * avgWeightG) / 1000) * 1000) / 1000;
     }
 
     // Reject concurrent submissions sharing the same in-flight idempotency key.
@@ -270,7 +305,10 @@ const createShrimpHealthLog = async (accountId, seasonId, data, idempotencyKey =
         });
         if (existing && existing.seasonId === seasonId && existing.recordedBy === accountId) {
             const accountMap = await fetchAccountMap([existing.recordedBy]);
-            return { log: normalizeLog(existing, season.stockingDate, accountMap), duplicate: true };
+            return {
+                log: normalizeLog(existing, season.stockingDate, accountMap),
+                duplicate: true,
+            };
         }
     }
     if (prior?.status === 'processing') {
@@ -279,22 +317,46 @@ const createShrimpHealthLog = async (accountId, seasonId, data, idempotencyKey =
     idempotencySet(key, { status: 'processing', fingerprint });
 
     try {
-        const created = await prisma.shrimpHealthLog.create({
-            data: {
-                seasonId,
-                recordedBy: accountId,
-                recordedAt,
-                sampleSize,
-                avgWeightG: avgWeightG !== null ? avgWeightG : undefined,
-                avgLengthCm: avgLengthCm !== null ? avgLengthCm : undefined,
-                mortalityCount: BigInt(mortalityCount),
-                estimatedPopulation: estimatedPopulation !== null ? BigInt(estimatedPopulation) : undefined,
-                estimatedBiomassKg: estimatedBiomassKg !== null ? estimatedBiomassKg : undefined,
-                healthStatus,
-                note,
+        const created = await prisma.$transaction(
+            async (tx) => {
+                await tx.$queryRaw`SELECT id FROM aquaculture_seasons WHERE id=${seasonId}::uuid FOR UPDATE`;
+                const current = await tx.aquacultureSeason.findFirst({
+                    where: {
+                        id: seasonId,
+                        status: SEASON_STATUS.ACTIVE,
+                        personnelAssignments: {
+                            some: {
+                                accountId,
+                                role: PERSONNEL_ROLE.TECHNICIAN,
+                                unassignedAt: null,
+                            },
+                        },
+                    },
+                    select: { id: true },
+                });
+                if (!current) throw ApiError.conflict(messages.SHRIMP_HEALTH_LOG.NO_ASSIGNMENT);
+                return tx.shrimpHealthLog.create({
+                    data: {
+                        seasonId,
+                        recordedBy: accountId,
+                        recordedAt,
+                        sampleSize,
+                        avgWeightG: avgWeightG !== null ? avgWeightG : undefined,
+                        avgLengthCm: avgLengthCm !== null ? avgLengthCm : undefined,
+                        mortalityCount: BigInt(mortalityCount),
+                        estimatedPopulation:
+                            estimatedPopulation !== null ? BigInt(estimatedPopulation) : undefined,
+                        estimatedBiomassKg:
+                            estimatedBiomassKg !== null ? estimatedBiomassKg : undefined,
+                        healthStatus,
+                        note,
+                    },
+                });
             },
-        });
+            { isolationLevel: 'Serializable' },
+        );
 
+        require('../jobs').requestSeason(seasonId);
         idempotencySet(key, { status: 'done', fingerprint, logId: created.id });
 
         const accountMap = await fetchAccountMap([created.recordedBy]);
@@ -433,16 +495,23 @@ const voidShrimpHealthLog = async (accountId, seasonId, logId, { voidReason }) =
 
     // Voiding is restricted to observations recorded on the current calendar day in the farm timezone (UTC+7).
     const nowFarm = new Date(Date.now() + FARM_TZ_OFFSET_MS);
-    const startOfTodayFarm = new Date(Date.UTC(
-        nowFarm.getUTCFullYear(),
-        nowFarm.getUTCMonth(),
-        nowFarm.getUTCDate(),
-    ) - FARM_TZ_OFFSET_MS);
+    const startOfTodayFarm = new Date(
+        Date.UTC(nowFarm.getUTCFullYear(), nowFarm.getUTCMonth(), nowFarm.getUTCDate()) -
+            FARM_TZ_OFFSET_MS,
+    );
 
     const updated = await prisma.$transaction(async (tx) => {
         // Shared order with generation/execution: season first, then dependent schedules.
         await tx.$queryRaw`SELECT id FROM aquaculture_seasons WHERE id = ${seasonId}::uuid FOR UPDATE`;
-        const currentSeason = await tx.aquacultureSeason.findUnique({ where: { id: seasonId }, select: { status: true } });
+        const currentSeason = await tx.aquacultureSeason.findFirst({
+            where: {
+                id: seasonId,
+                personnelAssignments: {
+                    some: { accountId, role: PERSONNEL_ROLE.TECHNICIAN, unassignedAt: null },
+                },
+            },
+            select: { status: true },
+        });
         if (currentSeason?.status !== SEASON_STATUS.ACTIVE) {
             throw ApiError.conflict(messages.SHRIMP_HEALTH_LOG.VOID_FORBIDDEN_STATE);
         }
@@ -453,6 +522,7 @@ const voidShrimpHealthLog = async (accountId, seasonId, logId, { voidReason }) =
             throw ApiError.badRequest(messages.SHRIMP_HEALTH_LOG.VOID_ONLY_TODAY);
         }
         const voidedAt = new Date();
+        await assertCalculationStorage(tx);
         const changed = await tx.shrimpHealthLog.updateMany({
             where: { id: logId, seasonId, isVoided: false },
             data: {
@@ -467,9 +537,19 @@ const voidShrimpHealthLog = async (accountId, seasonId, logId, { voidReason }) =
         }
         // Cancel only pending facts. Completed executions and their inventory history stay immutable.
         await tx.operationSchedule.updateMany({
-            where: { seasonId, sourceHealthLogId: logId, status: OPERATION_STATUS.PLANNED, execution: null },
-            data: { status: OPERATION_STATUS.CANCELLED, cancelledAt: voidedAt, cancelledBy: accountId,
-                cancellationReason: messages.PRODUCTION_PROTOCOL.BIOMASS_SOURCE_VOIDED },
+            where: {
+                seasonId,
+                sourceHealthLogId: logId,
+                status: OPERATION_STATUS.PLANNED,
+                execution: null,
+            },
+            data: {
+                status: OPERATION_STATUS.CANCELLED,
+                cancelledAt: voidedAt,
+                cancelledBy: accountId,
+                cancellationType: 'CALCULATION_CHANGED',
+                cancellationReason: messages.PRODUCTION_PROTOCOL.BIOMASS_SOURCE_VOIDED,
+            },
         });
         return {
             ...log,
@@ -480,6 +560,7 @@ const voidShrimpHealthLog = async (accountId, seasonId, logId, { voidReason }) =
         };
     });
 
+    require('../jobs').requestSeason(seasonId);
     const accountMap = await fetchAccountMap([updated.recordedBy, updated.voidedBy]);
     return normalizeLog(updated, season.stockingDate, accountMap);
 };
@@ -539,7 +620,10 @@ const getStatistics = async (accountId, seasonId, query = {}, scope = 'ktv') => 
             statusCounts[r.healthStatus] += 1;
         }
 
-        const mort = r.mortalityCount !== null && r.mortalityCount !== undefined ? Number(r.mortalityCount) : 0;
+        const mort =
+            r.mortalityCount !== null && r.mortalityCount !== undefined
+                ? Number(r.mortalityCount)
+                : 0;
         totalMortality += mort;
 
         const dateKey = bucketKeyOf(r.recordedAt, granularity);
@@ -553,7 +637,10 @@ const getStatistics = async (accountId, seasonId, query = {}, scope = 'ktv') => 
             avgWeightG: toNumberOrNull(r.avgWeightG),
             avgLengthCm: toNumberOrNull(r.avgLengthCm),
             estimatedBiomassKg: toNumberOrNull(r.estimatedBiomassKg),
-            estimatedPopulation: r.estimatedPopulation !== null && r.estimatedPopulation !== undefined ? Number(r.estimatedPopulation) : null,
+            estimatedPopulation:
+                r.estimatedPopulation !== null && r.estimatedPopulation !== undefined
+                    ? Number(r.estimatedPopulation)
+                    : null,
             mortalityCount: mort,
             healthStatus: r.healthStatus,
         });
@@ -565,12 +652,22 @@ const getStatistics = async (accountId, seasonId, query = {}, scope = 'ktv') => 
         orderBy: { recordedAt: 'desc' },
     });
 
-    const initialQty = season.initialQuantity !== null && season.initialQuantity !== undefined ? Number(season.initialQuantity) : null;
-    const currentPop = latestValidLog?.estimatedPopulation !== null && latestValidLog?.estimatedPopulation !== undefined ? Number(latestValidLog.estimatedPopulation) : null;
+    const initialQty =
+        season.initialQuantity !== null && season.initialQuantity !== undefined
+            ? Number(season.initialQuantity)
+            : null;
+    const currentPop =
+        latestValidLog?.estimatedPopulation !== null &&
+        latestValidLog?.estimatedPopulation !== undefined
+            ? Number(latestValidLog.estimatedPopulation)
+            : null;
 
     let survivalRatePercent = null;
     if (initialQty && initialQty > 0 && currentPop !== null) {
-        survivalRatePercent = Math.min(100, Math.max(0, Math.round((currentPop / initialQty) * 10000) / 100));
+        survivalRatePercent = Math.min(
+            100,
+            Math.max(0, Math.round((currentPop / initialQty) * 10000) / 100),
+        );
     }
 
     const totalValidLogs = rows.length;
@@ -578,19 +675,31 @@ const getStatistics = async (accountId, seasonId, query = {}, scope = 'ktv') => 
         totalLogs: totalValidLogs,
         excellent: {
             count: statusCounts.EXCELLENT,
-            percent: totalValidLogs > 0 ? Math.round((statusCounts.EXCELLENT / totalValidLogs) * 1000) / 10 : 0,
+            percent:
+                totalValidLogs > 0
+                    ? Math.round((statusCounts.EXCELLENT / totalValidLogs) * 1000) / 10
+                    : 0,
         },
         good: {
             count: statusCounts.GOOD,
-            percent: totalValidLogs > 0 ? Math.round((statusCounts.GOOD / totalValidLogs) * 1000) / 10 : 0,
+            percent:
+                totalValidLogs > 0
+                    ? Math.round((statusCounts.GOOD / totalValidLogs) * 1000) / 10
+                    : 0,
         },
         warning: {
             count: statusCounts.WARNING,
-            percent: totalValidLogs > 0 ? Math.round((statusCounts.WARNING / totalValidLogs) * 1000) / 10 : 0,
+            percent:
+                totalValidLogs > 0
+                    ? Math.round((statusCounts.WARNING / totalValidLogs) * 1000) / 10
+                    : 0,
         },
         critical: {
             count: statusCounts.CRITICAL,
-            percent: totalValidLogs > 0 ? Math.round((statusCounts.CRITICAL / totalValidLogs) * 1000) / 10 : 0,
+            percent:
+                totalValidLogs > 0
+                    ? Math.round((statusCounts.CRITICAL / totalValidLogs) * 1000) / 10
+                    : 0,
         },
     };
 

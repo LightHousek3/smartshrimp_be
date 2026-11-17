@@ -1,6 +1,12 @@
 const prisma = require('../config/prisma');
 const { ApiError } = require('../utils');
-const { httpStatus, messages, POND_STATUS, POND_LIMITS, OPEN_SEASON_STATUSES } = require('../constants');
+const {
+    httpStatus,
+    messages,
+    POND_STATUS,
+    POND_LIMITS,
+    OPEN_SEASON_STATUSES,
+} = require('../constants');
 
 const normalizePondNameKey = (name) => name.replace(/\s+/gu, '').toLocaleLowerCase('vi');
 
@@ -167,22 +173,25 @@ const mapWriteError = (error) => {
  */
 const createPond = async (farmId, pondData, ownerId) => {
     try {
-        const pond = await prisma.$transaction(async (transaction) => {
-            await requireOwnedFarm(transaction, farmId, ownerId);
-            await requireUniquePondName(transaction, farmId, pondData.name);
-            return transaction.pond.create({
-                data: {
-                    ...pondData,
-                    farmId,
-                    volumeM3: resolveVolumeM3(
-                        pondData.areaM2,
-                        pondData.depthM,
-                        pondData.volumeM3,
-                    ),
-                },
-                select: POND_SELECT,
-            });
-        }, { isolationLevel: 'Serializable' });
+        const pond = await prisma.$transaction(
+            async (transaction) => {
+                await requireOwnedFarm(transaction, farmId, ownerId);
+                await requireUniquePondName(transaction, farmId, pondData.name);
+                return transaction.pond.create({
+                    data: {
+                        ...pondData,
+                        farmId,
+                        volumeM3: resolveVolumeM3(
+                            pondData.areaM2,
+                            pondData.depthM,
+                            pondData.volumeM3,
+                        ),
+                    },
+                    select: POND_SELECT,
+                });
+            },
+            { isolationLevel: 'Serializable' },
+        );
         return normalizePond(pond);
     } catch (error) {
         return mapWriteError(error);
@@ -196,11 +205,7 @@ const buildPondUpdate = (current, changes) => {
     }
     const data = { ...changes };
     if (Object.hasOwn(changes, 'volumeM3')) {
-        data.volumeM3 = resolveVolumeM3(
-            current.areaM2,
-            current.depthM,
-            changes.volumeM3,
-        );
+        data.volumeM3 = resolveVolumeM3(current.areaM2, current.depthM, changes.volumeM3);
     }
     return data;
 };
@@ -209,8 +214,8 @@ const buildPondUpdate = (current, changes) => {
 const assertOpenSeasonAllowsUpdate = (current, changes) => {
     if (current.seasons.length === 0) return;
     const changesType = changes.type !== undefined && changes.type !== current.type;
-    const entersMaintenance = changes.status === POND_STATUS.MAINTENANCE
-        && current.status !== POND_STATUS.MAINTENANCE;
+    const entersMaintenance =
+        changes.status === POND_STATUS.MAINTENANCE && current.status !== POND_STATUS.MAINTENANCE;
     if (changesType || entersMaintenance) {
         throw new ApiError(httpStatus.CONFLICT, messages.POND.OPEN_SEASON_RESTRICTS_UPDATE);
     }
@@ -221,31 +226,47 @@ const assertOpenSeasonAllowsUpdate = (current, changes) => {
  * Ownership, name uniqueness and updates share a serializable transaction.
  */
 const updatePond = async (farmId, pondId, pondData, ownerId) => {
+    const affected = [];
     try {
-        const pond = await prisma.$transaction(async (transaction) => {
-            await requireOwnedFarm(transaction, farmId, ownerId);
-            const current = await findOwnedPond(
-                transaction,
-                farmId,
-                pondId,
-                ownerId,
-                POND_DETAIL_SELECT,
-            );
-            if (pondData.name !== undefined) {
-                await requireUniquePondName(transaction, farmId, pondData.name, pondId);
-            }
-            const updateData = buildPondUpdate(current, pondData);
-            assertOpenSeasonAllowsUpdate(current, updateData);
-            const result = await transaction.pond.updateMany({
-                where: { id: pondId, farmId },
-                data: updateData,
-            });
-            // Never report success if the guarded write did not affect one pond.
-            if (result.count !== 1) {
-                throw new ApiError(httpStatus.CONFLICT, messages.POND.CHANGE_CONFLICT);
-            }
-            return transaction.pond.findUnique({ where: { id: pondId }, select: POND_SELECT });
-        }, { isolationLevel: 'Serializable' });
+        const pond = await prisma.$transaction(
+            async (transaction) => {
+                await requireOwnedFarm(transaction, farmId, ownerId);
+                const current = await findOwnedPond(
+                    transaction,
+                    farmId,
+                    pondId,
+                    ownerId,
+                    POND_DETAIL_SELECT,
+                );
+                if (pondData.name !== undefined) {
+                    await requireUniquePondName(transaction, farmId, pondData.name, pondId);
+                }
+                const updateData = buildPondUpdate(current, pondData);
+                assertOpenSeasonAllowsUpdate(current, updateData);
+                if (updateData.volumeM3 !== undefined) {
+                    const seasons = await transaction.aquacultureSeason.findMany({
+                        where: { pondId, status: 'ACTIVE' },
+                        select: { id: true },
+                        orderBy: { id: 'asc' },
+                    });
+                    for (const season of seasons) {
+                        await transaction.$queryRaw`SELECT id FROM aquaculture_seasons WHERE id=${season.id}::uuid FOR UPDATE`;
+                        affected.push(season.id);
+                    }
+                }
+                const result = await transaction.pond.updateMany({
+                    where: { id: pondId, farmId },
+                    data: updateData,
+                });
+                // Never report success if the guarded write did not affect one pond.
+                if (result.count !== 1) {
+                    throw new ApiError(httpStatus.CONFLICT, messages.POND.CHANGE_CONFLICT);
+                }
+                return transaction.pond.findUnique({ where: { id: pondId }, select: POND_SELECT });
+            },
+            { isolationLevel: 'Serializable' },
+        );
+        affected.forEach((id) => require('../jobs').requestSeason(id));
         return normalizePond(pond);
     } catch (error) {
         return mapWriteError(error);
@@ -259,31 +280,34 @@ const updatePond = async (farmId, pondId, pondData, ownerId) => {
  */
 const deletePond = async (farmId, pondId, ownerId) => {
     try {
-        const pond = await prisma.$transaction(async (transaction) => {
-            await requireOwnedFarm(transaction, farmId, ownerId);
-            const currentPond = await findOwnedPond(
-                transaction,
-                farmId,
-                pondId,
-                ownerId,
-                POND_SELECT,
-            );
-            const openSeasonCount = await transaction.aquacultureSeason.count({
-                where: { pondId, status: { in: OPEN_SEASON_STATUSES } },
-            });
-            if (openSeasonCount > 0) {
-                throw new ApiError(httpStatus.CONFLICT, messages.POND.HAS_OPEN_SEASON);
-            }
-            // Completed/cancelled season history can still block this physical
-            // deletion through RESTRICT; mapWriteError reports that as a conflict.
-            const result = await transaction.pond.deleteMany({
-                where: { id: pondId, farmId },
-            });
-            if (result.count !== 1) {
-                throw new ApiError(httpStatus.CONFLICT, messages.POND.CHANGE_CONFLICT);
-            }
-            return currentPond;
-        }, { isolationLevel: 'Serializable' });
+        const pond = await prisma.$transaction(
+            async (transaction) => {
+                await requireOwnedFarm(transaction, farmId, ownerId);
+                const currentPond = await findOwnedPond(
+                    transaction,
+                    farmId,
+                    pondId,
+                    ownerId,
+                    POND_SELECT,
+                );
+                const openSeasonCount = await transaction.aquacultureSeason.count({
+                    where: { pondId, status: { in: OPEN_SEASON_STATUSES } },
+                });
+                if (openSeasonCount > 0) {
+                    throw new ApiError(httpStatus.CONFLICT, messages.POND.HAS_OPEN_SEASON);
+                }
+                // Completed/cancelled season history can still block this physical
+                // deletion through RESTRICT; mapWriteError reports that as a conflict.
+                const result = await transaction.pond.deleteMany({
+                    where: { id: pondId, farmId },
+                });
+                if (result.count !== 1) {
+                    throw new ApiError(httpStatus.CONFLICT, messages.POND.CHANGE_CONFLICT);
+                }
+                return currentPond;
+            },
+            { isolationLevel: 'Serializable' },
+        );
         return normalizePond(pond);
     } catch (error) {
         return mapWriteError(error);

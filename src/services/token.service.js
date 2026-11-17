@@ -38,7 +38,7 @@ const generateAccessToken = (account) => {
  * Generate and persist a refresh token. Passing a transaction client lets the
  * caller make token creation atomic with other account updates.
  */
-const generateRefreshToken = async (account, deviceId, database = prisma) => {
+const generateRefreshToken = async (account, deviceId, database = prisma, pushSession) => {
     const payload = {
         sub: account.id,
         type: 'refresh',
@@ -67,15 +67,23 @@ const generateRefreshToken = async (account, deviceId, database = prisma) => {
             tokenHash: hashToken(token),
             deviceId,
             expiresAt: new Date(decoded.exp * 1000),
+            // Rotation changes session credentials, not the installation's push registration.
+            ...(pushSession?.pushToken
+                ? {
+                      pushToken: pushSession.pushToken,
+                      pushPlatform: pushSession.pushPlatform,
+                      pushTokenUpdatedAt: pushSession.pushTokenUpdatedAt,
+                  }
+                : {}),
         },
     });
 
     return token;
 };
 
-const generateAuthTokens = async (account, deviceId, database = prisma) => {
+const generateAuthTokens = async (account, deviceId, database = prisma, pushSession) => {
     const accessToken = generateAccessToken(account);
-    const refreshToken = await generateRefreshToken(account, deviceId, database);
+    const refreshToken = await generateRefreshToken(account, deviceId, database, pushSession);
     return { accessToken, refreshToken };
 };
 
@@ -134,7 +142,12 @@ const refreshAuthTokens = async (refreshToken) => {
             throw new ApiError(httpStatus.UNAUTHORIZED, messages.AUTH.INVALID_REFRESH_TOKEN);
         }
 
-        const tokens = await generateAuthTokens(account, storedToken.deviceId, transaction);
+        const tokens = await generateAuthTokens(
+            account,
+            storedToken.deviceId,
+            transaction,
+            storedToken,
+        );
         return { ...tokens, account };
     });
 };

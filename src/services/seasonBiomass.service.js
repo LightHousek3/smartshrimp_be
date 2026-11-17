@@ -1,4 +1,5 @@
 const { Prisma } = require('@prisma/client');
+const { populationMatches } = require('../utils/biomassSource');
 
 /**
  * Read quantitative provenance for already authorized seasons in one batch.
@@ -17,14 +18,14 @@ const readSources = async (client, seasonIds, at) => {
         LEFT JOIN LATERAL (
             SELECT l.id, l.recorded_at, l.estimated_biomass_kg, l.estimated_population
             FROM shrimp_health_logs l
-            WHERE l.season_id = s.id AND NOT l.is_voided AND l.recorded_at <= ${at}
+            WHERE l.season_id = s.id AND NOT l.is_voided AND l.recorded_at <= ${at} AND l.created_at <= ${at}
                 AND l.estimated_biomass_kg IS NOT NULL
             ORDER BY l.recorded_at DESC, l.created_at DESC, l.id DESC LIMIT 1
         ) b ON true
         LEFT JOIN LATERAL (
             SELECT l.id, l.recorded_at, l.estimated_population
             FROM shrimp_health_logs l
-            WHERE l.season_id = s.id AND NOT l.is_voided AND l.recorded_at <= ${at}
+            WHERE l.season_id = s.id AND NOT l.is_voided AND l.recorded_at <= ${at} AND l.created_at <= ${at}
                 AND l.estimated_population IS NOT NULL
             ORDER BY l.recorded_at DESC, l.created_at DESC, l.id DESC LIMIT 1
         ) p ON true
@@ -33,17 +34,8 @@ const readSources = async (client, seasonIds, at) => {
             WHERE season_id = s.id AND harvest_type = 'partial' AND harvested_at <= ${at}
             ORDER BY harvested_at DESC, id DESC LIMIT 1
         ) h ON true
-        WHERE s.id IN (${Prisma.join(seasonIds.map(id => Prisma.sql`${id}::uuid`))})`);
-    return new Map(rows.map(row => [row.seasonId, row]));
+        WHERE s.id IN (${Prisma.join(seasonIds.map((id) => Prisma.sql`${id}::uuid`))})`);
+    return new Map(rows.map((row) => [row.seasonId, row]));
 };
-
-/**
- * A later population estimate cannot silently renew or contradict an older biomass.
- * Unknown population provenance is insufficient to reconcile a changed estimate.
- */
-const populationMatches = (source) => !source.populationAt || !source.recordedAt
-    || source.populationAt < source.recordedAt || source.populationId === source.id
-    || (source.estimatedPopulation != null && source.latestPopulation != null
-        && String(source.estimatedPopulation) === String(source.latestPopulation));
 
 module.exports = { readSources, populationMatches };

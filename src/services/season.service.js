@@ -148,8 +148,7 @@ const normalizeSeasonBase = (season) => ({
     initialQuantity: season.initialQuantity == null ? null : season.initialQuantity.toString(),
     initialDensityPerM2:
         season.initialDensityPerM2 == null ? null : Number(season.initialDensityPerM2),
-    dayOfCulture:
-        season.status === SEASON_STATUS.ACTIVE ? dayOfCulture(season.stockingDate) : null,
+    dayOfCulture: season.status === SEASON_STATUS.ACTIVE ? dayOfCulture(season.stockingDate) : null,
 });
 
 const normalizeSeasonSummary = ({ pond, ...season }) => ({
@@ -160,9 +159,9 @@ const normalizeSeasonSummary = ({ pond, ...season }) => ({
 const getActiveAssignment = (assignments, role) =>
     assignments.find(
         (assignment) =>
-            assignment.role === role
-            && assignment.unassignedAt == null
-            && assignment.account.status === ACCOUNT_STATUS.ACTIVE,
+            assignment.role === role &&
+            assignment.unassignedAt == null &&
+            assignment.account.status === ACCOUNT_STATUS.ACTIVE,
     ) || null;
 
 const getLatestAssignment = (assignments, role) =>
@@ -172,15 +171,15 @@ const buildActivationEligibility = (season) => {
     const missingConditions = [];
     const activeTechnicians = season.personnelAssignments.filter(
         (assignment) =>
-            assignment.role === PERSONNEL_ROLE.TECHNICIAN
-            && assignment.unassignedAt == null
-            && assignment.account.status === ACCOUNT_STATUS.ACTIVE,
+            assignment.role === PERSONNEL_ROLE.TECHNICIAN &&
+            assignment.unassignedAt == null &&
+            assignment.account.status === ACCOUNT_STATUS.ACTIVE,
     );
     const activeExperts = season.personnelAssignments.filter(
         (assignment) =>
-            assignment.role === PERSONNEL_ROLE.EXPERT
-            && assignment.unassignedAt == null
-            && assignment.account.status === ACCOUNT_STATUS.ACTIVE,
+            assignment.role === PERSONNEL_ROLE.EXPERT &&
+            assignment.unassignedAt == null &&
+            assignment.account.status === ACCOUNT_STATUS.ACTIVE,
     );
 
     if (season.status !== SEASON_STATUS.PLANNING) missingConditions.push('SEASON_NOT_PLANNING');
@@ -202,12 +201,7 @@ const buildActivationEligibility = (season) => {
     };
 };
 
-const normalizeSeasonDetail = ({
-    personnelAssignments,
-    protocols = [],
-    pond,
-    ...season
-}) => {
+const normalizeSeasonDetail = ({ personnelAssignments, protocols = [], pond, ...season }) => {
     const activationEligibility = buildActivationEligibility({
         ...season,
         pond,
@@ -225,10 +219,7 @@ const normalizeSeasonDetail = ({
             expert,
         },
         lastAssignedPersonnel: {
-            technician: getLatestAssignment(
-                personnelAssignments,
-                PERSONNEL_ROLE.TECHNICIAN,
-            ),
+            technician: getLatestAssignment(personnelAssignments, PERSONNEL_ROLE.TECHNICIAN),
             expert: getLatestAssignment(personnelAssignments, PERSONNEL_ROLE.EXPERT),
         },
         approvedProductionProtocol: protocols[0] || null,
@@ -276,7 +267,7 @@ const dependencyTableExists = async (client, tableName) => {
 };
 
 const getApprovedProductionProtocols = async (client, seasonId) => {
-    if (!await dependencyTableExists(client, 'protocols')) return [];
+    if (!(await dependencyTableExists(client, 'protocols'))) return [];
     return client.$queryRawUnsafe(
         `SELECT id,
                 title,
@@ -404,41 +395,44 @@ const mapWriteError = (error) => {
 
 const createSeason = async (seasonData, ownerId) => {
     try {
-        const season = await prisma.$transaction(async (transaction) => {
-            const pond = await transaction.pond.findFirst({
-                where: {
-                    id: seasonData.pondId,
-                    farm: { ownerId },
-                },
-                select: {
-                    id: true,
-                    areaM2: true,
-                    type: true,
-                    status: true,
-                    farm: { select: { status: true } },
-                },
-            });
-            if (!pond) {
-                throw new ApiError(httpStatus.NOT_FOUND, messages.SEASON.POND_NOT_FOUND);
-            }
-            assertEligiblePond(pond);
+        const season = await prisma.$transaction(
+            async (transaction) => {
+                const pond = await transaction.pond.findFirst({
+                    where: {
+                        id: seasonData.pondId,
+                        farm: { ownerId },
+                    },
+                    select: {
+                        id: true,
+                        areaM2: true,
+                        type: true,
+                        status: true,
+                        farm: { select: { status: true } },
+                    },
+                });
+                if (!pond) {
+                    throw new ApiError(httpStatus.NOT_FOUND, messages.SEASON.POND_NOT_FOUND);
+                }
+                assertEligiblePond(pond);
 
-            const openSeasonCount = await transaction.aquacultureSeason.count({
-                where: {
-                    pondId: pond.id,
-                    status: { in: [SEASON_STATUS.PLANNING, SEASON_STATUS.ACTIVE] },
-                },
-            });
-            if (openSeasonCount > 0) {
-                throw new ApiError(httpStatus.CONFLICT, messages.SEASON.OPEN_SEASON_EXISTS);
-            }
+                const openSeasonCount = await transaction.aquacultureSeason.count({
+                    where: {
+                        pondId: pond.id,
+                        status: { in: [SEASON_STATUS.PLANNING, SEASON_STATUS.ACTIVE] },
+                    },
+                });
+                if (openSeasonCount > 0) {
+                    throw new ApiError(httpStatus.CONFLICT, messages.SEASON.OPEN_SEASON_EXISTS);
+                }
 
-            const created = await transaction.aquacultureSeason.create({
-                data: buildCreateData(seasonData, ownerId, pond.areaM2),
-                select: { id: true },
-            });
-            return findOwnedSeasonDetail(transaction, created.id, ownerId);
-        }, { isolationLevel: 'Serializable' });
+                const created = await transaction.aquacultureSeason.create({
+                    data: buildCreateData(seasonData, ownerId, pond.areaM2),
+                    select: { id: true },
+                });
+                return findOwnedSeasonDetail(transaction, created.id, ownerId);
+            },
+            { isolationLevel: 'Serializable' },
+        );
 
         return normalizeSeasonDetail(season);
     } catch (error) {
@@ -446,9 +440,8 @@ const createSeason = async (seasonData, ownerId) => {
     }
 };
 
-const assignmentRoleLabel = (role) => (
-    role === PERSONNEL_ROLE.TECHNICIAN ? 'Kỹ thuật viên' : 'Chuyên gia thủy sản'
-);
+const assignmentRoleLabel = (role) =>
+    role === PERSONNEL_ROLE.TECHNICIAN ? 'Kỹ thuật viên' : 'Chuyên gia thủy sản';
 
 const requireEligiblePersonnel = async (client, accountId, role, ownerId) => {
     const account = await client.account.findFirst({
@@ -461,10 +454,7 @@ const requireEligiblePersonnel = async (client, accountId, role, ownerId) => {
         select: { id: true },
     });
     if (!account) {
-        throw new ApiError(
-            httpStatus.NOT_FOUND,
-            messages.SEASON.ASSIGNMENT_PERSONNEL_NOT_ELIGIBLE,
-        );
+        throw new ApiError(httpStatus.NOT_FOUND, messages.SEASON.ASSIGNMENT_PERSONNEL_NOT_ELIGIBLE);
     }
     return account;
 };
@@ -491,56 +481,59 @@ const requireAssignableSeason = async (client, seasonId, ownerId) => {
 
 const assignPersonnel = async (seasonId, { accountId, role }, ownerId) => {
     try {
-        const result = await prisma.$transaction(async (transaction) => {
-            const season = await requireAssignableSeason(transaction, seasonId, ownerId);
-            await requireEligiblePersonnel(transaction, accountId, role, ownerId);
+        const result = await prisma.$transaction(
+            async (transaction) => {
+                const season = await requireAssignableSeason(transaction, seasonId, ownerId);
+                await requireEligiblePersonnel(transaction, accountId, role, ownerId);
 
-            const currentAssignments = await transaction.seasonPersonnelAssignment.findMany({
-                where: {
-                    seasonId,
-                    unassignedAt: null,
-                    OR: [{ role }, { accountId }],
-                },
-                select: { role: true, accountId: true },
-            });
-            if (currentAssignments.some((assignment) => assignment.role === role)) {
-                throw new ApiError(
-                    httpStatus.CONFLICT,
-                    messages.SEASON.ASSIGNMENT_ROLE_OCCUPIED,
-                );
-            }
-            if (currentAssignments.some((assignment) => assignment.accountId === accountId)) {
-                throw new ApiError(
-                    httpStatus.CONFLICT,
-                    messages.SEASON.ASSIGNMENT_PERSONNEL_ALREADY_ASSIGNED,
-                );
-            }
+                const currentAssignments = await transaction.seasonPersonnelAssignment.findMany({
+                    where: {
+                        seasonId,
+                        unassignedAt: null,
+                        OR: [{ role }, { accountId }],
+                    },
+                    select: { role: true, accountId: true },
+                });
+                if (currentAssignments.some((assignment) => assignment.role === role)) {
+                    throw new ApiError(
+                        httpStatus.CONFLICT,
+                        messages.SEASON.ASSIGNMENT_ROLE_OCCUPIED,
+                    );
+                }
+                if (currentAssignments.some((assignment) => assignment.accountId === accountId)) {
+                    throw new ApiError(
+                        httpStatus.CONFLICT,
+                        messages.SEASON.ASSIGNMENT_PERSONNEL_ALREADY_ASSIGNED,
+                    );
+                }
 
-            const assignment = await transaction.seasonPersonnelAssignment.create({
-                data: {
-                    seasonId,
-                    role,
-                    accountId,
-                    assignedBy: ownerId,
-                },
-                select: ASSIGNMENT_SELECT,
-            });
-            const notification = await transaction.notification.create({
-                data: {
-                    accountId,
-                    title: 'Bạn được phân công vào vụ nuôi',
-                    content:
-                        `Bạn đã được phân công làm ${assignmentRoleLabel(role)} `
-                        + `cho vụ nuôi ${season.name}.`,
-                    type: NOTIFICATION_TYPE.SEASON_ASSIGNMENT_CREATED,
-                    referenceType: 'aquaculture_season',
-                    referenceId: seasonId,
-                },
-                select: { id: true },
-            });
+                const assignment = await transaction.seasonPersonnelAssignment.create({
+                    data: {
+                        seasonId,
+                        role,
+                        accountId,
+                        assignedBy: ownerId,
+                    },
+                    select: ASSIGNMENT_SELECT,
+                });
+                const notification = await transaction.notification.create({
+                    data: {
+                        accountId,
+                        title: 'Bạn được phân công vào vụ nuôi',
+                        content:
+                            `Bạn đã được phân công làm ${assignmentRoleLabel(role)} ` +
+                            `cho vụ nuôi ${season.name}.`,
+                        type: NOTIFICATION_TYPE.SEASON_ASSIGNMENT_CREATED,
+                        referenceType: 'aquaculture_season',
+                        referenceId: seasonId,
+                    },
+                    select: { id: true },
+                });
 
-            return { assignment, notificationId: notification.id };
-        }, { isolationLevel: 'Serializable' });
+                return { assignment, notificationId: notification.id };
+            },
+            { isolationLevel: 'Serializable' },
+        );
 
         emitNotification(accountId, 'notification:new', {
             id: result.notificationId,
@@ -548,10 +541,7 @@ const assignPersonnel = async (seasonId, { accountId, role }, ownerId) => {
         });
         return result.assignment;
     } catch (error) {
-        return mapPersonnelAssignmentWriteError(
-            error,
-            messages.SEASON.ASSIGNMENT_CONFLICT,
-        );
+        return mapPersonnelAssignmentWriteError(error, messages.SEASON.ASSIGNMENT_CONFLICT);
     }
 };
 
@@ -596,131 +586,134 @@ const replacePersonnel = async (
     ownerId,
 ) => {
     try {
-        const result = await prisma.$transaction(async (transaction) => {
-            const season = await requireAssignableSeason(transaction, seasonId, ownerId);
-            const currentAssignment = await transaction.seasonPersonnelAssignment.findFirst({
-                where: {
-                    id: expectedAssignmentId,
-                    seasonId,
-                    role,
-                    unassignedAt: null,
-                },
-                select: { id: true, accountId: true },
-            });
-            if (!currentAssignment) {
-                throw new ApiError(
-                    httpStatus.CONFLICT,
-                    messages.SEASON.REPLACEMENT_CURRENT_ASSIGNMENT_CHANGED,
-                );
-            }
-            if (currentAssignment.accountId === accountId) {
-                throw new ApiError(
-                    httpStatus.CONFLICT,
-                    messages.SEASON.REPLACEMENT_SAME_PERSONNEL,
-                );
-            }
-
-            await requireEligiblePersonnel(transaction, accountId, role, ownerId);
-            const existingAssignment = await transaction.seasonPersonnelAssignment.findFirst({
-                where: { seasonId, accountId, unassignedAt: null },
-                select: { id: true },
-            });
-            if (existingAssignment) {
-                throw new ApiError(
-                    httpStatus.CONFLICT,
-                    messages.SEASON.ASSIGNMENT_PERSONNEL_ALREADY_ASSIGNED,
-                );
-            }
-
-            const replacedAt = new Date();
-            const closeResult = await transaction.seasonPersonnelAssignment.updateMany({
-                where: {
-                    id: currentAssignment.id,
-                    seasonId,
-                    role,
-                    unassignedAt: null,
-                    replacedByAssignmentId: null,
-                },
-                data: {
-                    unassignedAt: replacedAt,
-                    unassignedBy: ownerId,
-                    replacementReason: reason,
-                },
-            });
-            if (closeResult.count !== 1) {
-                throw new ApiError(
-                    httpStatus.CONFLICT,
-                    messages.SEASON.REPLACEMENT_CURRENT_ASSIGNMENT_CHANGED,
-                );
-            }
-
-            const assignment = await transaction.seasonPersonnelAssignment.create({
-                data: {
-                    seasonId,
-                    role,
-                    accountId,
-                    assignedBy: ownerId,
-                },
-                select: ASSIGNMENT_SELECT,
-            });
-            const linkResult = await transaction.seasonPersonnelAssignment.updateMany({
-                where: {
-                    id: currentAssignment.id,
-                    replacedByAssignmentId: null,
-                },
-                data: { replacedByAssignmentId: assignment.id },
-            });
-            if (linkResult.count !== 1) {
-                throw new ApiError(httpStatus.CONFLICT, messages.SEASON.REPLACEMENT_CONFLICT);
-            }
-
-            const transferResult = await transferReplacementWork(transaction, {
-                seasonId,
-                role,
-                previousAccountId: currentAssignment.accountId,
-                replacementAccountId: accountId,
-                replacedAt,
-            });
-            await transaction.notification.createMany({
-                data: [
-                    {
-                        accountId: currentAssignment.accountId,
-                        title: 'Phân công vụ nuôi đã được thay đổi',
-                        content:
-                            `Bạn không còn phụ trách vai trò ${assignmentRoleLabel(role)} `
-                            + `cho vụ nuôi ${season.name}. Lý do: ${reason}`,
-                        type: NOTIFICATION_TYPE.SEASON_ASSIGNMENT_REPLACED,
-                        referenceType: 'aquaculture_season',
-                        referenceId: seasonId,
+        const result = await prisma.$transaction(
+            async (transaction) => {
+                const season = await requireAssignableSeason(transaction, seasonId, ownerId);
+                const currentAssignment = await transaction.seasonPersonnelAssignment.findFirst({
+                    where: {
+                        id: expectedAssignmentId,
+                        seasonId,
+                        role,
+                        unassignedAt: null,
                     },
-                    {
+                    select: { id: true, accountId: true },
+                });
+                if (!currentAssignment) {
+                    throw new ApiError(
+                        httpStatus.CONFLICT,
+                        messages.SEASON.REPLACEMENT_CURRENT_ASSIGNMENT_CHANGED,
+                    );
+                }
+                if (currentAssignment.accountId === accountId) {
+                    throw new ApiError(
+                        httpStatus.CONFLICT,
+                        messages.SEASON.REPLACEMENT_SAME_PERSONNEL,
+                    );
+                }
+
+                await requireEligiblePersonnel(transaction, accountId, role, ownerId);
+                const existingAssignment = await transaction.seasonPersonnelAssignment.findFirst({
+                    where: { seasonId, accountId, unassignedAt: null },
+                    select: { id: true },
+                });
+                if (existingAssignment) {
+                    throw new ApiError(
+                        httpStatus.CONFLICT,
+                        messages.SEASON.ASSIGNMENT_PERSONNEL_ALREADY_ASSIGNED,
+                    );
+                }
+
+                const replacedAt = new Date();
+                const closeResult = await transaction.seasonPersonnelAssignment.updateMany({
+                    where: {
+                        id: currentAssignment.id,
+                        seasonId,
+                        role,
+                        unassignedAt: null,
+                        replacedByAssignmentId: null,
+                    },
+                    data: {
+                        unassignedAt: replacedAt,
+                        unassignedBy: ownerId,
+                        replacementReason: reason,
+                    },
+                });
+                if (closeResult.count !== 1) {
+                    throw new ApiError(
+                        httpStatus.CONFLICT,
+                        messages.SEASON.REPLACEMENT_CURRENT_ASSIGNMENT_CHANGED,
+                    );
+                }
+
+                const assignment = await transaction.seasonPersonnelAssignment.create({
+                    data: {
+                        seasonId,
+                        role,
                         accountId,
-                        title: 'Bạn được phân công thay thế nhân sự',
-                        content:
-                            `Bạn đã được phân công làm ${assignmentRoleLabel(role)} `
-                            + `cho vụ nuôi ${season.name}.`,
-                        type: NOTIFICATION_TYPE.SEASON_ASSIGNMENT_REPLACED,
-                        referenceType: 'aquaculture_season',
-                        referenceId: seasonId,
+                        assignedBy: ownerId,
                     },
-                ],
-            });
+                    select: ASSIGNMENT_SELECT,
+                });
+                const linkResult = await transaction.seasonPersonnelAssignment.updateMany({
+                    where: {
+                        id: currentAssignment.id,
+                        replacedByAssignmentId: null,
+                    },
+                    data: { replacedByAssignmentId: assignment.id },
+                });
+                if (linkResult.count !== 1) {
+                    throw new ApiError(httpStatus.CONFLICT, messages.SEASON.REPLACEMENT_CONFLICT);
+                }
 
-            return {
-                assignment,
-                replacedAssignment: {
-                    id: currentAssignment.id,
+                const transferResult = await transferReplacementWork(transaction, {
+                    seasonId,
                     role,
-                    accountId: currentAssignment.accountId,
-                    unassignedAt: replacedAt,
-                    unassignedBy: ownerId,
-                    replacementReason: reason,
-                    replacedByAssignmentId: assignment.id,
-                },
-                ...transferResult,
-                notificationAccountIds: [currentAssignment.accountId, accountId],
-            };
-        }, { isolationLevel: 'Serializable' });
+                    previousAccountId: currentAssignment.accountId,
+                    replacementAccountId: accountId,
+                    replacedAt,
+                });
+                await transaction.notification.createMany({
+                    data: [
+                        {
+                            accountId: currentAssignment.accountId,
+                            title: 'Phân công vụ nuôi đã được thay đổi',
+                            content:
+                                `Bạn không còn phụ trách vai trò ${assignmentRoleLabel(role)} ` +
+                                `cho vụ nuôi ${season.name}. Lý do: ${reason}`,
+                            type: NOTIFICATION_TYPE.SEASON_ASSIGNMENT_REPLACED,
+                            referenceType: 'aquaculture_season',
+                            referenceId: seasonId,
+                        },
+                        {
+                            accountId,
+                            title: 'Bạn được phân công thay thế nhân sự',
+                            content:
+                                `Bạn đã được phân công làm ${assignmentRoleLabel(role)} ` +
+                                `cho vụ nuôi ${season.name}.`,
+                            type: NOTIFICATION_TYPE.SEASON_ASSIGNMENT_REPLACED,
+                            referenceType: 'aquaculture_season',
+                            referenceId: seasonId,
+                        },
+                    ],
+                });
+
+                return {
+                    assignment,
+                    replacedAssignment: {
+                        id: currentAssignment.id,
+                        role,
+                        accountId: currentAssignment.accountId,
+                        unassignedAt: replacedAt,
+                        unassignedBy: ownerId,
+                        replacementReason: reason,
+                        replacedByAssignmentId: assignment.id,
+                    },
+                    ...transferResult,
+                    notificationAccountIds: [currentAssignment.accountId, accountId],
+                };
+            },
+            { isolationLevel: 'Serializable' },
+        );
 
         result.notificationAccountIds.forEach((notificationAccountId) => {
             emitNotification(notificationAccountId, 'notification:new', {
@@ -734,10 +727,7 @@ const replacePersonnel = async (
             transferredDiseaseCaseCount: result.transferredDiseaseCaseCount,
         };
     } catch (error) {
-        return mapPersonnelAssignmentWriteError(
-            error,
-            messages.SEASON.REPLACEMENT_CONFLICT,
-        );
+        return mapPersonnelAssignmentWriteError(error, messages.SEASON.REPLACEMENT_CONFLICT);
     }
 };
 
@@ -753,9 +743,8 @@ const buildUpdateData = (seasonData, current) => {
         data.expectedEndDate = parseDateOnly(seasonData.expectedEndDate);
     }
     if (Object.hasOwn(seasonData, 'initialQuantity')) {
-        data.initialQuantity = seasonData.initialQuantity == null
-            ? null
-            : BigInt(seasonData.initialQuantity);
+        data.initialQuantity =
+            seasonData.initialQuantity == null ? null : BigInt(seasonData.initialQuantity);
     }
     const nextStockingDate = Object.hasOwn(data, 'stockingDate')
         ? data.stockingDate
@@ -778,25 +767,33 @@ const buildUpdateData = (seasonData, current) => {
 const updateSeason = async (seasonId, seasonData, ownerId) => {
     const { expectedUpdatedAt, ...editableData } = seasonData;
     try {
-        const season = await prisma.$transaction(async (transaction) => {
-            const current = await findOwnedSeason(transaction, seasonId, ownerId, SEASON_LIST_SELECT);
-            if (current.status !== SEASON_STATUS.PLANNING) {
-                throw new ApiError(httpStatus.CONFLICT, messages.SEASON.PLANNING_UPDATE_ONLY);
-            }
+        const season = await prisma.$transaction(
+            async (transaction) => {
+                const current = await findOwnedSeason(
+                    transaction,
+                    seasonId,
+                    ownerId,
+                    SEASON_LIST_SELECT,
+                );
+                if (current.status !== SEASON_STATUS.PLANNING) {
+                    throw new ApiError(httpStatus.CONFLICT, messages.SEASON.PLANNING_UPDATE_ONLY);
+                }
 
-            const result = await transaction.aquacultureSeason.updateMany({
-                where: {
-                    id: seasonId,
-                    status: SEASON_STATUS.PLANNING,
-                    updatedAt: updatedAtApiWindow(expectedUpdatedAt),
-                },
-                data: buildUpdateData(editableData, current),
-            });
-            if (result.count !== 1) {
-                throw new ApiError(httpStatus.CONFLICT, messages.SEASON.CHANGE_CONFLICT);
-            }
-            return findOwnedSeasonDetail(transaction, seasonId, ownerId);
-        }, { isolationLevel: 'Serializable' });
+                const result = await transaction.aquacultureSeason.updateMany({
+                    where: {
+                        id: seasonId,
+                        status: SEASON_STATUS.PLANNING,
+                        updatedAt: updatedAtApiWindow(expectedUpdatedAt),
+                    },
+                    data: buildUpdateData(editableData, current),
+                });
+                if (result.count !== 1) {
+                    throw new ApiError(httpStatus.CONFLICT, messages.SEASON.CHANGE_CONFLICT);
+                }
+                return findOwnedSeasonDetail(transaction, seasonId, ownerId);
+            },
+            { isolationLevel: 'Serializable' },
+        );
 
         return normalizeSeasonDetail(season);
     } catch (error) {
@@ -805,15 +802,17 @@ const updateSeason = async (seasonId, seasonData, ownerId) => {
 };
 
 const buildStatusNotifications = (season, content) => {
-    const accountIds = [...new Set(
-        season.personnelAssignments
-            .filter(
-                (assignment) =>
-                    assignment.unassignedAt == null
-                    && assignment.account.status === ACCOUNT_STATUS.ACTIVE,
-            )
-            .map((assignment) => assignment.account.id),
-    )];
+    const accountIds = [
+        ...new Set(
+            season.personnelAssignments
+                .filter(
+                    (assignment) =>
+                        assignment.unassignedAt == null &&
+                        assignment.account.status === ACCOUNT_STATUS.ACTIVE,
+                )
+                .map((assignment) => assignment.account.id),
+        ),
+    ];
     return {
         accountIds,
         data: accountIds.map((accountId) => ({
@@ -833,14 +832,8 @@ const emitStatusNotifications = (accountIds, seasonId) => {
     });
 };
 
-const cancelPlannedOperationSchedules = async (
-    client,
-    seasonId,
-    reason,
-    ownerId,
-    cancelledAt,
-) => {
-    if (!await dependencyTableExists(client, 'operation_schedules')) return 0;
+const cancelPlannedOperationSchedules = async (client, seasonId, reason, ownerId, cancelledAt) => {
+    if (!(await dependencyTableExists(client, 'operation_schedules'))) return 0;
     return client.$executeRawUnsafe(
         `UPDATE operation_schedules
             SET status = 'cancelled',
@@ -858,64 +851,64 @@ const cancelPlannedOperationSchedules = async (
     );
 };
 
-const unassignCurrentSeasonPersonnel = async (
-    client,
-    seasonId,
-    ownerId,
-    unassignedAt,
-) => client.seasonPersonnelAssignment.updateMany({
-    where: {
-        seasonId,
-        unassignedAt: null,
-    },
-    data: {
-        unassignedAt,
-        unassignedBy: ownerId,
-    },
-});
+const unassignCurrentSeasonPersonnel = async (client, seasonId, ownerId, unassignedAt) =>
+    client.seasonPersonnelAssignment.updateMany({
+        where: {
+            seasonId,
+            unassignedAt: null,
+        },
+        data: {
+            unassignedAt,
+            unassignedBy: ownerId,
+        },
+    });
 
 const activateSeason = async (seasonId, { expectedUpdatedAt }, ownerId) => {
     try {
-        const result = await prisma.$transaction(async (transaction) => {
-            const current = await findOwnedSeasonDetail(transaction, seasonId, ownerId);
-            if (current.status !== SEASON_STATUS.PLANNING) {
-                throw new ApiError(
-                    httpStatus.CONFLICT,
-                    messages.SEASON.ACTIVATION_REQUIRES_PLANNING,
-                );
-            }
-            const eligibility = buildActivationEligibility(current);
-            if (!eligibility.canActivate) {
-                throw new ApiError(
-                    httpStatus.CONFLICT,
-                    messages.SEASON.ACTIVATION_CONDITIONS_NOT_MET,
-                );
-            }
+        const result = await prisma.$transaction(
+            async (transaction) => {
+                const current = await findOwnedSeasonDetail(transaction, seasonId, ownerId);
+                if (current.status !== SEASON_STATUS.PLANNING) {
+                    throw new ApiError(
+                        httpStatus.CONFLICT,
+                        messages.SEASON.ACTIVATION_REQUIRES_PLANNING,
+                    );
+                }
+                const eligibility = buildActivationEligibility(current);
+                if (!eligibility.canActivate) {
+                    throw new ApiError(
+                        httpStatus.CONFLICT,
+                        messages.SEASON.ACTIVATION_CONDITIONS_NOT_MET,
+                    );
+                }
 
-            const update = await transaction.aquacultureSeason.updateMany({
-                where: {
-                    id: seasonId,
-                    status: SEASON_STATUS.PLANNING,
-                    updatedAt: updatedAtApiWindow(expectedUpdatedAt),
-                },
-                data: { status: SEASON_STATUS.ACTIVE },
-            });
-            if (update.count !== 1) {
-                throw new ApiError(httpStatus.CONFLICT, messages.SEASON.CHANGE_CONFLICT);
-            }
+                const update = await transaction.aquacultureSeason.updateMany({
+                    where: {
+                        id: seasonId,
+                        status: SEASON_STATUS.PLANNING,
+                        updatedAt: updatedAtApiWindow(expectedUpdatedAt),
+                    },
+                    data: { status: SEASON_STATUS.ACTIVE },
+                });
+                if (update.count !== 1) {
+                    throw new ApiError(httpStatus.CONFLICT, messages.SEASON.CHANGE_CONFLICT);
+                }
 
-            const notifications = buildStatusNotifications(
-                current,
-                `Vụ nuôi ${current.name} đã được kích hoạt.`,
-            );
-            if (notifications.data.length > 0) {
-                await transaction.notification.createMany({ data: notifications.data });
-            }
-            const season = await findOwnedSeasonDetail(transaction, seasonId, ownerId);
-            return { season, notificationAccountIds: notifications.accountIds };
-        }, { isolationLevel: 'Serializable' });
+                const notifications = buildStatusNotifications(
+                    current,
+                    `Vụ nuôi ${current.name} đã được kích hoạt.`,
+                );
+                if (notifications.data.length > 0) {
+                    await transaction.notification.createMany({ data: notifications.data });
+                }
+                const season = await findOwnedSeasonDetail(transaction, seasonId, ownerId);
+                return { season, notificationAccountIds: notifications.accountIds };
+            },
+            { isolationLevel: 'Serializable' },
+        );
 
         emitStatusNotifications(result.notificationAccountIds, seasonId);
+        require('../jobs').requestSeason(seasonId);
         return normalizeSeasonDetail(result.season);
     } catch (error) {
         return mapWriteError(error);
@@ -924,56 +917,57 @@ const activateSeason = async (seasonId, { expectedUpdatedAt }, ownerId) => {
 
 const cancelSeason = async (seasonId, { reason, expectedUpdatedAt }, ownerId) => {
     try {
-        const result = await prisma.$transaction(async (transaction) => {
-            const current = await findOwnedSeasonDetail(transaction, seasonId, ownerId);
-            if (!CANCELLABLE_STATUSES.includes(current.status)) {
-                throw new ApiError(httpStatus.CONFLICT, messages.SEASON.CANCELLATION_NOT_ALLOWED);
-            }
+        const result = await prisma.$transaction(
+            async (transaction) => {
+                const current = await findOwnedSeasonDetail(transaction, seasonId, ownerId);
+                if (!CANCELLABLE_STATUSES.includes(current.status)) {
+                    throw new ApiError(
+                        httpStatus.CONFLICT,
+                        messages.SEASON.CANCELLATION_NOT_ALLOWED,
+                    );
+                }
 
-            const cancelledAt = new Date();
-            const update = await transaction.aquacultureSeason.updateMany({
-                where: {
-                    id: seasonId,
-                    status: current.status,
-                    updatedAt: updatedAtApiWindow(expectedUpdatedAt),
-                },
-                data: {
-                    status: SEASON_STATUS.CANCELLED,
-                    cancellationReason: reason,
-                },
-            });
-            if (update.count !== 1) {
-                throw new ApiError(httpStatus.CONFLICT, messages.SEASON.CHANGE_CONFLICT);
-            }
+                const cancelledAt = new Date();
+                const update = await transaction.aquacultureSeason.updateMany({
+                    where: {
+                        id: seasonId,
+                        status: current.status,
+                        updatedAt: updatedAtApiWindow(expectedUpdatedAt),
+                    },
+                    data: {
+                        status: SEASON_STATUS.CANCELLED,
+                        cancellationReason: reason,
+                    },
+                });
+                if (update.count !== 1) {
+                    throw new ApiError(httpStatus.CONFLICT, messages.SEASON.CHANGE_CONFLICT);
+                }
 
-            await lifecycle.closeSeason(transaction, seasonId, ownerId, true, cancelledAt);
-            await unassignCurrentSeasonPersonnel(
-                transaction,
-                seasonId,
-                ownerId,
-                cancelledAt,
-            );
-            const cancelledScheduleCount = await cancelPlannedOperationSchedules(
-                transaction,
-                seasonId,
-                reason,
-                ownerId,
-                cancelledAt,
-            );
-            const notifications = buildStatusNotifications(
-                current,
-                `Vụ nuôi ${current.name} đã bị hủy. Lý do: ${reason}`,
-            );
-            if (notifications.data.length > 0) {
-                await transaction.notification.createMany({ data: notifications.data });
-            }
-            const season = await findOwnedSeasonDetail(transaction, seasonId, ownerId);
-            return {
-                season,
-                cancelledScheduleCount,
-                notificationAccountIds: notifications.accountIds,
-            };
-        }, { isolationLevel: 'Serializable' });
+                await lifecycle.closeSeason(transaction, seasonId, ownerId, true, cancelledAt);
+                await unassignCurrentSeasonPersonnel(transaction, seasonId, ownerId, cancelledAt);
+                const cancelledScheduleCount = await cancelPlannedOperationSchedules(
+                    transaction,
+                    seasonId,
+                    reason,
+                    ownerId,
+                    cancelledAt,
+                );
+                const notifications = buildStatusNotifications(
+                    current,
+                    `Vụ nuôi ${current.name} đã bị hủy. Lý do: ${reason}`,
+                );
+                if (notifications.data.length > 0) {
+                    await transaction.notification.createMany({ data: notifications.data });
+                }
+                const season = await findOwnedSeasonDetail(transaction, seasonId, ownerId);
+                return {
+                    season,
+                    cancelledScheduleCount,
+                    notificationAccountIds: notifications.accountIds,
+                };
+            },
+            { isolationLevel: 'Serializable' },
+        );
 
         emitStatusNotifications(result.notificationAccountIds, seasonId);
         return {

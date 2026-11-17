@@ -1,6 +1,21 @@
 const { notificationService, notificationNavigationService } = require('../services');
 const { asyncHandler, ResponseHandler } = require('../utils');
 const { messages } = require('../constants');
+const devices = require('../services/pushDevice.service');
+const push = require('../constants/pushNotification');
+
+/** Register the authenticated installation without exposing its endpoint token in the response. */
+const registerDevice = asyncHandler(async (req, res) => {
+    await devices.register(req.account.id, req.body);
+    res.set('Cache-Control', 'no-store');
+    ResponseHandler.success(res, { message: push.messages.REGISTERED });
+});
+
+/** Repeated logout or permission cleanup remains safe and reveals no other account's devices. */
+const unregisterDevice = asyncHandler(async (req, res) => {
+    await devices.unregister(req.account.id, req.params.deviceId);
+    res.status(204).send();
+});
 
 const getListNotification = asyncHandler(async (req, res) => {
     const { notifications, meta } = await notificationService.getListNotification(
@@ -39,13 +54,17 @@ const markAllAsRead = asyncHandler(async (req, res) => {
 
 const getReferenceContext = asyncHandler(async (req, res) => {
     const context = await notificationNavigationService.getNotificationReferenceContext(
-        req.account.id, req.params.notificationId, req.account.role,
+        req.account.id,
+        req.params.notificationId,
+        req.account.role,
     );
     res.set('Cache-Control', 'no-store');
     ResponseHandler.success(res, { message: messages.NOTIFICATION.FETCHED, data: context });
 });
 
 module.exports = {
+    registerDevice,
+    unregisterDevice,
     getListNotification,
     getNotification,
     markAllAsRead,
