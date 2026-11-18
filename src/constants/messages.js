@@ -462,7 +462,8 @@ const messages = {
         LIST: 'Đã tải danh sách thu hoạch.',
         DETAIL: 'Đã tải chi tiết thu hoạch.',
         CREATED: 'Đã ghi nhận thu hoạch.',
-        INVALID_DATE_RANGE: 'from must not be after to',
+        INVALID_DATE_RANGE: 'Ngày bắt đầu không được sau ngày kết thúc.',
+        POPULATION_IN_FUTURE: 'Thời điểm ước tính số tôm không được ở tương lai.',
         PARTIAL_COUNT_REQUIRED: 'Vui lòng nhập số con thu hoạch khi thu tỉa.',
         POPULATION_UNKNOWN:
             'Chưa xác định được số tôm hiện có. Vui lòng cập nhật số lượng trước khi thu tỉa.',
@@ -496,6 +497,7 @@ const messages = {
         IDEMPOTENCY_KEY_REUSED: 'Khóa lưu nhật ký đã được dùng cho nội dung khác',
         RECORDED_AT_TOO_FAR_FUTURE: 'Thời điểm đo không được vượt quá hiện tại 5 phút',
         INVALID_DATE_RANGE: 'Khoảng thời gian thống kê tối đa 90 ngày',
+        REVERSED_DATE_RANGE: 'Ngày kết thúc không được trước ngày bắt đầu.',
     },
 
     SHRIMP_HEALTH_LOG: {
@@ -632,7 +634,7 @@ const messages = {
         SEASON_MISMATCH: 'Không thể đổi vụ nuôi của hội thoại.',
         ASSIGNMENT_REQUIRED: 'Bạn cần phân công còn hiệu lực vào vụ nuôi này.',
         SEASON_CLOSED: 'Không thể gửi câu hỏi trong vụ nuôi đã hoàn tất hoặc đã hủy.',
-        FORBIDDEN: 'Chỉ kỹ thuật viên đang hoạt động được sử dụng RAG.',
+        FORBIDDEN: 'Chỉ kỹ thuật viên đang hoạt động được sử dụng trợ lý AI.',
         NO_ANSWER: 'Chỉ được đánh giá câu trả lời đã được tạo.',
         UNAVAILABLE: 'Dịch vụ AI hiện không khả dụng. Vui lòng thử lại.',
         CONFLICT: 'Dữ liệu hoặc quyền truy cập đã thay đổi. Vui lòng thử lại.',
