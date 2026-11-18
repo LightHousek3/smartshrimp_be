@@ -166,6 +166,11 @@ const createProduct = {
     params: farmParams,
     body: Joi.object({
         ...productFields,
+        protocolProposal: Joi.object({
+            protocolId: uuid.required(),
+            itemId: uuid.required(),
+            updatedAt: Joi.date().iso().required(),
+        }).unknown(false),
         name: normalizedText(255).required(),
         manufacturerId: uuid.required(),
         category: Joi.string().valid(...Object.values(PRODUCT_CATEGORY)).required(),

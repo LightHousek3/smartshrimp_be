@@ -50,6 +50,7 @@ const assertOperationalMaterial = (product, item, farmId, ownerId, protocol = {}
         product.status !== PRODUCT_STATUS.ACTIVE ||
         product.farmId !== farmId ||
         !product.manufacturer ||
+        product.manufacturer.status !== 'active' ||
         product.manufacturer.ownerId !== ownerId ||
         !['MANUFACTURER', 'BOTH'].includes(product.manufacturer.supplierType)
     ) {
@@ -104,7 +105,7 @@ const assertApprovedMaterial = (product, snapshot) => {
             ingredientsText: profile.ingredientsText ?? null,
             containsAntibiotic: profile.containsAntibiotic ?? null,
             usageInstructions: profile.usageInstructions ?? null,
-            withdrawalDays: decimal(profile.withdrawalDays),
+            withdrawalDays: decimal(profile.withdrawalDays ?? 0),
         });
     };
     if (!snapshot || signature(product) !== signature(snapshot))
@@ -124,9 +125,11 @@ const assertSelectionMatches = (item, product, submittedItem) => {
     const sameText = (left, right) =>
         String(left ?? '')
             .trim()
+            .replace(/\s+/gu, ' ')
             .toLocaleLowerCase('vi') ===
         String(right ?? '')
             .trim()
+            .replace(/\s+/gu, ' ')
             .toLocaleLowerCase('vi');
     if (
         !proposed ||
@@ -135,7 +138,8 @@ const assertSelectionMatches = (item, product, submittedItem) => {
             item.recommendedManufacturerId !== product.manufacturerId) ||
         (!item.recommendedManufacturerId &&
             (!sameText(proposed.manufacturer?.name, product.manufacturer?.name) ||
-                !sameText(proposed.manufacturer?.address, product.manufacturer?.address)))
+                (proposed.manufacturer?.address &&
+                    !sameText(proposed.manufacturer.address, product.manufacturer?.address))))
     ) {
         throw ApiError.conflict(messages.PRODUCTION_PROTOCOL.MATERIAL_CHANGED);
     }
@@ -146,13 +150,37 @@ const assertSelectionMatches = (item, product, submittedItem) => {
     });
 };
 
-/** Return material evidence and unresolved catalog selections for the Owner's review. */
+/**
+ * Return current submission proposals and material readiness without stock estimates.
+ * A product linked before resubmission is a catalogue selection for this review;
+ * its original recommendation remains stored for audit, not repeated in the Owner card.
+ */
 const reviews = async (client, protocol, ownerId) => {
     const items = await client.protocolItem.findMany({
         where: { protocolId: protocol.id },
         orderBy: { sequenceOrder: 'asc' },
         include: { product: { select: materialSelect } },
     });
+    const submission = await client.protocolStatusHistory.findFirst({
+        where: { protocolId: protocol.id, eventType: 'SUBMITTED' },
+        orderBy: [{ changedAt: 'desc' }, { id: 'desc' }],
+        select: { eventData: true },
+    });
+    const submittedItems = new Map(
+        (submission?.eventData?.snapshot?.items ?? []).map(item => [item.id, item]),
+    );
+    const manufacturerIds = [
+        ...new Set(items.map(item => item.recommendedManufacturerId).filter(Boolean)),
+    ];
+    const manufacturers = manufacturerIds.length
+        ? await client.supplier.findMany({
+            where: { id: { in: manufacturerIds }, ownerId },
+            select: {
+                id: true, name: true, address: true, phone: true,
+                contactName: true, email: true, note: true, supplierType: true,
+            },
+        })
+        : [];
     return items.map((item) => {
         structure.assertItemMetadata(item);
         let resolutionMessage = null;
@@ -165,6 +193,7 @@ const reviews = async (client, protocol, ownerId) => {
                     ownerId,
                     protocol,
                 );
+                assertSelectionMatches(item, item.product);
             } catch (error) {
                 if (!(error instanceof ApiError)) throw error;
                 resolutionMessage = error.message;
@@ -174,6 +203,11 @@ const reviews = async (client, protocol, ownerId) => {
             protocol.status === PROTOCOL_STATUS.PENDING_APPROVAL
                 ? item.product
                 : (item.materialSnapshot ?? item.product);
+        // Use the submitted identity, not today's productId: creation in this
+        // review must remain visible after refresh. Legacy snapshots may be absent.
+        const proposed = submittedItems.get(item.id)?.productId
+            ? null
+            : item.recommendedProductDetails?.proposed;
         return {
             itemId: item.id,
             productId: item.productId,
@@ -188,7 +222,14 @@ const reviews = async (client, protocol, ownerId) => {
             requiresResolution: Boolean(resolutionMessage),
             resolutionMessage,
             recommendedManufacturerId: item.recommendedManufacturerId,
-            proposed: item.recommendedProductDetails?.proposed ?? null,
+            proposed: proposed
+                ? {
+                    ...proposed,
+                    ...(item.recommendedManufacturerId && {
+                        manufacturer: manufacturers.find(row => row.id === item.recommendedManufacturerId) ?? null,
+                    }),
+                }
+                : null,
             catalog: catalog ? JSON.parse(JSON.stringify(catalog)) : null,
             dailyDoseIncrement: String(item.dailyDoseIncrement ?? 0),
             firstDay: item.startDayOffset,
@@ -197,6 +238,115 @@ const reviews = async (client, protocol, ownerId) => {
             recurrenceAnchorDay: item.recurrenceAnchorDay ?? item.startDayOffset,
         };
     });
+};
+
+/**
+ * Lock the season and pending version before creating a proposed material.
+ * The displayed revision prevents a stale form from linking to a changed prescription.
+ */
+const prepareCreation = async (client, ownerId, farmId, context) => {
+    const where = {
+        id: context.protocolId,
+        submittedAt: { not: null },
+        season: { pond: { farmId, farm: { ownerId } } },
+    };
+    const select = {
+        id: true,
+        status: true,
+        updatedAt: true,
+        submittedAt: true,
+        protocolType: true,
+        treatmentStartAt: true,
+        seasonId: true,
+        season: {
+            select: {
+                stockingDate: true,
+                status: true,
+                pond: { select: { farmId: true, farm: { select: { status: true } } } },
+            },
+        },
+    };
+    const owned = await client.protocol.findFirst({ where, select });
+    if (!owned) throw ApiError.notFound(messages.PROTOCOL.NOT_FOUND);
+    // Use the same season-first lock order as approval and schedule execution.
+    await client.$queryRaw`SELECT id FROM aquaculture_seasons WHERE id=${owned.seasonId}::uuid FOR UPDATE`;
+    await client.$queryRaw`SELECT id FROM protocols WHERE id=${owned.id}::uuid FOR UPDATE`;
+    const protocol = await client.protocol.findFirst({ where, select });
+    if (
+        !protocol ||
+        protocol.status !== PROTOCOL_STATUS.PENDING_APPROVAL ||
+        protocol.updatedAt.getTime() !== new Date(context.updatedAt).getTime()
+    ) {
+        throw ApiError.conflict(messages.PROTOCOL.CONFLICT);
+    }
+    if (
+        !['PLANNING', 'ACTIVE'].includes(protocol.season.status) ||
+        protocol.season.pond.farm.status !== 'ACTIVE'
+    ) {
+        throw ApiError.forbidden(messages.PROTOCOL.CLOSED);
+    }
+    const items = await client.protocolItem.findMany({
+        where: { protocolId: protocol.id },
+        orderBy: { sequenceOrder: 'asc' },
+    });
+    const item = items.find(row => row.id === context.itemId);
+    if (!item || !item.recommendedProductDetails?.proposed)
+        throw ApiError.notFound(messages.PROTOCOL.PROPOSAL_NOT_FOUND);
+    if (item.productId) throw ApiError.conflict(messages.PROTOCOL.CONFLICT);
+    return { protocol, item, items };
+};
+
+/**
+ * Link a newly saved material to every identical proposal in this version atomically.
+ * Original Expert facts stay intact; creating catalogue records never creates stock.
+ */
+const linkCreatedMaterial = async (client, context, product, ownerId) => {
+    const { protocol, item, items } = context;
+    assertSelectionMatches(item, product);
+    if (!item.recommendedManufacturerId) {
+        const manufacturer = await client.supplier.findFirst({
+            where: { id: product.manufacturerId, ownerId },
+            select: { createdAt: true },
+        });
+        if (!manufacturer || manufacturer.createdAt < protocol.submittedAt)
+            throw ApiError.badRequest(messages.PROTOCOL.PROPOSED_SUPPLIER_REQUIRED);
+    }
+    // Meal-specific notes and evidence links do not create a second catalogue identity.
+    const matching = items.filter(row => {
+        if (row.productId || !row.recommendedProductDetails?.proposed) return false;
+        if ((row.recommendedManufacturerId ?? null) !== (item.recommendedManufacturerId ?? null))
+            return false;
+        try {
+            assertSelectionMatches(row, product);
+            return true;
+        } catch (error) {
+            if (error instanceof ApiError && error.statusCode === 409) return false;
+            throw error;
+        }
+    });
+    for (const row of matching) {
+        structure.assertItemMetadata(row);
+        assertSelectionMatches(row, product);
+        assertOperationalMaterial(product, row, protocol.season.pond.farmId, ownerId, protocol);
+    }
+    const linked = await client.protocolItem.updateMany({
+        where: { protocolId: protocol.id, id: { in: matching.map(row => row.id) }, productId: null },
+        data: { productId: product.id, materialSnapshot: JSON.parse(JSON.stringify(product)) },
+    });
+    if (linked.count !== matching.length) throw ApiError.conflict(messages.PROTOCOL.CONFLICT);
+    const changed = await client.protocol.updateMany({
+        where: {
+            id: protocol.id,
+            status: PROTOCOL_STATUS.PENDING_APPROVAL,
+            // PostgreSQL stores microseconds while the client revision carries milliseconds.
+            updatedAt: {
+                gte: protocol.updatedAt,
+                lt: new Date(protocol.updatedAt.getTime() + 1),
+            },
+        },
+        data: { updatedAt: new Date(Math.max(Date.now(), protocol.updatedAt.getTime() + 1)) },
+    });
+    if (changed.count !== 1) throw ApiError.conflict(messages.PROTOCOL.CONFLICT);
 };
 
 /** Resolve only existing catalog records; proposals and evidence remain immutable submission snapshots. */
@@ -215,7 +365,11 @@ const resolveForApproval = async (client, protocol, ownerId, selections = []) =>
     const productIds = [
         ...new Set(items.map((item) => selected.get(item.id) ?? item.productId).filter(Boolean)),
     ].sort();
-    if (items.some((item) => !(selected.get(item.id) ?? item.productId))) {
+    // New proposals must be created and linked before the separate approval decision.
+    // A legacy selection payload cannot bypass creation or replace the Expert's material.
+    if (items.some(item =>
+        !item.productId || (selected.has(item.id) && selected.get(item.id) !== item.productId),
+    )) {
         throw ApiError.badRequest(messages.PRODUCTION_PROTOCOL.MATERIAL_UNRESOLVED);
     }
     for (const id of productIds)
@@ -323,4 +477,6 @@ module.exports = {
     resolveForApproval,
     options,
     assertSelectionMatches,
+    prepareCreation,
+    linkCreatedMaterial,
 };

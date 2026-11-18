@@ -26,6 +26,7 @@ const { requireSelectableSupplier } = require('./supplier.service');
 const legacyRead = require('./inventoryLegacyRead.service');
 const { getHistoryOptions } = require('./inventoryHistoryOptions.service');
 const { materialFactsChanged } = require('../utils/protocolMaterial');
+const protocolReview = require('./productionProtocolReview.service');
 const logger = require('../config/logger');
 const {
     stockInAlertUnit,
@@ -588,19 +589,24 @@ const prepareOwnerCompliance = (
 
 /**
  * Create a product after checking farm ownership and name/unit uniqueness.
- * Keep the checks and insert in one serializable transaction.
+ * Keep creation and optional protocol proposal linkage in one serializable transaction.
  */
 const createProduct = async (farmId, productData, ownerId) => {
-    const { compliance = {}, ...fields } = productData;
+    const { compliance = {}, protocolProposal, ...fields } = productData;
     const data = prepareProductData(fields, { fillDefaults: true });
     validateConversion(data);
     try {
         const product = await prisma.$transaction(
             async (transaction) => {
                 await requireOwnedFarm(transaction, farmId, ownerId);
+                const proposal = protocolProposal
+                    ? await protocolReview.prepareCreation(
+                        transaction, ownerId, farmId, protocolProposal,
+                    )
+                    : null;
                 await requireSelectableSupplier(transaction, ownerId, data.manufacturerId, true);
                 await requireUniqueProductNameUnit(transaction, farmId, data.name, data.unit);
-                return transaction.product.create({
+                const created = await transaction.product.create({
                     data: {
                         ...data,
                         farmId,
@@ -610,6 +616,16 @@ const createProduct = async (farmId, productData, ownerId) => {
                     },
                     select: PRODUCT_SELECT,
                 });
+                if (proposal) {
+                    const material = await transaction.product.findUnique({
+                        where: { id: created.id },
+                        select: protocolReview.materialSelect,
+                    });
+                    await protocolReview.linkCreatedMaterial(
+                        transaction, proposal, material, ownerId,
+                    );
+                }
+                return created;
             },
             { isolationLevel: 'Serializable' },
         );
