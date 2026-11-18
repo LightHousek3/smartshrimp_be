@@ -718,7 +718,8 @@ const messages = {
         INSUFFICIENT_INVENTORY_TITLE: 'Tồn kho hợp lệ không đủ để thực hiện vận hành',
         INSUFFICIENT_INVENTORY_CONTENT:
             'Kiểm tra số lượng, hạn sử dụng và hồ sơ của vật tư trước khi thực hiện lại.',
-        VARIANCE_REASON_REQUIRED: 'Cần cung cấp lý do khi số lượng chênh lệch vượt mức cho phép',
+        VARIANCE_REASON_REQUIRED: 'Cần cung cấp lý do khi số lượng thực tế khác với kế hoạch',
+        EARLY_EXECUTION_NOT_ALLOWED: 'Chưa đến thời gian dự kiến thực hiện lịch vận hành',
         INVALID_ACTUAL_QUANTITY: 'Số lượng thực tế phải lớn hơn 0',
         INVALID_IDEMPOTENCY_KEY: 'Mã idempotency_key không hợp lệ',
     },

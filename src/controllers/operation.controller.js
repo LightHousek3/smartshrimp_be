@@ -36,6 +36,20 @@ const executeSchedule = asyncHandler(async (req, res) => {
 });
 
 /**
+ * UC-11b: Ghi nhận thực hiện nhiều hoạt động cùng cữ (atomic transaction)
+ */
+const executeSchedulesBatch = asyncHandler(async (req, res) => {
+    const executions = await operationService.executeSchedulesBatch(
+        req.account.id,
+        req.body.items,
+    );
+    ResponseHandler.created(res, {
+        message: messages.OPERATION.EXECUTED,
+        data: executions,
+    });
+});
+
+/**
  * UC-12: Xem thống kê vận hành
  */
 const getSeasonStats = asyncHandler(async (req, res) => {
@@ -50,5 +64,6 @@ module.exports = {
     listSchedules,
     getSchedule,
     executeSchedule,
+    executeSchedulesBatch,
     getSeasonStats,
 };
