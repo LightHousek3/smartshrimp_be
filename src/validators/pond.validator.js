@@ -25,8 +25,8 @@ const pondFields = {
     areaM2: positiveDecimal(POND_LIMITS.AREA_M2),
     depthM: positiveDecimal(POND_LIMITS.DEPTH_M),
     volumeM3: positiveDecimal(POND_LIMITS.VOLUME_M3),
-    type: Joi.string().valid(...POND_TYPES),
-    status: Joi.string().valid(...POND_STATUSES),
+    type: Joi.string().valid(...POND_TYPES).label('Loại ao'),
+    status: Joi.string().valid(...POND_STATUSES).label('Trạng thái ao'),
 };
 
 /** Validate farm scope and convert query strings/defaults before pagination runs. */
@@ -37,8 +37,8 @@ const getPonds = {
         limit: Joi.number().integer().min(1)
             .max(POND_PAGINATION.MAX_LIMIT).default(POND_PAGINATION.DEFAULT_LIMIT),
         search: Joi.string().trim().max(POND_LIMITS.NAME).allow('').default(''),
-        status: Joi.string().valid(...POND_STATUSES),
-        type: Joi.string().valid(...POND_TYPES),
+        status: pondFields.status,
+        type: pondFields.type,
     }),
 };
 

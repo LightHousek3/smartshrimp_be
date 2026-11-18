@@ -1,5 +1,5 @@
 const Joi = require('joi');
-const { WATER_METRIC_DEFINITIONS, WATER_NOTE_MAX_LENGTH } = require('../constants');
+const { WATER_METRIC_DEFINITIONS, WATER_NOTE_MAX_LENGTH, messages } = require('../constants');
 
 /**
  * Validators cho nhật ký đo nước (water_quality_logs).
@@ -45,7 +45,9 @@ const listWaterLogs = {
     }),
     query: Joi.object().keys({
         from: Joi.date().iso(),
-        to: Joi.date().iso().min(Joi.ref('from')),
+        to: Joi.date().iso().min(Joi.ref('from')).messages({
+            'date.min': messages.WATER_LOG.REVERSED_DATE_RANGE,
+        }),
         includeVoided: Joi.boolean().default(false),
         filter: Joi.string().valid('all', 'warning', 'voided'),
         includeCounts: Joi.boolean().default(false),
@@ -73,7 +75,7 @@ const getStatistics = {
         to: Joi.date().iso().when('from', {
             is: Joi.exist(),
             then: Joi.date().min(Joi.ref('from')),
-        }),
+        }).messages({ 'date.min': messages.WATER_LOG.REVERSED_DATE_RANGE }),
         granularity: Joi.string().valid('day', 'week').default('day'),
     }),
 };

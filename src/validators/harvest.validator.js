@@ -18,11 +18,14 @@ const list = {
         harvestType: Joi.string().valid('PARTIAL', 'FINAL'),
         from: Joi.date().iso(),
         to: Joi.date().iso(),
-        populationAt: Joi.date().iso().max('now'),
+        populationAt: Joi.date().iso().max('now').messages({
+            'date.max': messages.HARVEST.POPULATION_IN_FUTURE,
+        }),
         cursor: uuid,
         limit: Joi.number().integer().min(1).max(50).default(20),
     }).custom((value, helpers) => value.from && value.to && value.from > value.to
-        ? helpers.message({ custom: messages.HARVEST.INVALID_DATE_RANGE }) : value),
+        ? helpers.error('date.range') : value)
+        .messages({ 'date.range': messages.HARVEST.INVALID_DATE_RANGE }),
 };
 // Validate the parent season and child harvest identifiers together.
 const detail = { params: Joi.object({ ...params, harvestId: uuid.required() }) };
