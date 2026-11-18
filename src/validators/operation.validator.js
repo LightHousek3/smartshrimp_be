@@ -43,6 +43,42 @@ const executeSchedule = {
     }),
 };
 
+const executeSchedulesBatch = {
+    body: Joi.object().keys({
+        items: Joi.array()
+            .min(1)
+            .max(20)
+            .items(
+                Joi.object().keys({
+                    scheduleId: Joi.string().uuid({ version: 'uuidv4' }).required(),
+                    actualQuantity: Joi.alternatives()
+                        .try(
+                            Joi.string().pattern(/^(?:0|[1-9]\d{0,10})(?:\.\d{1,9})?$/),
+                            Joi.number().positive().max(99999999999).strict(),
+                        )
+                        .required()
+                        .messages({
+                            'alternatives.match':
+                                'Số lượng thực tế phải dương, tối đa 9 chữ số thập phân',
+                            'any.required': 'Số lượng thực tế là bắt buộc',
+                        }),
+                    actualProductId: Joi.string().uuid({ version: 'uuidv4' }).allow(null),
+                    executedAt: Joi.date().iso().max('now'),
+                    note: Joi.string().trim().max(500).allow('', null),
+                    varianceReason: Joi.string().trim().max(500).allow('', null),
+                    idempotencyKey: Joi.string()
+                        .uuid({ version: 'uuidv4' })
+                        .required()
+                        .messages({
+                            'string.guid': 'Mã idempotency_key phải là UUID hợp lệ',
+                            'any.required': 'Mã idempotency_key là bắt buộc',
+                        }),
+                }),
+            )
+            .required(),
+    }),
+};
+
 const getSeasonStats = {
     params: Joi.object().keys({
         seasonId: Joi.string().uuid({ version: 'uuidv4' }).required(),
@@ -53,5 +89,6 @@ module.exports = {
     listSchedules,
     getSchedule,
     executeSchedule,
+    executeSchedulesBatch,
     getSeasonStats,
 };
