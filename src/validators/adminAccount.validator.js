@@ -43,9 +43,15 @@ const createAccount = {
             .required(),
         managedByOwnerId: Joi.when('role', {
             is: Joi.valid(...staffRoles),
-            then: accountId.required(),
-            otherwise: Joi.forbidden(),
-        }),
+            then: accountId.required().messages({
+                'any.required': 'Vui lòng chọn chủ quản.',
+                'string.guid': 'Mã chủ quản không hợp lệ. Vui lòng chọn lại chủ quản.',
+            }),
+            otherwise: Joi.forbidden().messages({
+                'any.unknown':
+                    'Không được chọn chủ quản khi tạo tài khoản chủ trang trại.',
+            }),
+        }).label('Chủ quản'),
     }),
 };
 
