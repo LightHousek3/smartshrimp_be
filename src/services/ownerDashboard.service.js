@@ -12,12 +12,12 @@ const {
     SEASON_STATUS,
     ALERT_KIND,
     DASHBOARD_PERIOD,
-    PRODUCT_UNIT,
+    DISEASE_CASE_STATUS,
 } = require('../constants');
+const { usableStock, stockInAlertUnit, alertUnit } = require('../utils/inventoryStock');
 
 const DAY_MS = 86400000;
 const MAX_FINANCE_MONTHS = 60;
-const PACKAGED_UNITS = new Set([PRODUCT_UNIT.PACK, PRODUCT_UNIT.BOTTLE]);
 const localDate = new Intl.DateTimeFormat('en-CA', {
     timeZone: 'Asia/Ho_Chi_Minh',
     year: 'numeric',
@@ -56,22 +56,20 @@ const contextForSeason = (season, { includePondName = true } = {}) => ({
     farmName: season.pond.farm.name,
 });
 
-/** Fetch a count and one deterministic preview without loading every alert. */
-const alertPreview = async (delegate, where, select, kind, normalize, dateField = 'createdAt') => {
-    const [count, items] = await Promise.all([
-        delegate.count({ where }),
-        delegate.findMany({
-            where,
-            select,
-            orderBy: [{ [dateField]: 'desc' }, { id: 'desc' }],
-            take: 1,
-        }),
-    ]);
-    return count === 0 ? null : { kind, count, preview: normalize(items[0]) };
-};
+/**
+ * Each unresolved episode has its own season and detail target (BR-88/90).
+ * Legacy WAITING_FOR_INFO is an open conversation, never post-treatment monitoring.
+ */
+const diseaseAlerts = (cases) => cases.map((item) => ({
+    kind: item.status === DISEASE_CASE_STATUS.IN_TREATMENT
+        ? ALERT_KIND.IN_TREATMENT
+        : item.status === DISEASE_CASE_STATUS.MONITORING ? ALERT_KIND.MONITORING : ALERT_KIND.CASE_OPEN,
+    count: 1,
+    preview: { id: item.id, title: item.title, ...contextForSeason(item.season, { includePondName: false }) },
+}));
 
 /** Group all actionable urgent titles by farm/pond/season; retain the newest task as the detail target. */
-const urgentTaskAlerts = (tasks, farmById, seasonById) => {
+const urgentTaskAlerts = (tasks, farmById) => {
     const groups = new Map();
     for (const task of tasks) {
         const key = JSON.stringify([task.farmId, task.seasonId]);
@@ -87,7 +85,7 @@ const urgentTaskAlerts = (tasks, farmById, seasonById) => {
                     id: task.id,
                     farmId: task.farmId,
                     farmName: farmById.get(task.farmId).name,
-                    ...(task.seasonId && contextForSeason(seasonById.get(task.seasonId))),
+                    ...(task.season && contextForSeason(task.season)),
                 },
             });
         }
@@ -100,7 +98,7 @@ const urgentTaskAlerts = (tasks, farmById, seasonById) => {
 };
 
 /** Compute lot-valued inventory using Decimal so lots and alert thresholds do not drift. */
-const inventorySummary = (farms, products) => {
+const inventorySummary = (farms, products, now) => {
     const inventories = farms.map((farm) => ({
         farmId: farm.id,
         farmName: farm.name,
@@ -112,10 +110,6 @@ const inventorySummary = (farms, products) => {
     const lowStockByFarm = new Map();
     for (const product of products) {
         const inventory = byFarm.get(product.farmId);
-        const quantity = product.inventoryBalances.reduce(
-            (sum, lot) => sum.plus(lot.quantity),
-            new Prisma.Decimal(0),
-        );
         inventory.productCount += 1;
         inventory.stockValue = product.inventoryBalances.reduce(
             (sum, lot) => sum.plus(new Prisma.Decimal(lot.quantity).times(lot.unitPrice)),
@@ -123,9 +117,7 @@ const inventorySummary = (farms, products) => {
         );
         // Warehouse thresholds for bottles/packs use the conversion unit, while
         // balances and stock valuation retain their original stock unit.
-        const usesConversion = PACKAGED_UNITS.has(product.unit)
-            && product.conversionUnit && new Prisma.Decimal(product.conversionQuantity ?? 0).gt(0);
-        const alertQuantity = usesConversion ? quantity.times(product.conversionQuantity) : quantity;
+        const alertQuantity = stockInAlertUnit(product, usableStock(product, product.inventoryBalances, now));
         const threshold = new Prisma.Decimal(product.minAlertQuantity);
         // A disabled threshold or stock exactly at the minimum is not low.
         if (threshold.gt(0) && alertQuantity.lessThan(threshold)) {
@@ -137,7 +129,7 @@ const inventorySummary = (farms, products) => {
                 farmName: inventory.farmName,
                 quantity: Number(alertQuantity),
                 minAlertQuantity: Number(product.minAlertQuantity),
-                unit: usesConversion ? product.conversionUnit : product.unit,
+                unit: alertUnit(product),
             };
             // Collect every low product in the same scope as the count and warehouse link.
             const farmAlert = lowStockByFarm.get(product.farmId);
@@ -221,10 +213,11 @@ const getOverview = async (ownerId, now = new Date()) =>
                 }),
             ]);
             const farmIds = farms.map(({ id }) => id);
-            const seasonIds = seasons.map(({ id }) => id);
-            const seasonById = new Map(seasons.map((season) => [season.id, season]));
             const farmById = new Map(farms.map((farm) => [farm.id, farm]));
-            const caseWhere = { season: visibleSeason(ownerId) };
+            const caseWhere = {
+                season: { status: SEASON_STATUS.ACTIVE, pond: { farm: { ownerId, status: FARM_STATUS.ACTIVE } } },
+                status: { not: DISEASE_CASE_STATUS.RESOLVED },
+            };
             const protocolWhere = { season: visibleSeason(ownerId), status: 'PENDING_APPROVAL' };
             const normalize = (item) => ({
                 id: item.id,
@@ -232,7 +225,7 @@ const getOverview = async (ownerId, now = new Date()) =>
                 // Protocol/case captions use farm and season; pondId still supports navigation.
                 ...contextForSeason(item.season, { includePondName: false }),
             });
-            const [products, tasks, ...alerts] = await Promise.all([
+            const [products, tasks, protocols, cases] = await Promise.all([
                 tx.product.findMany({
                     where: { farmId: { in: farmIds }, status: 'ACTIVE' },
                     select: {
@@ -240,12 +233,13 @@ const getOverview = async (ownerId, now = new Date()) =>
                         name: true,
                         farmId: true,
                         unit: true,
+                        status: true,
                         minAlertQuantity: true,
                         conversionQuantity: true,
                         conversionUnit: true,
                         inventoryBalances: {
                             where: { quantity: { gt: 0 } },
-                            select: { quantity: true, unitPrice: true },
+                            select: { quantity: true, unitPrice: true, expiryDate: true, receivedAt: true },
                         },
                     },
                     orderBy: [{ name: 'asc' }, { id: 'asc' }],
@@ -256,60 +250,45 @@ const getOverview = async (ownerId, now = new Date()) =>
                         farmId: { in: farmIds },
                         priority: 'URGENT',
                         status: { in: ['PENDING', 'IN_PROGRESS'] },
-                        OR: [{ seasonId: null }, { seasonId: { in: seasonIds } }],
+                        OR: [{ seasonId: null }, { season: { pond: { farm: { ownerId } } } }],
                     },
-                    select: { id: true, title: true, farmId: true, seasonId: true },
+                    select: { id: true, title: true, farmId: true, seasonId: true, season: { select: seasonContextSelect } },
                     orderBy: [{ createdAt: 'desc' }, { id: 'desc' }],
                 }),
-                alertPreview(
-                    tx.protocol,
-                    { ...protocolWhere, protocolType: 'TREATMENT' },
-                    {
+                tx.protocol.findMany({
+                    where: {
+                        ...protocolWhere,
+                        OR: [
+                            { protocolType: 'PRODUCTION' },
+                            { protocolType: 'TREATMENT', diseaseCase: caseWhere },
+                        ],
+                    },
+                    select: {
                         id: true,
                         title: true,
+                        protocolType: true,
                         season: { select: seasonContextSelect },
                     },
-                    ALERT_KIND.PENDING_TREATMENT,
-                    normalize,
-                ),
-                alertPreview(
-                    tx.protocol,
-                    { ...protocolWhere, protocolType: 'PRODUCTION' },
-                    {
+                    orderBy: [{ createdAt: 'desc' }, { id: 'desc' }],
+                }),
+                tx.diseaseCase.findMany({
+                    where: caseWhere,
+                    select: {
                         id: true,
                         title: true,
+                        status: true,
                         season: { select: seasonContextSelect },
                     },
-                    ALERT_KIND.PENDING_PRODUCTION,
-                    normalize,
-                ),
-                alertPreview(
-                    tx.diseaseCase,
-                    { ...caseWhere, status: 'IN_TREATMENT' },
-                    {
-                        id: true,
-                        title: true,
-                        season: { select: seasonContextSelect },
-                    },
-                    ALERT_KIND.IN_TREATMENT,
-                    normalize,
-                    'updatedAt',
-                ),
-                alertPreview(
-                    tx.diseaseCase,
-                    { ...caseWhere, status: { in: ['OPEN', 'WAITING_FOR_INFO', 'MONITORING'] } },
-                    {
-                        id: true,
-                        title: true,
-                        season: { select: seasonContextSelect },
-                    },
-                    ALERT_KIND.MONITORING,
-                    normalize,
-                    'updatedAt',
-                ),
+                    orderBy: [{ updatedAt: 'desc' }, { id: 'desc' }],
+                }),
             ]);
-            const { inventories, lowStockAlerts } = inventorySummary(farms, products);
-            const urgentAlerts = urgentTaskAlerts(tasks, farmById, seasonById);
+            const { inventories, lowStockAlerts } = inventorySummary(farms, products, now);
+            const urgentAlerts = urgentTaskAlerts(tasks, farmById);
+            const pendingAlerts = protocols.map((item) => ({
+                kind: item.protocolType === 'TREATMENT' ? ALERT_KIND.PENDING_TREATMENT : ALERT_KIND.PENDING_PRODUCTION,
+                count: 1,
+                preview: normalize(item),
+            }));
             const activeSeasons = seasons.filter(({ status }) => status === SEASON_STATUS.ACTIVE);
             const today = new Date(`${todayInVietnam(now)}T00:00:00Z`);
             return {
@@ -320,7 +299,7 @@ const getOverview = async (ownerId, now = new Date()) =>
                     ponds: farms.reduce((sum, farm) => sum + farm._count.ponds, 0),
                     activeSeasons: activeSeasons.length,
                 },
-                alerts: [...urgentAlerts, ...alerts.slice(0, 2), ...lowStockAlerts, ...alerts.slice(2)].filter(Boolean),
+                alerts: [...urgentAlerts, ...pendingAlerts, ...lowStockAlerts, ...diseaseAlerts(cases)],
                 seasons: activeSeasons.map((season) => ({
                     ...contextForSeason(season),
                     shrimpType: season.shrimpType,
@@ -375,7 +354,7 @@ const financeRange = ({ period = DASHBOARD_PERIOD.THIS_MONTH, from, to }, now) =
 };
 
 /**
- * Aggregate retained financial facts, never purchases or unrecorded operational costs.
+ * Aggregate known harvest revenue and execution-linked receipt-layer costs (BR-127/128).
  * Lifecycle/status changes must not erase historical income or crop stock-out cost.
  * Parameterized SQL is needed because Prisma has no calendar-month/timezone groupBy and
  * harvest_events already exists in smartshrimp.sql but has no Prisma model. No DB change.
@@ -399,7 +378,8 @@ const getFinance = async (ownerId, query, now = new Date()) => {
             SELECT ${range.from}::date AS from_date, ${range.to}::date AS to_date
         ), facts AS (
             SELECT date_trunc('month', h.harvested_at AT TIME ZONE 'Asia/Ho_Chi_Minh') AS month,
-                   coalesce(h.total_revenue, 0) AS income, 0::numeric AS cost
+                   coalesce(h.total_revenue, 0) AS income, 0::numeric AS cost,
+                   (h.total_revenue IS NULL)::int AS unpriced, (h.total_revenue IS NOT NULL)::int AS priced
             FROM harvest_events h
             JOIN aquaculture_seasons s ON s.id = h.season_id
             JOIN ponds p ON p.id = s.pond_id
@@ -408,21 +388,25 @@ const getFinance = async (ownerId, query, now = new Date()) => {
               AND h.harvested_at >= b.from_date::timestamp AT TIME ZONE 'Asia/Ho_Chi_Minh'
               AND h.harvested_at < (b.to_date + 1)::timestamp AT TIME ZONE 'Asia/Ho_Chi_Minh'
             UNION ALL
-            SELECT date_trunc('month', t.created_at AT TIME ZONE 'Asia/Ho_Chi_Minh'),
-                   0::numeric, t.total_amount
+            SELECT date_trunc('month', e.executed_at AT TIME ZONE 'Asia/Ho_Chi_Minh'),
+                   0::numeric, t.total_amount, 0, 0
             FROM inventory_transactions t
+            JOIN operation_executions e ON t.reference_type = 'operation_execution' AND e.id = t.reference_id
+            JOIN operation_schedules os ON os.id = e.schedule_id AND os.season_id = t.season_id
             JOIN products pr ON pr.id = t.product_id
             JOIN aquaculture_seasons s ON s.id = t.season_id
             JOIN ponds p ON p.id = s.pond_id
             JOIN farms f ON f.id = p.farm_id CROSS JOIN bounds b
             WHERE f.owner_id = ${ownerId}::uuid ${farmFilter}
               AND pr.farm_id = f.id AND t.transaction_type = 'stock_out'
-              AND pr.category IN ('feed', 'medicine', 'mineral', 'chemical')
-              AND t.created_at >= b.from_date::timestamp AT TIME ZONE 'Asia/Ho_Chi_Minh'
-              AND t.created_at < (b.to_date + 1)::timestamp AT TIME ZONE 'Asia/Ho_Chi_Minh'
+              AND (e.actual_product_id IS NULL OR e.actual_product_id = t.product_id)
+              AND e.executed_at >= b.from_date::timestamp AT TIME ZONE 'Asia/Ho_Chi_Minh'
+              AND e.executed_at < (b.to_date + 1)::timestamp AT TIME ZONE 'Asia/Ho_Chi_Minh'
         )
         SELECT to_char(m.month, 'YYYY-MM') AS month,
-               coalesce(sum(facts.income), 0) AS income, coalesce(sum(facts.cost), 0) AS cost
+               coalesce(sum(facts.income), 0) AS income, coalesce(sum(facts.cost), 0) AS cost,
+               coalesce(sum(facts.unpriced), 0)::int AS "unpricedHarvests",
+               coalesce(sum(facts.priced), 0)::int AS "pricedHarvests"
         FROM bounds b CROSS JOIN LATERAL generate_series(
             date_trunc('month', b.from_date::timestamp), date_trunc('month', b.to_date::timestamp), interval '1 month'
         ) m(month)
@@ -431,14 +415,22 @@ const getFinance = async (ownerId, query, now = new Date()) => {
     `);
     const income = rows.reduce((sum, row) => sum.plus(row.income), new Prisma.Decimal(0));
     const cost = rows.reduce((sum, row) => sum.plus(row.cost), new Prisma.Decimal(0));
+    const unpricedHarvests = rows.reduce((sum, row) => sum + Number(row.unpricedHarvests ?? 0), 0);
+    const pricedHarvests = rows.reduce((sum, row) => sum + Number(row.pricedHarvests ?? 0), 0);
+    const undetermined = unpricedHarvests > 0 && pricedHarvests === 0;
     return {
         ...range,
         months: rows.map((row) => ({
             month: row.month,
-            income: Number(row.income),
+            income: Number(row.unpricedHarvests ?? 0) > 0 && Number(row.pricedHarvests ?? 0) === 0 ? null : Number(row.income),
             cost: Number(row.cost),
+            unpricedHarvests: Number(row.unpricedHarvests ?? 0),
         })),
-        totals: { income: Number(income), cost: Number(cost), profit: Number(income.minus(cost)) },
+        totals: {
+            income: undetermined ? null : Number(income), cost: Number(cost),
+            // Kept as an API compatibility key; the UI labels this material margin, not full profit.
+            profit: undetermined ? null : Number(income.minus(cost)), unpricedHarvests,
+        },
     };
 };
 
