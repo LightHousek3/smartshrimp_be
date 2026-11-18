@@ -532,6 +532,8 @@ const messages = {
     },
 
     PROTOCOL: {
+        PROPOSAL_NOT_FOUND: 'Không tìm thấy vật tư đề xuất trong phác đồ này.',
+        PROPOSED_SUPPLIER_REQUIRED: 'Hãy tạo nhà sản xuất được Chuyên gia đề xuất trước khi lưu vật tư.',
         FETCHED: 'Lấy dữ liệu phác đồ thành công.',
         REVIEWED: 'Đã lưu quyết định phác đồ.',
         NOT_FOUND: 'Không tìm thấy phác đồ trong phạm vi quản lý.',

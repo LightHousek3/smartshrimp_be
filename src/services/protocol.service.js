@@ -314,6 +314,7 @@ const detail = async (ownerId, id) =>
             }
             return {
                 ...card(p, refs),
+                farmId: p.season.pond.farmId,
                 updatedAt: p.updatedAt,
                 anchorDate: anchor,
                 durationDays: duration._max.endDayOffset ?? 0,

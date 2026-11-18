@@ -761,6 +761,23 @@ const createWorkflow = ({ protocolType = 'PRODUCTION', diseaseCaseId = null } = 
                 for (const entry of meal.items) {
                     checkId(entry.id, oldItems);
                     const window = structure.itemWindow(entry, stage);
+                    if (entry.productId) {
+                        const previous = oldItems.get(entry.id);
+                        // Accepted proposals keep their canonical, server-owned declaration and
+                        // Owner overrides. The editor's DTO uppercases product enums and strips
+                        // those stamps, so it must not replace the saved proposal on a graph edit.
+                        const retained = previous?.productId === entry.productId
+                            ? previous.recommendedProductDetails
+                            : null;
+                        entry.recommendedProductDetails = retained
+                            ? JSON.parse(JSON.stringify(retained))
+                            : null;
+                        // A different catalogue selection is a new reference. Its prior proposal
+                        // remains in submission history, not attached to the replacement product.
+                        entry.recommendedManufacturerId = retained
+                            ? previous.recommendedManufacturerId ?? null
+                            : null;
+                    }
                     if (!entry.productId && !entry.recommendedProductDetails?.proposed)
                         throw ApiError.badRequest(messages.PRODUCTION_PROTOCOL.PRODUCT);
                     if (!entry.productId && entry.recommendedProductDetails) {
