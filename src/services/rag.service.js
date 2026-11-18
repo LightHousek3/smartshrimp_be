@@ -115,14 +115,14 @@ const getConversation = async (accountId, id, { page = 1, limit = 20 } = {}) => 
 
 /**
  * Create or update feedback on an answer in an owned, accessible conversation.
- * Failed or empty answers cannot be rated; upsert keeps one feedback per query
+ * Closed seasons and failed or empty answers cannot be rated; upsert keeps one feedback per query
  * even when the first submissions arrive concurrently.
  */
 const saveFeedback = async (accountId, queryId, { rating, comment }) => atomic(async (db) => {
     await requireTechnician(db, accountId);
     const query = await db.ragQuery.findFirst({ where: { id: queryId, accountId } });
     if (!query) throw ApiError.notFound(messages.RAG.QUERY_NOT_FOUND);
-    await requireConversation(db, accountId, query.conversationId);
+    await requireConversation(db, accountId, query.conversationId, true);
     if (query.queryStatus === RAG_STATUS.ERROR || !query.answer?.trim()) throw ApiError.conflict(messages.RAG.NO_ANSWER);
     const data = { rating, comment: comment?.trim() || null };
     // Native upsert uses the existing UNIQUE(query_id), including simultaneous first feedbacks.
