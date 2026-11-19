@@ -1,4 +1,5 @@
 const prisma = require('../config/prisma');
+const { Prisma } = require('@prisma/client');
 const lifecycle = require('./protocolLifecycle.service');
 const { emitNotification } = require('../realtime/notification.socket');
 const { ApiError } = require('../utils');
@@ -11,9 +12,12 @@ const {
     PERSONNEL_ROLE,
     SEASON_STATUS,
     POND_STATUS,
+    PRODUCT_CATEGORY,
+    INVENTORY_TRANSACTION_TYPE,
 } = require('../constants');
 
 const MAX_INITIAL_DENSITY_PER_M2 = 9999999999.99;
+const MaterialCostDecimal = Prisma.Decimal.clone({ precision: 50 });
 const CANCELLABLE_STATUSES = [SEASON_STATUS.PLANNING, SEASON_STATUS.ACTIVE];
 const API_TIMESTAMP_PRECISION_MS = 1;
 const ASSIGNABLE_STATUSES = [SEASON_STATUS.PLANNING, SEASON_STATUS.ACTIVE];
@@ -328,9 +332,40 @@ const getSeasons = async (ownerId, query = {}) => {
     };
 };
 
+/** Return the existing owned-season detail plus retained stock-out costs. */
 const getSeason = async (seasonId, ownerId) => {
     const season = await findOwnedSeasonDetail(prisma, seasonId, ownerId);
-    return normalizeSeasonDetail(season);
+    // Sum stored stock-out amounts, retaining the price of each consumed lot.
+    const sumCategory = (categories) => prisma.inventoryTransaction.aggregate({
+        where: {
+            seasonId,
+            transactionType: INVENTORY_TRANSACTION_TYPE.STOCK_OUT,
+            product: {
+                farmId: season.pond.farmId,
+                category: { in: categories },
+            },
+        },
+        _sum: { totalAmount: true },
+    });
+    // All categories must describe the same snapshot during concurrent stock-outs.
+    const amounts = await prisma.$transaction([
+        sumCategory([PRODUCT_CATEGORY.FEED]),
+        sumCategory([PRODUCT_CATEGORY.MEDICINE]),
+        sumCategory([PRODUCT_CATEGORY.MINERAL, PRODUCT_CATEGORY.CHEMICAL]),
+    ], { isolationLevel: Prisma.TransactionIsolationLevel.RepeatableRead });
+    const [feed, medicine, environment] = amounts.map(
+        (result) => new MaterialCostDecimal(result._sum.totalAmount ?? 0),
+    );
+    return {
+        ...normalizeSeasonDetail(season),
+        materialCosts: {
+            currency: 'VND',
+            feed: feed.toFixed(2),
+            medicine: medicine.toFixed(2),
+            environment: environment.toFixed(2),
+            total: feed.plus(medicine).plus(environment).toFixed(2),
+        },
+    };
 };
 
 const calculateInitialDensity = (initialQuantity, areaM2) => {

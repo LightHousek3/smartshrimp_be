@@ -20,6 +20,11 @@ router.post(
     validate(seasonValidator.replacePersonnel),
     seasonController.replacePersonnel,
 );
+/**
+ * @route   GET /api/v1/owner/seasons/:seasonId
+ * @desc    Get owned-season detail, including materialCosts from recorded stock-outs.
+ * @access  FARM_OWNER
+ */
 router.get('/:seasonId', validate(seasonValidator.getSeason), seasonController.getSeason);
 router.patch(
     '/:seasonId/activate',
