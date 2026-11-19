@@ -1,7 +1,41 @@
 const prisma = require('../config/prisma');
 const { ApiError, localizeNotification } = require('../utils');
-const { httpStatus, messages, NOTIFICATION_TYPE } = require('../constants');
+const { httpStatus, messages, NOTIFICATION_TYPE, ACCOUNT_ROLE } = require('../constants');
 const { emitNotification } = require('../realtime/notification.socket');
+const { legacyTaskReferences } = require('../utils/notificationText');
+
+/** Resolve legacy reference labels in batches, restricted to the recipient's owner scope. */
+const presentNotifications = async (rows, accountId, client = prisma) => {
+    const references = rows.flatMap(legacyTaskReferences);
+    if (!references.length) return rows.map((row) => localizeNotification(row));
+    const account = await client.account.findUnique({
+        where: { id: accountId }, select: { id: true, role: true, managedByOwnerId: true },
+    });
+    const ownerId = account?.role === ACCOUNT_ROLE.FARM_OWNER ? account.id : account?.managedByOwnerId;
+    if (!ownerId) return rows.map((row) => localizeNotification(row));
+    const ids = (key) => [...new Set(references.filter((ref) => ref.key === key).map((ref) => ref.id))];
+    const farmIds = ids('farmId');
+    const seasonIds = ids('seasonId');
+    const technicianIds = ids('assignedTo');
+    const [farms, seasons, technicians] = await Promise.all([
+        farmIds.length ? client.farm.findMany({
+            where: { id: { in: farmIds }, ownerId }, select: { id: true, name: true },
+        }) : [],
+        seasonIds.length ? client.aquacultureSeason.findMany({
+            where: { id: { in: seasonIds }, pond: { farm: { ownerId } } }, select: { id: true, name: true },
+        }) : [],
+        technicianIds.length ? client.account.findMany({
+            where: { id: { in: technicianIds }, managedByOwnerId: ownerId, role: ACCOUNT_ROLE.TECHNICIAN },
+            select: { id: true, fullName: true, email: true },
+        }) : [],
+    ]);
+    const names = {
+        farmId: new Map(farms.map((row) => [row.id, row.name])),
+        seasonId: new Map(seasons.map((row) => [row.id, row.name])),
+        assignedTo: new Map(technicians.map((row) => [row.id, row.fullName || row.email])),
+    };
+    return rows.map((row) => localizeNotification(row, names));
+};
 
 const NOTIFICATION_LIST_SELECT = {
     id: true,
@@ -109,7 +143,7 @@ const getListNotification = async (accountId, {
     const notifications = hasNextPage ? rows.slice(0, limit) : rows;
 
     return {
-        notifications: notifications.map(localizeNotification),
+        notifications: await presentNotifications(notifications, accountId),
         meta: {
             limit,
             totalResults,
@@ -126,7 +160,7 @@ const createNotification = async (data) => {
         select: NOTIFICATION_SELECT,
     });
     emitNotification(data.accountId, 'notification:new', { id: notification.id });
-    return localizeNotification(notification);
+    return (await presentNotifications([notification], data.accountId))[0];
 };
 
 const getNotificationById = async (accountId, notificationId) => {
@@ -155,7 +189,7 @@ const getNotificationById = async (accountId, notificationId) => {
             readAt: notification.readAt,
         });
     }
-    return localizeNotification(notification);
+    return (await presentNotifications([notification], accountId))[0];
 };
 
 const markAllAsRead = async (accountId) => {
@@ -175,6 +209,7 @@ const markAllAsRead = async (accountId) => {
 };
 
 module.exports = {
+    presentNotifications,
     createNotification,
     getListNotification,
     getNotificationById,

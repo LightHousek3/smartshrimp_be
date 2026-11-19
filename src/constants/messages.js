@@ -427,6 +427,11 @@ const messages = {
             HIGH: 'Cao',
             URGENT: 'Khẩn cấp',
         },
+        UNAVAILABLE_REFERENCES: {
+            farmId: 'Trang trại không còn khả dụng',
+            seasonId: 'Vụ nuôi không còn khả dụng',
+            assignedTo: 'Kỹ thuật viên không còn khả dụng',
+        },
     },
 
     ASSIGNED_SEASON: {

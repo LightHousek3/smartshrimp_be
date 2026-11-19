@@ -5,6 +5,7 @@ const policy = require('../utils/pushNotificationPolicy');
 const limits = require('../constants/pushNotification');
 const { localizeNotification } = require('../utils');
 const { cleared } = require('./pushDevice.service');
+const { presentNotifications } = require('./notification.service');
 
 const ready = (now) => ({
     pushStatus: { in: ['pending', 'processing'] },
@@ -97,6 +98,7 @@ const processNotification = async (row, now = new Date()) => {
             await finish('skipped');
             return true;
         }
+        const [presented] = await presentNotifications([notification], notification.accountId);
         let accepted = 0,
             retryable = false,
             permanent = false;
@@ -111,7 +113,7 @@ const processNotification = async (row, now = new Date()) => {
             )
                 return false;
             const batch = tokens.slice(start, start + 500);
-            const result = await messaging.send(message(notification, batch, expiry, now));
+            const result = await messaging.send(message(presented, batch, expiry, now));
             for (const [index, response] of result.responses.entries()) {
                 if (response.success) {
                     accepted++;
