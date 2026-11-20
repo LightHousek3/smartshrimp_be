@@ -10,7 +10,7 @@ const getIdempotencyKey = (req) => {
 // ---- KTV Handlers (Ghi + Đọc) -----------------------------------------------
 
 /**
- * POST /api/v1/me/seasons/:seasonId/shrimp-health-logs
+ * POST /api/v1/technician/seasons/:seasonId/shrimp-health-logs
  */
 const createShrimpHealthLog = asyncHandler(async (req, res) => {
     const { log } = await shrimpHealthService.createShrimpHealthLog(
@@ -26,7 +26,7 @@ const createShrimpHealthLog = asyncHandler(async (req, res) => {
 });
 
 /**
- * GET /api/v1/me/seasons/:seasonId/shrimp-health-logs
+ * GET /api/v1/technician/seasons/:seasonId/shrimp-health-logs
  */
 const listShrimpHealthLogs = asyncHandler(async (req, res) => {
     const result = await shrimpHealthService.listShrimpHealthLogs(
@@ -47,7 +47,7 @@ const listShrimpHealthLogs = asyncHandler(async (req, res) => {
 });
 
 /**
- * GET /api/v1/me/seasons/:seasonId/shrimp-health-logs/:logId
+ * GET /api/v1/technician/seasons/:seasonId/shrimp-health-logs/:logId
  */
 const getShrimpHealthLogDetail = asyncHandler(async (req, res) => {
     const log = await shrimpHealthService.getShrimpHealthLogDetail(
@@ -63,8 +63,8 @@ const getShrimpHealthLogDetail = asyncHandler(async (req, res) => {
 });
 
 /**
- * PATCH /api/v1/me/seasons/:seasonId/shrimp-health-logs/:logId/void
- * (hoặc POST /api/v1/me/seasons/:seasonId/shrimp-health-logs/:logId/void)
+ * PATCH /api/v1/technician/seasons/:seasonId/shrimp-health-logs/:logId/void
+ * (hoặc POST /api/v1/technician/seasons/:seasonId/shrimp-health-logs/:logId/void)
  */
 const voidShrimpHealthLog = asyncHandler(async (req, res) => {
     const log = await shrimpHealthService.voidShrimpHealthLog(
@@ -80,7 +80,7 @@ const voidShrimpHealthLog = asyncHandler(async (req, res) => {
 });
 
 /**
- * GET /api/v1/me/seasons/:seasonId/shrimp-health-logs/statistics
+ * GET /api/v1/technician/seasons/:seasonId/shrimp-health-logs/statistics
  */
 const getStatistics = asyncHandler(async (req, res) => {
     const statistics = await shrimpHealthService.getStatistics(

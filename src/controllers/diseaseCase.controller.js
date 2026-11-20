@@ -3,7 +3,7 @@ const { ResponseHandler, asyncHandler } = require('../utils');
 const { messages } = require('../constants');
 
 /**
- * GET /api/v1/me/seasons/:seasonId/disease-cases
+ * GET /api/v1/technician/seasons/:seasonId/disease-cases
  * List disease cases for the assigned technician within a season.
  * Supports pagination and filtering by status, resolved group, or severity.
  */
@@ -13,7 +13,7 @@ const list = asyncHandler(async (req, res) => {
 });
 
 /**
- * GET /api/v1/me/seasons/:seasonId/disease-cases/:caseId
+ * GET /api/v1/technician/seasons/:seasonId/disease-cases/:caseId
  * Get detailed information of a specific disease case, including snapshots, conversation, and status history.
  */
 const detail = asyncHandler(async (req, res) => {
@@ -22,7 +22,7 @@ const detail = asyncHandler(async (req, res) => {
 });
 
 /**
- * POST /api/v1/me/seasons/:seasonId/disease-cases
+ * POST /api/v1/technician/seasons/:seasonId/disease-cases
  * Create a new disease case for an active season with evidence attachments, optional AI diagnosis, and historical logs snapshot.
  */
 const create = asyncHandler(async (req, res) => {
@@ -31,7 +31,7 @@ const create = asyncHandler(async (req, res) => {
 });
 
 /**
- * POST /api/v1/me/seasons/:seasonId/disease-cases/:caseId/responses
+ * POST /api/v1/technician/seasons/:seasonId/disease-cases/:caseId/responses
  * Submit ordinary conversation or an emergency alert without changing clinical state.
  */
 const respond = asyncHandler(async (req, res) => {

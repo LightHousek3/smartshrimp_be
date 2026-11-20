@@ -4,7 +4,7 @@ const { ACCOUNT_ROLE } = require('../constants');
 const { diseaseCaseController: controller } = require('../controllers');
 const { diseaseCaseValidator: validator } = require('../validators');
 
-// /api/v1/me/seasons/:seasonId/disease-cases — current assigned technicians only.
+// /api/v1/technician/seasons/:seasonId/disease-cases — current assigned technicians only.
 router.use(authenticate, authorize(ACCOUNT_ROLE.TECHNICIAN));
 router.get('/', validate(validator.list), controller.list);
 router.post('/', validate(validator.create), controller.create);
