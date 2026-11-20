@@ -5,23 +5,23 @@ const { waterLogValidator } = require('../validators');
 const { ACCOUNT_ROLE } = require('../constants');
 
 /**
- * Nhật ký đo nước — phạm vi KTV (ghi + đọc).
- * Mount tại /me/seasons/:seasonId/water-logs (xem src/routes/index.js).
- * BR-OPS-01 / BR-WATER-01 được kiểm tra trong waterLog.service.
+ * Technician water quality logs (read/write).
+ * Mounted at /technician/seasons/:seasonId/water-logs in src/routes/index.js.
+ * Assignment and season-state rules are enforced in waterLog.service.
  */
 const router = express.Router({ mergeParams: true });
 
 router.use(authenticate, authorize(ACCOUNT_ROLE.TECHNICIAN));
 
 /**
- * @route   GET /api/v1/me/seasons/:seasonId/water-logs/metadata
+ * @route   GET /api/v1/technician/seasons/:seasonId/water-logs/metadata
  * @desc    Read metric ranges, storage scale and species thresholds in any season state
  * @access  Assigned technician
  */
 router.get('/metadata', validate(waterLogValidator.getMetadata), waterLogController.getMetadata);
 
 /**
- * @route   POST /api/v1/me/seasons/:seasonId/water-logs
+ * @route   POST /api/v1/technician/seasons/:seasonId/water-logs
  * @desc    Create a water quality log for an active assigned season and check warning thresholds
  * @access  Technician
  */
@@ -32,7 +32,7 @@ router.post(
 );
 
 /**
- * @route   GET /api/v1/me/seasons/:seasonId/water-logs
+ * @route   GET /api/v1/technician/seasons/:seasonId/water-logs
  * @desc    List water quality logs for an assigned season with filters and pagination
  * @access  Technician
  */
@@ -44,7 +44,7 @@ router.get(
 // Đặt /statistics TRƯỚC /:logId để không bị route param nuốt.
 
 /**
- * @route   GET /api/v1/me/seasons/:seasonId/water-logs/statistics
+ * @route   GET /api/v1/technician/seasons/:seasonId/water-logs/statistics
  * @desc    Get water quality statistics and threshold exceedance rates for an assigned season
  * @access  Technician
  */
@@ -55,7 +55,7 @@ router.get(
 );
 
 /**
- * @route   POST /api/v1/me/seasons/:seasonId/water-logs/:logId/void
+ * @route   POST /api/v1/technician/seasons/:seasonId/water-logs/:logId/void
  * @desc    Void a water quality log with a reason while the assigned season is active
  * @access  Technician
  */
