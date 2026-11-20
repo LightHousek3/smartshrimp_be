@@ -35,7 +35,7 @@ const dateValue = (value) => {
 /** The case may already carry the human-readable AI assessment from when it was opened. */
 const snapshotLabel = (snapshot) => {
     const diagnosis = snapshot?.aiDiagnosis;
-    const label = textValue(diagnosis?.disease) ?? textValue(diagnosis?.label);
+    const label = textValue(diagnosis?.disease) ?? textValue(diagnosis?.label) ?? textValue(diagnosis?.predictedLabel);
     const confidence = numberValue(diagnosis?.confidence);
     const probability = confidence > 1 ? confidence / 100 : confidence;
     if (probability !== null && (probability < AI_MIN_RECOGNITION_CONFIDENCE || probability > 1)) return null;
