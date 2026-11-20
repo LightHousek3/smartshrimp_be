@@ -3,7 +3,7 @@ const { asyncHandler, ResponseHandler } = require('../utils');
 const { messages } = require('../constants');
 
 /**
- * GET /me/seasons
+ * GET /technician/seasons
  * Return the authenticated technician’s assignment-scoped page and cursor metadata.
  */
 const getAssignedSeasons = asyncHandler(async (req, res) => {
@@ -16,7 +16,7 @@ const getAssignedSeasons = asyncHandler(async (req, res) => {
 });
 
 /**
- * GET /me/seasons/:seasonId
+ * GET /technician/seasons/:seasonId
  */
 const getAssignedSeason = asyncHandler(async (req, res) => {
     const season = await assignedSeasonService.getAssignedSeason(req.account.id, req.params.seasonId);
@@ -25,7 +25,7 @@ const getAssignedSeason = asyncHandler(async (req, res) => {
 });
 
 /**
- * GET /me/seasons/farms
+ * GET /technician/seasons/farms
  */
 const getAssignedSeasonFarms = asyncHandler(async (req, res) => {
     const farms = await assignedSeasonService.getAssignedSeasonFarms(req.account.id);

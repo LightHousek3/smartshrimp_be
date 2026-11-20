@@ -7,28 +7,28 @@ const router = express.Router();
 router.use(authenticate, authorize(ACCOUNT_ROLE.TECHNICIAN));
 
 /**
- * @route   POST /api/v1/me/rag/queries
+ * @route   POST /api/v1/technician/rag/queries
  * @desc    Ask a RAG question for an assigned season and save the answer in a conversation
  * @access  Technician
  */
 router.post('/queries', validate(validator.askQuestion), controller.askQuestion);
 
 /**
- * @route   GET /api/v1/me/rag/conversations
+ * @route   GET /api/v1/technician/rag/conversations
  * @desc    List RAG conversations belonging to the authenticated Technician
  * @access  Technician
  */
 router.get('/conversations', validate(validator.listConversations), controller.listConversations);
 
 /**
- * @route   GET /api/v1/me/rag/conversations/:conversationId
+ * @route   GET /api/v1/technician/rag/conversations/:conversationId
  * @desc    Get an owned RAG conversation and its paginated questions and answers
  * @access  Technician
  */
 router.get('/conversations/:conversationId', validate(validator.getConversation), controller.getConversation);
 
 /**
- * @route   PUT /api/v1/me/rag/queries/:queryId/feedback
+ * @route   PUT /api/v1/technician/rag/queries/:queryId/feedback
  * @desc    Create or update feedback on an answer in an owned RAG conversation
  * @access  Technician
  */

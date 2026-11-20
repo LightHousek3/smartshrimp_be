@@ -18,7 +18,7 @@ const getIdempotencyKey = (req) => {
 // ---- KTV (ghi + đọc) -------------------------------------------------------
 
 /**
- * POST /me/seasons/:seasonId/water-logs
+ * POST /technician/seasons/:seasonId/water-logs
  */
 const createWaterLog = asyncHandler(async (req, res) => {
     const { log } = await waterLogService.createWaterLog(
@@ -31,7 +31,7 @@ const createWaterLog = asyncHandler(async (req, res) => {
 });
 
 /**
- * GET /me/seasons/:seasonId/water-logs
+ * GET /technician/seasons/:seasonId/water-logs
  */
 const listWaterLogs = asyncHandler(async (req, res) => {
     const { logs, meta } = await waterLogService.listWaterLogs(
@@ -48,7 +48,7 @@ const listWaterLogs = asyncHandler(async (req, res) => {
 });
 
 /**
- * POST /me/seasons/:seasonId/water-logs/:logId/void
+ * POST /technician/seasons/:seasonId/water-logs/:logId/void
  */
 const voidWaterLog = asyncHandler(async (req, res) => {
     const log = await waterLogService.voidWaterLog(
@@ -61,7 +61,7 @@ const voidWaterLog = asyncHandler(async (req, res) => {
 });
 
 /**
- * GET /me/seasons/:seasonId/water-logs/statistics
+ * GET /technician/seasons/:seasonId/water-logs/statistics
  */
 const getStatistics = asyncHandler(async (req, res) => {
     const statistics = await waterLogService.getStatistics(

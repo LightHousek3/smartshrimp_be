@@ -9,14 +9,14 @@ const router = express.Router();
 router.use(authenticate, authorize(ACCOUNT_ROLE.TECHNICIAN));
 
 /**
- * @route   GET /api/v1/me/seasons
+ * @route   GET /api/v1/technician/seasons
  * @desc    List aquaculture seasons currently assigned to the authenticated Technician
  * @access  Technician
  */
 router.get('/', validate(assignedSeasonValidator.getAssignedSeasons), assignedSeasonController.getAssignedSeasons);
 
 /**
- * @route   GET /api/v1/me/seasons/farms
+ * @route   GET /api/v1/technician/seasons/farms
  * @desc    List farm choices across the Technician's current assignments
  * @access  Technician
  */
@@ -24,7 +24,7 @@ router.get('/', validate(assignedSeasonValidator.getAssignedSeasons), assignedSe
 router.get('/farms', validate(assignedSeasonValidator.getAssignedSeasonFarms), assignedSeasonController.getAssignedSeasonFarms);
 
 /**
- * @route   GET /api/v1/me/seasons/:seasonId
+ * @route   GET /api/v1/technician/seasons/:seasonId
  * @desc    Get details of a season currently assigned to the authenticated Technician
  * @access  Technician
  */

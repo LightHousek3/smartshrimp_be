@@ -3,7 +3,7 @@ const { asyncHandler, ResponseHandler } = require('../utils');
 const { messages } = require('../constants');
 
 /**
- * POST /me/rag/queries
+ * POST /technician/rag/queries
  */
 const askQuestion = asyncHandler(async (req, res) => {
     const data = await service.askQuestion(req.account.id, req.body);
@@ -12,7 +12,7 @@ const askQuestion = asyncHandler(async (req, res) => {
 });
 
 /**
- * GET /me/rag/conversations
+ * GET /technician/rag/conversations
  */
 const listConversations = asyncHandler(async (req, res) => {
     const { conversations, meta } = await service.listConversations(req.account.id, req.query);
@@ -21,7 +21,7 @@ const listConversations = asyncHandler(async (req, res) => {
 });
 
 /**
- * GET /me/rag/conversations/:conversationId
+ * GET /technician/rag/conversations/:conversationId
  */
 const getConversation = asyncHandler(async (req, res) => {
     const { conversation, meta } = await service.getConversation(req.account.id, req.params.conversationId, req.query);
@@ -30,7 +30,7 @@ const getConversation = asyncHandler(async (req, res) => {
 });
 
 /**
- * PUT /me/rag/queries/:queryId/feedback
+ * PUT /technician/rag/queries/:queryId/feedback
  */
 const saveFeedback = asyncHandler(async (req, res) => {
     const data = await service.saveFeedback(req.account.id, req.params.queryId, req.body);
