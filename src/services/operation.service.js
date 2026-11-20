@@ -185,6 +185,8 @@ const listSchedules = async (technicianId, seasonId, query = {}) => {
             id: true,
             name: true,
             status: true,
+            stockingDate: true,
+            createdAt: true,
             pond: {
                 select: {
                     id: true,
@@ -307,6 +309,8 @@ const listSchedules = async (technicianId, seasonId, query = {}) => {
                                 title: true,
                                 versionNo: true,
                                 allowedVariancePct: true,
+                                protocolType: true,
+                                diseaseCaseId: true,
                             },
                         },
                     },
@@ -409,6 +413,7 @@ const getSchedule = async (technicianId, scheduleId) => {
                             versionNo: true,
                             allowedVariancePct: true,
                             protocolType: true,
+                            diseaseCaseId: true,
                         },
                     },
                 },

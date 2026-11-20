@@ -139,7 +139,8 @@ const createCase = (accountId, seasonId, input) => mutate(async (tx) => {
                 avgWeightG: true, mortalityCount: true, estimatedBiomassKg: true, healthStatus: true } }),
         tx.waterQualityLog.findFirst({ where: { seasonId, isVoided: false, recordedAt: { lte: capturedAt } },
             orderBy: [{ recordedAt: 'desc' }, { id: 'desc' }], select: { id: true, recordedAt: true,
-                ph: true, dissolvedOxygenMgL: true, nh3MgL: true, no2MgL: true } }),
+                ph: true, dissolvedOxygenMgL: true, nh3MgL: true, no2MgL: true,
+                temperatureC: true, salinityPpt: true, alkalinityMgLCaCO3: true, h2sMgL: true } }),
     ]);
     const snapshot = { capturedAt: capturedAt.toISOString(), seasonId, seasonName: season.name,
         pondName: season.pond.name, farmName: season.pond.farm.name,
@@ -150,7 +151,28 @@ const createCase = (accountId, seasonId, input) => mutate(async (tx) => {
         mortalityCount: health?.mortalityCount?.toString() ?? null,
         estimatedBiomassKg: health?.estimatedBiomassKg?.toString() ?? null, healthStatus: health?.healthStatus ?? null,
         ph: water?.ph?.toString() ?? null, doMgL: water?.dissolvedOxygenMgL?.toString() ?? null,
+        dissolvedOxygenMgL: water?.dissolvedOxygenMgL?.toString() ?? null,
+        temperatureC: water?.temperatureC?.toString() ?? null,
+        salinityPpt: water?.salinityPpt?.toString() ?? null,
         nh3MgL: water?.nh3MgL?.toString() ?? null, no2MgL: water?.no2MgL?.toString() ?? null,
+        alkalinityMgLCaCO3: water?.alkalinityMgLCaCO3?.toString() ?? null,
+        h2sMgL: water?.h2sMgL?.toString() ?? null,
+        waterIndicators: water ? {
+            ph: water.ph?.toString() ?? null,
+            dissolvedOxygenMgL: water.dissolvedOxygenMgL?.toString() ?? null,
+            temperatureC: water.temperatureC?.toString() ?? null,
+            salinityPpt: water.salinityPpt?.toString() ?? null,
+            nh3MgL: water.nh3MgL?.toString() ?? null,
+            no2MgL: water.no2MgL?.toString() ?? null,
+            alkalinityMgLCaCO3: water.alkalinityMgLCaCO3?.toString() ?? null,
+            h2sMgL: water.h2sMgL?.toString() ?? null,
+        } : null,
+        shrimpHealth: health ? {
+            avgWeightG: health.avgWeightG?.toString() ?? null,
+            mortalityCount: health.mortalityCount?.toString() ?? null,
+            estimatedBiomassKg: health.estimatedBiomassKg?.toString() ?? null,
+            healthStatus: health.healthStatus ?? null,
+        } : null,
         ...(aiSnapshot && { aiDiagnosis: aiSnapshot }) };
     const item = await tx.diseaseCase.create({ data: {
         seasonId, reportedBy: accountId, expertId: experts[0].accountId,
