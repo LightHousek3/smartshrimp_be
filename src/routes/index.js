@@ -32,10 +32,10 @@ const diseaseCaseRoute = require('./diseaseCase.route');
 const router = express.Router();
 
 const routes = [
-    { path: '/me/seasons/:seasonId/disease-cases', route: diseaseCaseRoute },
+    { path: '/technician/seasons/:seasonId/disease-cases', route: diseaseCaseRoute },
     { path: '/expert/protocol-templates', route: expertProtocolTemplateRoute },
     { path: '/owner/tasks', route: taskRoute },
-    { path: '/me/tasks', route: assignedTaskRoute },
+    { path: '/technician/tasks', route: assignedTaskRoute },
     { path: '/owner/protocols', route: protocolRoute },
     { path: '/owner/disease-cases', route: ownerDiseaseCaseRoute },
     { path: '/technician/rag', route: ragRoute },
@@ -55,7 +55,7 @@ const routes = [
     { path: '/technician/seasons', route: assignedSeasonRoute },
     { path: '/technician/seasons/:seasonId/water-logs', route: waterLogRoute },
     { path: '/technician/seasons/:seasonId/ai-diagnoses', route: aiDiagnosisRoute },
-    { path: '/me/seasons/:seasonId/shrimp-health-logs', route: shrimpHealthRoute },
+    { path: '/technician/seasons/:seasonId/shrimp-health-logs', route: shrimpHealthRoute },
     { path: '/operations', route: operationRoute },
     { path: '/expert/dashboard', route: expertDashboardRoute },
     { path: '/expert/seasons', route: expertSeasonRoute },
