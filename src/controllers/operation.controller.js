@@ -3,7 +3,8 @@ const { asyncHandler, ResponseHandler } = require('../utils');
 const { messages } = require('../constants');
 
 /**
- * UC-09: Xem danh sách kế hoạch vận hành
+ * UC-KTV-09: List operation schedules
+ * GET /operations/seasons/:seasonId/schedules
  */
 const listSchedules = asyncHandler(async (req, res) => {
     const result = await operationService.listSchedules(req.account.id, req.params.seasonId, req.query);
@@ -14,7 +15,8 @@ const listSchedules = asyncHandler(async (req, res) => {
 });
 
 /**
- * UC-10: Xem chi tiết kế hoạch vận hành
+ * UC-KTV-10: Get operation schedule detail
+ * GET /operations/schedules/:scheduleId
  */
 const getSchedule = asyncHandler(async (req, res) => {
     const schedule = await operationService.getSchedule(req.account.id, req.params.scheduleId);
@@ -25,7 +27,8 @@ const getSchedule = asyncHandler(async (req, res) => {
 });
 
 /**
- * UC-11: Ghi nhận thực hiện hoạt động
+ * UC-KTV-11: Execute operation schedule
+ * POST /operations/schedules/:scheduleId/execute
  */
 const executeSchedule = asyncHandler(async (req, res) => {
     const execution = await operationService.executeSchedule(req.account.id, req.params.scheduleId, req.body);
@@ -36,7 +39,8 @@ const executeSchedule = asyncHandler(async (req, res) => {
 });
 
 /**
- * UC-11b: Ghi nhận thực hiện nhiều hoạt động cùng cữ (atomic transaction)
+ * UC-KTV-11b: Batch execute operation schedules (atomic transaction)
+ * POST /operations/schedules/execute-batch
  */
 const executeSchedulesBatch = asyncHandler(async (req, res) => {
     const executions = await operationService.executeSchedulesBatch(
@@ -50,7 +54,8 @@ const executeSchedulesBatch = asyncHandler(async (req, res) => {
 });
 
 /**
- * UC-12: Xem thống kê vận hành
+ * UC-KTV-12: Get season operation statistics
+ * GET /operations/seasons/:seasonId/stats
  */
 const getSeasonStats = asyncHandler(async (req, res) => {
     const stats = await operationService.getSeasonStats(req.account.id, req.params.seasonId);

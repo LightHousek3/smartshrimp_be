@@ -2,8 +2,8 @@ const Joi = require('joi');
 const { HEALTH_STATUS } = require('../constants');
 
 /**
- * Validators cho nhật ký sức khỏe tôm (shrimp_health_logs).
- * - Khoảng giá trị khớp CHECK constraints trong PostgreSQL:
+ * Validators for shrimp health logs (shrimp_health_logs).
+ * - Value ranges match PostgreSQL CHECK constraints:
  *   + sample_size IS NULL OR sample_size > 0
  *   + avg_weight_g IS NULL OR avg_weight_g > 0
  *   + avg_length_cm IS NULL OR avg_length_cm > 0
@@ -16,6 +16,9 @@ const { HEALTH_STATUS } = require('../constants');
 const seasonIdParam = Joi.string().uuid({ version: 'uuidv4' }).required();
 const logIdParam = Joi.string().uuid({ version: 'uuidv4' }).required();
 
+/**
+ * UC-KTV-13: Create shrimp health log
+ */
 const createShrimpHealthLog = {
     params: Joi.object().keys({
         seasonId: seasonIdParam,
@@ -48,6 +51,9 @@ const createShrimpHealthLog = {
         }),
 };
 
+/**
+ * UC-KTV-14: List shrimp health logs
+ */
 const listShrimpHealthLogs = {
     params: Joi.object().keys({
         seasonId: seasonIdParam,
@@ -64,6 +70,9 @@ const listShrimpHealthLogs = {
     }),
 };
 
+/**
+ * UC-KTV-15: Get shrimp health log detail
+ */
 const getShrimpHealthLogDetail = {
     params: Joi.object().keys({
         seasonId: seasonIdParam,
@@ -71,6 +80,9 @@ const getShrimpHealthLogDetail = {
     }),
 };
 
+/**
+ * UC-KTV-16: Void shrimp health log
+ */
 const voidShrimpHealthLog = {
     params: Joi.object().keys({
         seasonId: seasonIdParam,
@@ -84,6 +96,9 @@ const voidShrimpHealthLog = {
     }),
 };
 
+/**
+ * UC-KTV-17: Get shrimp health and growth statistics
+ */
 const getStatistics = {
     params: Joi.object().keys({
         seasonId: seasonIdParam,

@@ -5,9 +5,9 @@ const { shrimpHealthValidator } = require('../validators');
 const { ACCOUNT_ROLE } = require('../constants');
 
 /**
- * Nhật ký sức khỏe tôm — phạm vi KTV (ghi + đọc).
- * Mount tại /technician/seasons/:seasonId/shrimp-health-logs (xem src/routes/index.js).
- * BR-OPS-01 / BR-HEALTH-01 được kiểm tra trong shrimpHealth.service.
+ * Shrimp health logs — technician scope (read/write).
+ * Mounted at /technician/seasons/:seasonId/shrimp-health-logs (see src/routes/index.js).
+ * BR-OPS-01 / BR-HEALTH-01 are enforced in shrimpHealth.service.
  */
 const router = express.Router({ mergeParams: true });
 
@@ -15,7 +15,7 @@ router.use(authenticate, authorize(ACCOUNT_ROLE.TECHNICIAN));
 
 /**
  * @route   POST /api/v1/technician/seasons/:seasonId/shrimp-health-logs
- * @desc    Create a shrimp health log for an active assigned season
+ * @desc    UC-KTV-13: Create a shrimp health log
  * @access  Technician
  */
 router.post(
@@ -26,7 +26,7 @@ router.post(
 
 /**
  * @route   GET /api/v1/technician/seasons/:seasonId/shrimp-health-logs
- * @desc    List shrimp health logs for an assigned season with filters and pagination
+ * @desc    UC-KTV-14: List shrimp health logs
  * @access  Technician
  */
 router.get(
@@ -35,9 +35,10 @@ router.get(
     shrimpHealthController.listShrimpHealthLogs,
 );
 
+// Declare /statistics BEFORE /:logId so it is not captured as a route parameter.
 /**
  * @route   GET /api/v1/technician/seasons/:seasonId/shrimp-health-logs/statistics
- * @desc    Get shrimp health and growth statistics for an assigned season
+ * @desc    UC-KTV-17: Get shrimp health and growth statistics
  * @access  Technician
  */
 router.get(
@@ -48,7 +49,7 @@ router.get(
 
 /**
  * @route   GET /api/v1/technician/seasons/:seasonId/shrimp-health-logs/:logId
- * @desc    Get details of a shrimp health log
+ * @desc    UC-KTV-15: Get shrimp health log detail
  * @access  Technician
  */
 router.get(
@@ -60,7 +61,7 @@ router.get(
 /**
  * @route   PATCH /api/v1/technician/seasons/:seasonId/shrimp-health-logs/:logId/void
  * @route   POST /api/v1/technician/seasons/:seasonId/shrimp-health-logs/:logId/void
- * @desc    Void a shrimp health log with a reason while the assigned season is active
+ * @desc    UC-KTV-16: Void a shrimp health log
  * @access  Technician
  */
 router.patch(
