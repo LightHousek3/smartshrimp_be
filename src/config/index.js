@@ -39,6 +39,7 @@ const config = {
     env: process.env.NODE_ENV || 'development',
     port: parseInt(process.env.PORT, 10) || 3000,
     apiPrefix: API_PREFIX,
+    database: { url: process.env.DATABASE_URL },
     app: {
         backendUrl: BASE_URL || undefined,
         webBaseUrl: WEB_BASE_URL,

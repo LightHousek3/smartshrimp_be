@@ -1,5 +1,5 @@
 const prisma = require('../config/prisma');
-const { PERSONNEL_ROLE, SEASON_STATUS } = require('../constants');
+const { PERSONNEL_ROLE, SEASON_STATUS, PROTOCOL_STATUS, DISEASE_CASE_STATUS } = require('../constants');
 
 const localDate = new Intl.DateTimeFormat('en-US', {
     timeZone: 'Asia/Ho_Chi_Minh',
@@ -63,16 +63,14 @@ const normalizeCase = (item) => ({
 });
 
 const getExpertDashboard = async (accountId, now = new Date()) => {
+    // Batch reads share one connection instead of competing with jobs for the session pool.
     const [
         assignments,
         planningSeasons,
-        openCases,
-        criticalCases,
-        pendingProtocols,
-        draftProtocols,
-        rejectedProtocols,
+        caseCounts,
+        protocolCounts,
         recentCases,
-    ] = await Promise.all([
+    ] = await prisma.$transaction([
         prisma.seasonPersonnelAssignment.findMany({
             where: activeAssignment(accountId, SEASON_STATUS.ACTIVE),
             select: {
@@ -102,17 +100,23 @@ const getExpertDashboard = async (accountId, now = new Date()) => {
         prisma.seasonPersonnelAssignment.count({
             where: activeAssignment(accountId, SEASON_STATUS.PLANNING),
         }),
-        prisma.diseaseCase.count({ where: { expertId: accountId, status: { not: 'RESOLVED' } } }),
-        prisma.diseaseCase.count({
-            where: {
-                expertId: accountId,
-                status: { not: 'RESOLVED' },
-                severity: 'CRITICAL',
-            },
+        prisma.diseaseCase.groupBy({
+            by: ['severity'],
+            where: { expertId: accountId, status: { not: DISEASE_CASE_STATUS.RESOLVED } },
+            _count: { _all: true },
         }),
-        prisma.protocol.count({ where: { createdBy: accountId, status: 'PENDING_APPROVAL' } }),
-        prisma.protocol.count({ where: { createdBy: accountId, status: 'DRAFT' } }),
-        prisma.protocol.count({ where: { createdBy: accountId, status: 'REJECTED' } }),
+        prisma.protocol.groupBy({
+            by: ['status'],
+            where: {
+                createdBy: accountId,
+                status: { in: [
+                    PROTOCOL_STATUS.PENDING_APPROVAL,
+                    PROTOCOL_STATUS.DRAFT,
+                    PROTOCOL_STATUS.REJECTED,
+                ] },
+            },
+            _count: { _all: true },
+        }),
         prisma.diseaseCase.findMany({
             where: { expertId: accountId },
             select: {
@@ -134,15 +138,19 @@ const getExpertDashboard = async (accountId, now = new Date()) => {
         }),
     ]);
 
+    const countsByStatus = Object.fromEntries(
+        protocolCounts.map(({ status, _count }) => [status, _count._all]),
+    );
+
     return {
         summary: {
             activeSeasons: assignments.length + planningSeasons,
             planningSeasons,
-            openCases,
-            criticalCases,
-            pendingProtocols,
-            draftProtocols,
-            rejectedProtocols,
+            openCases: caseCounts.reduce((total, row) => total + row._count._all, 0),
+            criticalCases: caseCounts.find(({ severity }) => severity === 'CRITICAL')?._count._all ?? 0,
+            pendingProtocols: countsByStatus[PROTOCOL_STATUS.PENDING_APPROVAL] ?? 0,
+            draftProtocols: countsByStatus[PROTOCOL_STATUS.DRAFT] ?? 0,
+            rejectedProtocols: countsByStatus[PROTOCOL_STATUS.REJECTED] ?? 0,
         },
         seasons: assignments.map((assignment) => normalizeSeason(assignment, now)),
         recentCases: recentCases.map(normalizeCase),
