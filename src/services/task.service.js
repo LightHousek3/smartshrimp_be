@@ -2,6 +2,7 @@ const prisma = require('../config/prisma');
 const { ApiError } = require('../utils');
 const { httpStatus, messages, FARM_STATUS, TASK_OPEN_STATUSES, TASK_STATUSES, TASK_LIMITS } = require('../constants');
 const { emitNotification } = require('../realtime/notification.socket');
+const { taskChangeValue, taskReferenceNames } = require('../utils/notificationText');
 
 const identity = { id: true, fullName: true, email: true };
 const listSelect = {
@@ -160,14 +161,12 @@ const createTask = (ownerId, input) => mutate(async (tx) => {
 
 /** Compare nullable fields and timestamps consistently when detecting owner edits. */
 const comparable = (value) => value instanceof Date ? value.toISOString() : value ?? null;
-const displayChange = (key, value) =>
-    key === 'priority' ? messages.TASK.PRIORITY_LABELS[value] || 'Không xác định' : value ?? '—';
 
 /**
  * Recheck ownership/state and calculate actual changes for the assignee notification only.
  */
 const changeTask = (ownerId, taskId, input, cancelling = false) => mutate(async (tx) => {
-    const current = await tx.task.findFirst({ where: { id: taskId, ...scope(ownerId) } });
+    const current = await tx.task.findFirst({ where: { id: taskId, ...scope(ownerId) }, select: detailSelect });
     if (!current) throw new ApiError(httpStatus.NOT_FOUND, messages.TASK.NOT_FOUND);
     if (!TASK_OPEN_STATUSES.includes(current.status)) throw new ApiError(httpStatus.FORBIDDEN, messages.TASK.TERMINAL);
     if (!cancelling && current.status === 'IN_PROGRESS' && Object.keys(input).some((key) => !['description', 'priority', 'dueAt'].includes(key))) {
@@ -189,12 +188,13 @@ const changeTask = (ownerId, taskId, input, cancelling = false) => mutate(async 
         assignedTo: current.assignedTo, ...scope(ownerId) },
     data: { ...data, updatedAt: now } });
     if (result.count !== 1) throw new ApiError(httpStatus.CONFLICT, messages.TASK.CONFLICT);
-    const updated = { ...current, ...data };
+    const updated = await getTask(ownerId, taskId, tx);
+    const references = taskReferenceNames([present(current), updated]);
     const content = cancelling ? messages.TASK.CANCELLED_NOTIFICATION(input.reason) :
         messages.TASK.UPDATED_NOTIFICATION(Object.entries(changes).map(([key, value]) =>
-            `${messages.TASK.FIELD_LABELS[key] || key}: ${displayChange(key, value.before)} → ${displayChange(key, value.after)}`).join('; '));
+            `${messages.TASK.FIELD_LABELS[key] || key}: ${taskChangeValue(key, value.before, references)} → ${taskChangeValue(key, value.after, references)}`).join('; '));
     const notification = await notify(tx, updated, 'TASK_UPDATED', content);
-    return { task: await getTask(ownerId, taskId, tx), notification };
+    return { task: updated, notification };
 });
 
 /**

@@ -1,4 +1,3 @@
-const config = require('../config');
 const logger = require('../config/logger');
 const { ApiError } = require('../utils');
 const { httpStatus, messages } = require('../constants');
@@ -10,7 +9,11 @@ const errorConverter = (err, req, res, next) => {
     let error = err;
 
     if (!(error instanceof ApiError)) {
-        const statusCode = error.statusCode || httpStatus.INTERNAL_SERVER_ERROR;
+        const connectionUnavailable = ['P1001', 'P1002', 'P1017', 'P2024', 'P2037'].includes(error.code)
+            || /EMAXCONNSESSION|remaining connection slots|max clients reached/i.test(error.message || '');
+        const statusCode = connectionUnavailable
+            ? httpStatus.SERVICE_UNAVAILABLE
+            : error.statusCode || httpStatus.INTERNAL_SERVER_ERROR;
         const message = error.message || messages.SERVER.INTERNAL_ERROR;
         error = new ApiError(statusCode, message, false, err.stack);
     }
@@ -29,7 +32,9 @@ const errorHandler = (err, req, res, next) => {
         message =
             statusCode === httpStatus.BAD_REQUEST
                 ? messages.COMMON.BAD_REQUEST
-                : messages.SERVER.INTERNAL_ERROR;
+                : statusCode === httpStatus.SERVICE_UNAVAILABLE
+                  ? messages.SERVER.SERVICE_UNAVAILABLE
+                  : messages.SERVER.INTERNAL_ERROR;
     }
 
     // Log error
@@ -49,7 +54,6 @@ const errorHandler = (err, req, res, next) => {
         statusCode,
         message,
         ...(err.isOperational && err.errorCode && { errorCode: err.errorCode }),
-        ...(config.env === 'development' && { stack: err.stack }),
     };
 
     res.status(statusCode).json(response);

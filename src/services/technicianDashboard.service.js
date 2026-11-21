@@ -3,7 +3,8 @@ const prisma = require('../config/prisma');
 const { ApiError, productionSchedule: scheduleRules } = require('../utils');
 const { readSources, populationMatches } = require('./seasonBiomass.service');
 const { timingComparison, TIMING } = require('../utils/protocolExecution');
-const { treatmentOccurrences } = require('../utils/protocolTimeline');
+const { treatmentOccurrences, courseEndsAt, cultureDay } = require('../utils/protocolTimeline');
+const lifecycle = require('./protocolLifecycle.service');
 const {
     ACCOUNT_ROLE,
     ACCOUNT_STATUS,
@@ -81,11 +82,44 @@ const effectiveProtocol = {
         { protocolType: PROTOCOL_TYPE.TREATMENT, diseaseCase: { status: 'IN_TREATMENT' } },
     ],
 };
-const plannedWhere = (ids) => ({
+const plannedWhere = (ids, protocols) => ({
     seasonId: { in: ids },
     status: OPERATION_STATUS.PLANNED,
-    protocolItem: { protocol: effectiveProtocol },
+    protocolItem: { protocolId: { in: [...protocols.keys()] } },
 });
+
+/** Apply the execution lifecycle even when a worker has not persisted a timed transition yet. */
+const readProtocols = async (tx, seasons, now) => {
+    if (!seasons.length) return new Map();
+    const rows = await tx.protocol.findMany({
+        where: { seasonId: { in: seasons.map((season) => season.id) }, ...effectiveProtocol },
+        include: { items: { orderBy: { sequenceOrder: 'asc' } } },
+    });
+    const byId = new Map(seasons.map((season) => [season.id, season]));
+    const protocols = new Map();
+    for (const row of rows) {
+        const protocol = { ...row, season: byId.get(row.seasonId) };
+        const end = courseEndsAt(protocol);
+        if (!end || now >= end) continue;
+        if (
+            row.protocolType === PROTOCOL_TYPE.TREATMENT &&
+            (!row.treatmentStartAt || row.treatmentStartAt > now)
+        )
+            continue;
+        if (
+            row.protocolType === PROTOCOL_TYPE.PRODUCTION &&
+            (await lifecycle.productionBlocked(tx, row.seasonId, now))
+        )
+            continue;
+        const replacement = await lifecycle.nextTreatmentStart(tx, row.seasonId, row.id);
+        if (replacement && now >= replacement) continue;
+        protocols.set(row.id, {
+            ...protocol,
+            effectiveUntil: replacement && replacement < end ? replacement : end,
+        });
+    }
+    return protocols;
+};
 
 /**
  * Prisma cannot express DISTINCT ON for the newest non-null reading of each metric.
@@ -145,66 +179,75 @@ const usableSource = (source) =>
 /**
  * Evaluate today's missing occurrences against the effective prescription.
  * This read never runs the generator. A cancelled/completed slot is history, not a generation failure.
- * Disabled workers and periods without an applicable occurrence do not imply a missing-biomass alert.
+ * Periods without an applicable occurrence do not imply a missing-biomass alert.
  */
-const readBlockedAlerts = async (tx, seasons, now, window, sources) => {
-    if (!seasons.length) return [];
+const readBlockedAlerts = async (tx, seasons, now, window, sources, protocols) => {
+    if (!protocols.size) return [];
     const ids = seasons.map((s) => s.id);
-    const [protocols, slots] = await Promise.all([
-        tx.protocol.findMany({
-            where: {
-                seasonId: { in: ids },
-                status: PROTOCOL_STATUS.ACTIVE,
-
-                OR: [
-                    {
-                        protocolType: PROTOCOL_TYPE.PRODUCTION,
-                        season: { diseaseCases: { none: { status: 'IN_TREATMENT' } } },
-                    },
-                    {
-                        protocolType: PROTOCOL_TYPE.TREATMENT,
-                        diseaseCase: { status: 'IN_TREATMENT' },
-                    },
-                ],
-            },
-            include: { items: { orderBy: { sequenceOrder: 'asc' } } },
-        }),
-        tx.operationSchedule.findMany({
-            where: { seasonId: { in: ids }, scheduledAt: { gte: now, lt: window.end } },
-            select: {
-                protocolItemId: true,
-                scheduledAt: true,
-                status: true,
-                cancellationType: true,
-            },
-        }),
-    ]);
-    if (!protocols.length) return [];
+    const occurrencesByProtocol = new Map(
+        [...protocols.values()].map((protocol) => [
+            protocol.id,
+            protocol.protocolType === PROTOCOL_TYPE.TREATMENT
+                ? treatmentOccurrences(protocol, now)
+                : scheduleRules.occurrences(protocol, now),
+        ]),
+    );
+    const earliest = new Date(
+        Math.min(
+            window.start.getTime(),
+            ...[...occurrencesByProtocol.values()].flat().map(({ scheduledAt }) => scheduledAt.getTime()),
+        ),
+    );
+    const slots = await tx.operationSchedule.findMany({
+        where: {
+            seasonId: { in: ids },
+            protocolItem: { protocolId: { in: [...protocols.keys()] } },
+            scheduledAt: { gte: earliest, lt: window.end },
+        },
+        select: {
+            protocolItemId: true,
+            scheduledAt: true,
+            status: true,
+            cancellationType: true,
+        },
+    });
     const keys = new Set(
         slots
             .filter(
                 (row) =>
-                    row.status !== 'CANCELLED' || row.cancellationType !== 'CALCULATION_CHANGED',
+                    row.status !== 'CANCELLED' ||
+                    row.cancellationType !== 'CALCULATION_CHANGED' ||
+                    row.scheduledAt <= now,
             )
             .map((s) => `${s.protocolItemId}:${s.scheduledAt.toISOString()}`),
     );
     const byId = new Map(seasons.map((s) => [s.id, s]));
+    const sourcesAt = new Map([[now.toISOString(), sources]]);
     const alerts = [];
-    for (const protocol of protocols) {
+    for (const protocol of protocols.values()) {
         const season = byId.get(protocol.seasonId);
-        const source = usableSource(sources.get(season.id));
         const blocked = [];
-        const occurrences =
-            protocol.protocolType === PROTOCOL_TYPE.TREATMENT
-                ? treatmentOccurrences({ ...protocol, season }, now)
-                : scheduleRules.occurrences({ ...protocol, season }, now);
+        const occurrences = occurrencesByProtocol.get(protocol.id);
         for (const { item, doc, scheduledAt } of occurrences) {
-            if (scheduledAt >= window.end || keys.has(`${item.id}:${scheduledAt.toISOString()}`))
+            if (
+                scheduledAt >= window.end ||
+                scheduledAt >= protocol.effectiveUntil ||
+                keys.has(`${item.id}:${scheduledAt.toISOString()}`)
+            )
                 continue;
             // Unresolved materials belong to their own approval flow; do not mislabel them as biomass failures.
             if (!item.productId || !item.materialSnapshot) continue;
+            if (
+                cultureDay(season.stockingDate, scheduledAt) < 30 &&
+                ['PER_KG_BIOMASS', 'PERCENT_BIOMASS'].includes(item.doseBasis)
+            )
+                continue;
+            const at = scheduledAt < now ? scheduledAt : now;
+            const key = at.toISOString();
+            if (!sourcesAt.has(key)) sourcesAt.set(key, await readSources(tx, ids, at));
+            const source = usableSource(sourcesAt.get(key).get(season.id));
             const calculation = scheduleRules.calculate(item, doc, scheduledAt, {
-                now,
+                now: at,
                 volumeM3: season.pond.volumeM3,
                 healthLogs: source ? [source] : [],
                 biomassMaxAgeHours: PRODUCTION_PROTOCOL_LIMITS.biomassMaxAgeHours,
@@ -229,26 +272,33 @@ const readBlockedAlerts = async (tx, seasons, now, window, sources) => {
 };
 
 /** Read current facts, never another user's inbox or notification read/resolved assumptions. */
-const readAlerts = async (tx, seasons, now, window, sources) => {
+const readAlerts = async (tx, seasons, now, window, sources, protocols) => {
     if (!seasons.length) return [];
     const ids = seasons.map((s) => s.id);
     const [water, overdue, blocked] = await Promise.all([
         readWaterAlerts(tx, seasons, now),
         tx.operationSchedule.findMany({
-            where: { ...plannedWhere(ids), scheduledAt: { lt: now } },
+            where: { ...plannedWhere(ids, protocols), scheduledAt: { lt: now } },
             select: {
                 seasonId: true,
                 scheduledAt: true,
                 status: true,
-                protocolItem: { select: { dueAtMinutes: true } },
+                protocolItem: { select: { dueAtMinutes: true, protocolId: true } },
             },
         }),
-        readBlockedAlerts(tx, seasons, now, window, sources),
+        readBlockedAlerts(tx, seasons, now, window, sources, protocols),
     ]);
     const byId = new Map(seasons.map((s) => [s.id, s]));
     const order = { [kind.SCHEDULE_BLOCKED]: 0, [kind.OVERDUE_OPERATIONS]: 1, [kind.WATER]: 2 };
     const groups = new Map();
     for (const row of overdue) {
+        const protocol = protocols.get(row.protocolItem.protocolId);
+        if (
+            !protocol ||
+            protocol.seasonId !== row.seasonId ||
+            row.scheduledAt >= protocol.effectiveUntil
+        )
+            continue;
         if (timingComparison(row, row.protocolItem.dueAtMinutes, now).status !== TIMING.OVERDUE)
             continue;
         const group = groups.get(row.seasonId) ?? {
@@ -271,10 +321,13 @@ const readAlerts = async (tx, seasons, now, window, sources) => {
 };
 
 /** Include still-open windows across midnight; tomorrow's occurrences stay outside today's overview. */
-const readOperations = async (tx, seasons, now, window) => {
-    if (!seasons.length) return [];
+const readOperations = async (tx, seasons, now, window, protocols) => {
+    if (!protocols.size) return [];
     const rows = await tx.operationSchedule.findMany({
-        where: { ...plannedWhere(seasons.map((s) => s.id)), scheduledAt: { lt: window.end } },
+        where: {
+            ...plannedWhere(seasons.map((s) => s.id), protocols),
+            scheduledAt: { lt: window.end },
+        },
         select: {
             id: true,
             seasonId: true,
@@ -287,7 +340,7 @@ const readOperations = async (tx, seasons, now, window) => {
                 select: {
                     dueAtMinutes: true,
                     materialSnapshot: true,
-                    protocol: { select: { seasonId: true } },
+                    protocolId: true,
                 },
             },
         },
@@ -296,15 +349,22 @@ const readOperations = async (tx, seasons, now, window) => {
     const byId = new Map(seasons.map((s) => [s.id, s]));
     const groups = new Map();
     for (const row of rows) {
-        if (row.protocolItem.protocol.seasonId !== row.seasonId) continue;
-        if (timingComparison(row, row.protocolItem.dueAtMinutes, now).status === TIMING.OVERDUE)
+        const protocol = protocols.get(row.protocolItem.protocolId);
+        if (
+            !protocol ||
+            protocol.seasonId !== row.seasonId ||
+            row.scheduledAt >= protocol.effectiveUntil
+        )
             continue;
+        const timing = timingComparison(row, row.protocolItem.dueAtMinutes, now);
+        if (timing.status !== TIMING.PENDING) continue;
         const group = groups.get(row.seasonId) ?? { ...context(byId.get(row.seasonId)), items: [] };
         const snapshot = row.protocolItem.materialSnapshot;
         group.items.push({
             id: row.id,
             operationType: row.operationType,
             scheduledAt: row.scheduledAt,
+            dueAt: timing.dueAt,
             productName:
                 snapshot?.id === row.product?.id ? snapshot.name : (row.product?.name ?? null),
             plannedQuantity: Number(row.plannedQuantity),
@@ -316,8 +376,9 @@ const readOperations = async (tx, seasons, now, window) => {
 };
 
 /** Preview the latest measured snapshot, explicitly separating missing/stale/post-harvest data. */
-const presentSeason = (season, sources, now, date) => {
+const presentSeason = (season, sources, now) => {
     const source = sources.get(season.id);
+    const doc = cultureDay(season.stockingDate, now);
     let biomassState = 'MISSING';
     if (source?.recordedAt) {
         biomassState =
@@ -332,9 +393,7 @@ const presentSeason = (season, sources, now, date) => {
     } else if (source?.latestPartialHarvestAt) biomassState = 'AFTER_HARVEST';
     return {
         ...context(season),
-        cultureDay: season.stockingDate
-            ? Math.floor((Date.parse(date) - season.stockingDate.getTime()) / DAY_MS) + 1
-            : null,
+        cultureDay: doc > 0 ? doc : null,
         biomassState,
         biomassKg:
             biomassState === 'RECORDED' || biomassState === 'STALE'
@@ -359,11 +418,10 @@ const getOverview = (accountId, now = new Date()) =>
                 status: { in: TASK_OPEN_STATUSES },
                 farm: { ownerId },
             };
-            const sources = await readSources(
-                tx,
-                seasons.map((s) => s.id),
-                now,
-            );
+            const [sources, protocols] = await Promise.all([
+                readSources(tx, seasons.map((season) => season.id), now),
+                readProtocols(tx, seasons, now),
+            ]);
             const [openTaskCount, tasks, alerts, operationGroups] = await Promise.all([
                 tx.task.count({ where: taskWhere }),
                 tx.task.findMany({
@@ -376,8 +434,8 @@ const getOverview = (accountId, now = new Date()) =>
                     ],
                     take: limits.tasks,
                 }),
-                readAlerts(tx, seasons, now, window, sources),
-                readOperations(tx, seasons, now, window),
+                readAlerts(tx, seasons, now, window, sources, protocols),
+                readOperations(tx, seasons, now, window, protocols),
             ]);
             return {
                 date: window.date,
@@ -396,7 +454,7 @@ const getOverview = (accountId, now = new Date()) =>
                 operationGroups,
                 seasons: seasons
                     .slice(0, limits.seasons)
-                    .map((s) => presentSeason(s, sources, now, window.date)),
+                    .map((s) => presentSeason(s, sources, now)),
             };
         },
         { isolationLevel: 'RepeatableRead' },
