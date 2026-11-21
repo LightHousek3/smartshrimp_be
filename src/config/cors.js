@@ -1,7 +1,6 @@
 const config = require('./index');
 
-const LOCAL_DEVELOPMENT_ORIGIN =
-    /^https?:\/\/(?:localhost|127\.0\.0\.1|\[::1\])(?::\d{1,5})?$/;
+const LOCAL_DEVELOPMENT_ORIGIN = /^https?:\/\/(?:localhost|127\.0\.0\.1|\[::1\])(?::\d{1,5})?$/;
 
 const corsOptions = {
     origin: (origin, callback) => {
@@ -25,6 +24,7 @@ const corsOptions = {
         'Cache-Control',
         'X-Requested-With',
         'X-Device-Id',
+        'Idempotency-Key',
     ],
     exposedHeaders: ['X-Total-Count', 'X-Total-Pages'],
     maxAge: 86400, // 24 hours
