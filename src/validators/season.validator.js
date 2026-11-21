@@ -25,8 +25,8 @@ const dateOnly = Joi.string()
         return value;
     })
     .messages({
-        'string.pattern.base': '{{#label}} must use YYYY-MM-DD format',
-        'date.format': '{{#label}} must be a valid calendar date',
+        'string.pattern.base': '{{#label}} phải có định dạng YYYY-MM-DD',
+        'date.format': '{{#label}} phải là ngày hợp lệ',
     });
 
 const seasonFields = {
@@ -43,7 +43,7 @@ const validateDateRange = (value, helpers) => {
         && value.expectedEndDate
         && value.expectedEndDate < value.stockingDate
     ) {
-        return helpers.message({ custom: 'expectedEndDate must be on or after stockingDate' });
+        return helpers.message({ custom: 'Ngày dự kiến kết thúc phải cùng hoặc sau ngày thả giống' });
     }
     return value;
 };

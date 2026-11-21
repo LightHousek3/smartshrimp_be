@@ -14,6 +14,8 @@ const {
     POND_STATUS,
     PRODUCT_CATEGORY,
     INVENTORY_TRANSACTION_TYPE,
+    PROTOCOL_TYPE,
+    DISEASE_CASE_STATUS,
 } = require('../constants');
 
 const MAX_INITIAL_DENSITY_PER_M2 = 9999999999.99;
@@ -205,7 +207,14 @@ const buildActivationEligibility = (season) => {
     };
 };
 
-const normalizeSeasonDetail = ({ personnelAssignments, protocols = [], pond, ...season }) => {
+const normalizeSeasonDetail = ({
+    personnelAssignments,
+    protocols = [],
+    pond,
+    protocolCounts,
+    diseaseCaseCounts,
+    ...season
+}) => {
     const activationEligibility = buildActivationEligibility({
         ...season,
         pond,
@@ -214,6 +223,12 @@ const normalizeSeasonDetail = ({ personnelAssignments, protocols = [], pond, ...
     });
     const technician = getActiveAssignment(personnelAssignments, PERSONNEL_ROLE.TECHNICIAN);
     const expert = getActiveAssignment(personnelAssignments, PERSONNEL_ROLE.EXPERT);
+
+    const prodCount = protocolCounts?.production ?? (protocols.length > 0 ? 1 : 0);
+    const treatCount = protocolCounts?.treatment ?? 0;
+    const activeCases = diseaseCaseCounts?.active ?? 0;
+    const totalCases = diseaseCaseCounts?.total ?? 0;
+    const resolvedCases = diseaseCaseCounts?.resolved ?? 0;
 
     return {
         ...normalizeSeasonBase(season),
@@ -227,6 +242,20 @@ const normalizeSeasonDetail = ({ personnelAssignments, protocols = [], pond, ...
             expert: getLatestAssignment(personnelAssignments, PERSONNEL_ROLE.EXPERT),
         },
         approvedProductionProtocol: protocols[0] || null,
+        protocolCounts: {
+            production: prodCount,
+            treatment: treatCount,
+            total: prodCount + treatCount,
+        },
+        diseaseCaseCounts: {
+            active: activeCases,
+            resolved: resolvedCases,
+            total: totalCases,
+        },
+        productionProtocolsCount: prodCount,
+        treatmentProtocolsCount: treatCount,
+        activeDiseaseCasesCount: activeCases,
+        totalDiseaseCasesCount: totalCases,
         activationEligibility,
         availableActions: {
             update: season.status === SEASON_STATUS.PLANNING,
@@ -288,10 +317,83 @@ const getApprovedProductionProtocols = async (client, seasonId) => {
     );
 };
 
+const getProtocolCounts = async (client, seasonId) => {
+    if (!client.protocol || typeof client.protocol.groupBy !== 'function') {
+        return { production: 0, treatment: 0, total: 0 };
+    }
+    try {
+        if (!(await dependencyTableExists(client, 'protocols'))) {
+            return { production: 0, treatment: 0, total: 0 };
+        }
+        const counts = await client.protocol.groupBy({
+            by: ['protocolType'],
+            where: { seasonId },
+            _count: { _all: true },
+        });
+        const production =
+            counts.find(
+                (c) =>
+                    c.protocolType === PROTOCOL_TYPE.PRODUCTION ||
+                    c.protocolType === 'production',
+            )?._count?._all ?? 0;
+        const treatment =
+            counts.find(
+                (c) =>
+                    c.protocolType === PROTOCOL_TYPE.TREATMENT ||
+                    c.protocolType === 'treatment',
+            )?._count?._all ?? 0;
+        return {
+            production,
+            treatment,
+            total: production + treatment,
+        };
+    } catch {
+        return { production: 0, treatment: 0, total: 0 };
+    }
+};
+
+const getDiseaseCaseCounts = async (client, seasonId) => {
+    if (!client.diseaseCase || typeof client.diseaseCase.groupBy !== 'function') {
+        return { active: 0, resolved: 0, total: 0 };
+    }
+    try {
+        if (!(await dependencyTableExists(client, 'disease_cases'))) {
+            return { active: 0, resolved: 0, total: 0 };
+        }
+        const counts = await client.diseaseCase.groupBy({
+            by: ['status'],
+            where: { seasonId },
+            _count: { _all: true },
+        });
+        const resolved =
+            counts.find(
+                (c) =>
+                    c.status === DISEASE_CASE_STATUS.RESOLVED ||
+                    c.status === 'resolved',
+            )?._count?._all ?? 0;
+        const total = counts.reduce(
+            (sum, entry) => sum + (entry._count?._all ?? 0),
+            0,
+        );
+        const active = total - resolved;
+        return {
+            active,
+            resolved,
+            total,
+        };
+    } catch {
+        return { active: 0, resolved: 0, total: 0 };
+    }
+};
+
 const findOwnedSeasonDetail = async (client, seasonId, ownerId) => {
     const season = await findOwnedSeason(client, seasonId, ownerId);
-    const protocols = await getApprovedProductionProtocols(client, seasonId);
-    return { ...season, protocols };
+    const [protocols, protocolCounts, diseaseCaseCounts] = await Promise.all([
+        getApprovedProductionProtocols(client, seasonId),
+        getProtocolCounts(client, seasonId),
+        getDiseaseCaseCounts(client, seasonId),
+    ]);
+    return { ...season, protocols, protocolCounts, diseaseCaseCounts };
 };
 
 const getSeasons = async (ownerId, query = {}) => {
@@ -336,23 +438,36 @@ const getSeasons = async (ownerId, query = {}) => {
 const getSeason = async (seasonId, ownerId) => {
     const season = await findOwnedSeasonDetail(prisma, seasonId, ownerId);
     // Sum stored stock-out amounts, retaining the price of each consumed lot.
-    const sumCategory = (categories) => prisma.inventoryTransaction.aggregate({
-        where: {
-            seasonId,
-            transactionType: INVENTORY_TRANSACTION_TYPE.STOCK_OUT,
-            product: {
-                farmId: season.pond.farmId,
-                category: { in: categories },
+    const sumCategory = (categories) => {
+        if (!prisma.inventoryTransaction || typeof prisma.inventoryTransaction.aggregate !== 'function') {
+            return Promise.resolve({ _sum: { totalAmount: 0 } });
+        }
+        return prisma.inventoryTransaction.aggregate({
+            where: {
+                seasonId,
+                transactionType: INVENTORY_TRANSACTION_TYPE.STOCK_OUT,
+                product: {
+                    farmId: season.pond.farmId,
+                    category: { in: categories },
+                },
             },
-        },
-        _sum: { totalAmount: true },
-    });
+            _sum: { totalAmount: true },
+        });
+    };
     // All categories must describe the same snapshot during concurrent stock-outs.
-    const amounts = await prisma.$transaction([
+    const amountsPromises = [
         sumCategory([PRODUCT_CATEGORY.FEED]),
         sumCategory([PRODUCT_CATEGORY.MEDICINE]),
         sumCategory([PRODUCT_CATEGORY.MINERAL, PRODUCT_CATEGORY.CHEMICAL]),
-    ], { isolationLevel: Prisma.TransactionIsolationLevel.RepeatableRead });
+    ];
+    let amounts;
+    try {
+        amounts = await prisma.$transaction(amountsPromises, {
+            isolationLevel: Prisma.TransactionIsolationLevel.RepeatableRead,
+        });
+    } catch {
+        amounts = await Promise.all(amountsPromises);
+    }
     const [feed, medicine, environment] = amounts.map(
         (result) => new MaterialCostDecimal(result._sum.totalAmount ?? 0),
     );

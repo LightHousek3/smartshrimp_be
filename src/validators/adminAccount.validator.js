@@ -23,7 +23,7 @@ const getListAccount = {
         })
         .custom((value, helpers) => {
             if (value.createdFrom && value.createdTo && value.createdFrom > value.createdTo) {
-                return helpers.message({ custom: '"createdFrom" must not be after "createdTo"' });
+                return helpers.message({ custom: 'Ngày bắt đầu không được sau ngày kết thúc' });
             }
             return value;
         }),

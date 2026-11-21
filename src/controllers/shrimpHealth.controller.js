@@ -7,9 +7,10 @@ const getIdempotencyKey = (req) => {
     return typeof value === 'string' ? value.trim().slice(0, 128) : '';
 };
 
-// ---- KTV Handlers (Ghi + Đọc) -----------------------------------------------
+// ---- Technician Handlers (Read/Write) ---------------------------------------
 
 /**
+ * UC-KTV-13: Create shrimp health log
  * POST /api/v1/technician/seasons/:seasonId/shrimp-health-logs
  */
 const createShrimpHealthLog = asyncHandler(async (req, res) => {
@@ -26,6 +27,7 @@ const createShrimpHealthLog = asyncHandler(async (req, res) => {
 });
 
 /**
+ * UC-KTV-14: List shrimp health logs
  * GET /api/v1/technician/seasons/:seasonId/shrimp-health-logs
  */
 const listShrimpHealthLogs = asyncHandler(async (req, res) => {
@@ -47,6 +49,7 @@ const listShrimpHealthLogs = asyncHandler(async (req, res) => {
 });
 
 /**
+ * UC-KTV-15: Get shrimp health log detail
  * GET /api/v1/technician/seasons/:seasonId/shrimp-health-logs/:logId
  */
 const getShrimpHealthLogDetail = asyncHandler(async (req, res) => {
@@ -63,8 +66,9 @@ const getShrimpHealthLogDetail = asyncHandler(async (req, res) => {
 });
 
 /**
+ * UC-KTV-16: Void shrimp health log
  * PATCH /api/v1/technician/seasons/:seasonId/shrimp-health-logs/:logId/void
- * (hoặc POST /api/v1/technician/seasons/:seasonId/shrimp-health-logs/:logId/void)
+ * (or POST /api/v1/technician/seasons/:seasonId/shrimp-health-logs/:logId/void)
  */
 const voidShrimpHealthLog = asyncHandler(async (req, res) => {
     const log = await shrimpHealthService.voidShrimpHealthLog(
@@ -80,6 +84,7 @@ const voidShrimpHealthLog = asyncHandler(async (req, res) => {
 });
 
 /**
+ * UC-KTV-17: Get shrimp health and growth statistics
  * GET /api/v1/technician/seasons/:seasonId/shrimp-health-logs/statistics
  */
 const getStatistics = asyncHandler(async (req, res) => {
@@ -95,8 +100,11 @@ const getStatistics = asyncHandler(async (req, res) => {
     });
 });
 
-// ---- Expert Handlers (Chỉ đọc) ---------------------------------------------
+// ---- Expert Handlers (Read Only) --------------------------------------------
 
+/**
+ * GET /expert/seasons/:seasonId/shrimp-health-logs
+ */
 const listShrimpHealthLogsAsExpert = asyncHandler(async (req, res) => {
     const result = await shrimpHealthService.listShrimpHealthLogs(
         req.account.id,
@@ -115,6 +123,9 @@ const listShrimpHealthLogsAsExpert = asyncHandler(async (req, res) => {
     });
 });
 
+/**
+ * GET /expert/seasons/:seasonId/shrimp-health-logs/:logId
+ */
 const getShrimpHealthLogDetailAsExpert = asyncHandler(async (req, res) => {
     const log = await shrimpHealthService.getShrimpHealthLogDetail(
         req.account.id,
@@ -128,6 +139,9 @@ const getShrimpHealthLogDetailAsExpert = asyncHandler(async (req, res) => {
     });
 });
 
+/**
+ * GET /expert/seasons/:seasonId/shrimp-health-logs/statistics
+ */
 const getStatisticsAsExpert = asyncHandler(async (req, res) => {
     const statistics = await shrimpHealthService.getStatistics(
         req.account.id,
@@ -141,8 +155,11 @@ const getStatisticsAsExpert = asyncHandler(async (req, res) => {
     });
 });
 
-// ---- Owner Handlers (Chỉ đọc) ----------------------------------------------
+// ---- Owner Handlers (Read Only) ---------------------------------------------
 
+/**
+ * GET /owner/seasons/:seasonId/shrimp-health-logs
+ */
 const listShrimpHealthLogsAsOwner = asyncHandler(async (req, res) => {
     const result = await shrimpHealthService.listShrimpHealthLogs(
         req.account.id,
@@ -161,6 +178,9 @@ const listShrimpHealthLogsAsOwner = asyncHandler(async (req, res) => {
     });
 });
 
+/**
+ * GET /owner/seasons/:seasonId/shrimp-health-logs/:logId
+ */
 const getShrimpHealthLogDetailAsOwner = asyncHandler(async (req, res) => {
     const log = await shrimpHealthService.getShrimpHealthLogDetail(
         req.account.id,
@@ -174,6 +194,9 @@ const getShrimpHealthLogDetailAsOwner = asyncHandler(async (req, res) => {
     });
 });
 
+/**
+ * GET /owner/seasons/:seasonId/shrimp-health-logs/statistics
+ */
 const getStatisticsAsOwner = asyncHandler(async (req, res) => {
     const statistics = await shrimpHealthService.getStatistics(
         req.account.id,
