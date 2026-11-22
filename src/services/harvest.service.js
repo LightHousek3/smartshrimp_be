@@ -184,6 +184,7 @@ const list = (ownerId, seasonId, query = {}) =>
         FROM harvest_events h WHERE ${where}`);
             const items = rows.slice(0, limit).map((row) => normalize(row, season));
             const hasNextPage = rows.length > limit;
+            const withdrawalState = await withdrawal.readWithdrawal(tx, seasonId, populationAt);
             return {
                 items,
                 meta: {
@@ -195,6 +196,12 @@ const list = (ownerId, seasonId, query = {}) =>
                     totalRevenue: Number(totals.revenue),
                     availableQuantityCount:
                         totals.available == null ? null : String(totals.available),
+                    withdrawal: {
+                        ...withdrawalState,
+                        ...(withdrawalState.latestEndAt != null
+                            ? { latestEndAt: withdrawalState.latestEndAt.toISOString() }
+                            : {}),
+                    },
                 },
             };
         },
