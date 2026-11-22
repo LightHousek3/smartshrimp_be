@@ -207,6 +207,65 @@ const idempotencySet = (key, value) => {
     idempotencyStore.set(key, { ...value, expiresAt: Date.now() + IDEMPOTENCY_TTL_MS });
 };
 
+/**
+ * Cascade recalculate estimatedPopulation and estimatedBiomassKg for active logs in a season.
+ * Ensures that if a log is added or voided, subsequent logs have their herd population
+ * (and derived biomass) adjusted based on remaining active mortalities.
+ */
+const cascadeRecalculatePopulations = async (tx, seasonId, initialQuantity) => {
+    const initialQty =
+        initialQuantity !== null && initialQuantity !== undefined
+            ? Number(initialQuantity)
+            : null;
+
+    const activeLogs = await tx.shrimpHealthLog.findMany({
+        where: { seasonId, isVoided: false },
+        orderBy: [{ recordedAt: 'asc' }, { createdAt: 'asc' }, { id: 'asc' }],
+    });
+
+    let runningPopulation = initialQty;
+    for (const activeLog of activeLogs) {
+        const mort = Number(activeLog.mortalityCount || 0);
+        if (runningPopulation !== null) {
+            const newPop = Math.max(0, runningPopulation - mort);
+            const avgWeight =
+                activeLog.avgWeightG !== null && activeLog.avgWeightG !== undefined
+                    ? Number(activeLog.avgWeightG)
+                    : null;
+            let newBiomass =
+                activeLog.estimatedBiomassKg !== null && activeLog.estimatedBiomassKg !== undefined
+                    ? Number(activeLog.estimatedBiomassKg)
+                    : null;
+            if (avgWeight && avgWeight > 0) {
+                newBiomass =
+                    newPop > 0 ? Math.round(((newPop * avgWeight) / 1000) * 1000) / 1000 : 0;
+            }
+
+            const currentPopNum =
+                activeLog.estimatedPopulation !== null && activeLog.estimatedPopulation !== undefined
+                    ? Number(activeLog.estimatedPopulation)
+                    : null;
+            const currentBiomassNum =
+                activeLog.estimatedBiomassKg !== null && activeLog.estimatedBiomassKg !== undefined
+                    ? Number(activeLog.estimatedBiomassKg)
+                    : null;
+
+            if (currentPopNum !== newPop || currentBiomassNum !== newBiomass) {
+                await tx.shrimpHealthLog.update({
+                    where: { id: activeLog.id },
+                    data: {
+                        estimatedPopulation: BigInt(newPop),
+                        estimatedBiomassKg: newBiomass,
+                    },
+                });
+            }
+            runningPopulation = newPop;
+        } else if (activeLog.estimatedPopulation !== null && activeLog.estimatedPopulation !== undefined) {
+            runningPopulation = Number(activeLog.estimatedPopulation);
+        }
+    }
+};
+
 /** Record a new quantitative shrimp health observation. */
 
 const createShrimpHealthLog = async (accountId, seasonId, data, idempotencyKey = '') => {
@@ -335,7 +394,7 @@ const createShrimpHealthLog = async (accountId, seasonId, data, idempotencyKey =
                     select: { id: true },
                 });
                 if (!current) throw ApiError.conflict(messages.SHRIMP_HEALTH_LOG.NO_ASSIGNMENT);
-                return tx.shrimpHealthLog.create({
+                const log = await tx.shrimpHealthLog.create({
                     data: {
                         seasonId,
                         recordedBy: accountId,
@@ -352,6 +411,11 @@ const createShrimpHealthLog = async (accountId, seasonId, data, idempotencyKey =
                         note,
                     },
                 });
+
+                await cascadeRecalculatePopulations(tx, seasonId, season.initialQuantity);
+
+                const fresh = await tx.shrimpHealthLog.findUnique({ where: { id: log.id } });
+                return fresh || log;
             },
             { isolationLevel: 'Serializable' },
         );
@@ -551,6 +615,10 @@ const voidShrimpHealthLog = async (accountId, seasonId, logId, { voidReason }) =
                 cancellationReason: messages.PRODUCTION_PROTOCOL.BIOMASS_SOURCE_VOIDED,
             },
         });
+
+        // Recalculate estimatedPopulation and estimatedBiomassKg for remaining active logs
+        await cascadeRecalculatePopulations(tx, seasonId, season.initialQuantity);
+
         return {
             ...log,
             isVoided: true,
