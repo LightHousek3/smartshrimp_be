@@ -17,10 +17,45 @@ const {
     ACCOUNT_STATUS,
     PERSONNEL_ROLE,
     SHRIMP_CULTIVATION,
+    PRODUCTION_PROTOCOL_LIMITS,
 } = require('../constants');
 const M = messages.HARVEST;
 const { emitNotification } = require('../realtime');
 const withdrawal = require('./harvestWithdrawal.service');
+const { readSources, populationMatches } = require('./seasonBiomass.service');
+
+const biomassDeviationWarning = async (tx, seasonId, input, replayed = false) => {
+    const harvestedAt = new Date(input.harvestedAt);
+    const source = (await readSources(tx, [seasonId], harvestedAt)).get(seasonId);
+    if (!source?.recordedAt) return null;
+    let latestPartialHarvestAt = source.latestPartialHarvestAt;
+    if (replayed && input.harvestType === 'PARTIAL') {
+        // The saved event must not invalidate its own pre-harvest evidence on retry.
+        const [previous] = await tx.$queryRaw`SELECT max(harvested_at) AS at FROM harvest_events
+            WHERE season_id = ${seasonId}::uuid AND harvest_type = 'partial'
+                AND harvested_at < ${harvestedAt}`;
+        latestPartialHarvestAt = previous?.at;
+    }
+    const population = source.estimatedPopulation ?? source.latestPopulation;
+    if (
+        !populationMatches(source) ||
+        !(Number(source.estimatedBiomassKg) > 0) ||
+        (latestPartialHarvestAt && source.recordedAt <= latestPartialHarvestAt) ||
+        source.recordedAt > harvestedAt ||
+        harvestedAt - source.recordedAt > PRODUCTION_PROTOCOL_LIMITS.biomassMaxAgeHours * 3600000 ||
+        population == null ||
+        !new Prisma.Decimal(population.toString()).gt(0)
+    ) return null;
+    const ownerTotal = new Prisma.Decimal(input.quantityCount ?? '0').add(
+        input.harvestType === 'FINAL' ? '0' : input.estimatedRemainingCount,
+    );
+    const biomassPop = new Prisma.Decimal(population.toString());
+    const difference = ownerTotal.sub(biomassPop).abs();
+    if (!difference.gt(biomassPop.mul(HARVEST_LIMITS.biomassDeviationRatio))) return null;
+    const percent = difference.div(biomassPop).mul(100).toDecimalPlaces(1).toString();
+    const date = source.recordedAt.toLocaleDateString('vi-VN', { timeZone: 'Asia/Ho_Chi_Minh' });
+    return M.BIOMASS_DEVIATION(percent, date);
+};
 
 // Use the supplied client so ownership checks and row locks share the caller's transaction.
 const scope = async (tx, ownerId, seasonId, write = false) => {
@@ -217,6 +252,7 @@ const create = async (ownerId, seasonId, body, key) => {
                         event: {
                             ...saved,
                             warnings: [
+                                await biomassDeviationWarning(tx, seasonId, input, true),
                                 earlyHarvestWarning(season, existing.harvested_at),
                                 !HARVEST_POLICY.withdrawalEnabled
                                     ? M.WITHDRAWAL_UNVERIFIED_WARNING
@@ -283,6 +319,7 @@ const create = async (ownerId, seasonId, body, key) => {
                         HARVEST_ERROR_CODE.VARIANCE_REASON_REQUIRED,
                     );
                 }
+                const biomassWarning = await biomassDeviationWarning(tx, seasonId, input);
                 const withdrawalWarning = await withdrawal.checkHarvest(tx, seasonId, harvestedAt);
                 // Decimal arithmetic avoids binary floating-point drift in revenue and size calculations.
                 const weight = new Prisma.Decimal(input.totalWeightKg);
@@ -366,7 +403,7 @@ const create = async (ownerId, seasonId, body, key) => {
                 return {
                     event: {
                         ...normalize(row, season),
-                        warnings: [warning, withdrawalWarning].filter(Boolean),
+                        warnings: [warning, withdrawalWarning, biomassWarning].filter(Boolean),
                     },
                     replayed: false,
                     notificationAccountIds,

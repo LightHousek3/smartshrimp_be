@@ -41,7 +41,11 @@ const HARVEST_ERROR_CODE = Object.freeze({
 });
 // Withdrawal checks depend on material declarations and recorded execution snapshots.
 const HARVEST_POLICY = Object.freeze({ withdrawalEnabled: true });
-const HARVEST_LIMITS = Object.freeze({ noteMaxLength: 500, legacyNoteMaxLength: 5000 });
+const HARVEST_LIMITS = Object.freeze({
+    noteMaxLength: 500,
+    legacyNoteMaxLength: 5000,
+    biomassDeviationRatio: 0.2,
+});
 
 // Advisory defaults, not harvest eligibility rules. Approximate months as 30 days.
 // FAO: whiteleg partial harvest commonly starts after 3 months;

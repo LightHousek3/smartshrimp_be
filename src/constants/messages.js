@@ -443,6 +443,8 @@ const messages = {
     },
 
     HARVEST: {
+        BIOMASS_DEVIATION: (percent, date) =>
+            `Số thu và số còn lại lệch ${percent}% so với quần thể ước tính từ lần chài mẫu ngày ${date}. Kiểm tra lại số con hoặc lý do hiệu chỉnh.`,
         NOTE_TOO_LONG: (limit) => `Ghi chú thu hoạch tối đa ${limit} ký tự.`,
         VARIANCE_REASON_REQUIRED:
             'Số thu thực tế và số còn lại vượt ước tính hiện có. Vui lòng nhập lý do hiệu chỉnh ước tính.',
