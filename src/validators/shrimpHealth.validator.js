@@ -1,5 +1,5 @@
 const Joi = require('joi');
-const { HEALTH_STATUS } = require('../constants');
+const { HEALTH_STATUS, WATER_RECORDED_AT_FUTURE_TOLERANCE_SECONDS, messages } = require('../constants');
 
 /**
  * Validators for shrimp health logs (shrimp_health_logs).
@@ -15,6 +15,14 @@ const { HEALTH_STATUS } = require('../constants');
 
 const seasonIdParam = Joi.string().uuid({ version: 'uuidv4' }).required();
 const logIdParam = Joi.string().uuid({ version: 'uuidv4' }).required();
+
+const getPopulation = {
+    params: Joi.object({ seasonId: seasonIdParam }),
+    query: Joi.object({ at: Joi.date().iso().custom((value, helpers) =>
+        value.getTime() > Date.now() + WATER_RECORDED_AT_FUTURE_TOLERANCE_SECONDS * 1000
+            ? helpers.error('date.future') : value)
+        .messages({ 'date.future': messages.SHRIMP_HEALTH_LOG.RECORDED_AT_TOO_FAR_FUTURE }) }),
+};
 
 /**
  * UC-KTV-13: Create shrimp health log
@@ -111,6 +119,7 @@ const getStatistics = {
 };
 
 module.exports = {
+    getPopulation,
     createShrimpHealthLog,
     listShrimpHealthLogs,
     getShrimpHealthLogDetail,

@@ -33,6 +33,8 @@ const {
 const HARVEST_ERROR_CODE = Object.freeze({
     TIME_NOT_AFTER_LATEST: 'HARVEST_TIME_NOT_AFTER_LATEST',
     PARTIAL_COUNT_REQUIRED: 'HARVEST_PARTIAL_COUNT_REQUIRED',
+    FINAL_COUNT_REQUIRED: 'HARVEST_FINAL_COUNT_REQUIRED',
+    FINAL_REASON_REQUIRED: 'HARVEST_FINAL_REASON_REQUIRED',
     POPULATION_UNKNOWN: 'HARVEST_POPULATION_UNKNOWN',
     POPULATION_MISMATCH: 'HARVEST_POPULATION_MISMATCH',
     WITHDRAWAL_UNKNOWN: 'HARVEST_WITHDRAWAL_UNKNOWN',
@@ -41,7 +43,15 @@ const HARVEST_ERROR_CODE = Object.freeze({
 });
 // Withdrawal checks depend on material declarations and recorded execution snapshots.
 const HARVEST_POLICY = Object.freeze({ withdrawalEnabled: true });
-const HARVEST_LIMITS = Object.freeze({ noteMaxLength: 500, legacyNoteMaxLength: 5000 });
+const HARVEST_LIMITS = Object.freeze({
+    noteMaxLength: 500,
+    legacyNoteMaxLength: 5000,
+    biomassDeviationRatio: 0.2,
+    sizeMinPerKg: 1,
+    sizeMaxPerKg: 10000,
+    usualSizeMinPerKg: 10,
+    usualSizeMaxPerKg: 500,
+});
 
 // Advisory defaults, not harvest eligibility rules. Approximate months as 30 days.
 // FAO: whiteleg partial harvest commonly starts after 3 months;

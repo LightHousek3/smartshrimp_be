@@ -1,3 +1,4 @@
+const { populationAvailable, recalculateHealthPopulations } = require('./seasonPopulation.service');
 /**
  * Read immutable harvest history and record partial or final harvests for farm owners.
  * Writes coordinate through the season row lock; final harvest also completes the season.
@@ -17,10 +18,56 @@ const {
     ACCOUNT_STATUS,
     PERSONNEL_ROLE,
     SHRIMP_CULTIVATION,
+    PRODUCTION_PROTOCOL_LIMITS,
+    DISEASE_CASE_STATUS,
+    PROTOCOL_TYPE,
+    PROTOCOL_STATUS,
 } = require('../constants');
 const M = messages.HARVEST;
 const { emitNotification } = require('../realtime');
 const withdrawal = require('./harvestWithdrawal.service');
+const { readSources, populationMatches } = require('./seasonBiomass.service');
+
+const harvestSizeWarning = (value) => {
+    if (value == null) return null;
+    const size = new Prisma.Decimal(value);
+    return size.lt(HARVEST_LIMITS.usualSizeMinPerKg) || size.gt(HARVEST_LIMITS.usualSizeMaxPerKg)
+        ? M.SIZE_WARNING(size.toString())
+        : null;
+};
+
+const biomassDeviationWarning = async (tx, seasonId, input, replayed = false) => {
+    const harvestedAt = new Date(input.harvestedAt);
+    const source = (await readSources(tx, [seasonId], harvestedAt)).get(seasonId);
+    if (!source?.recordedAt) return null;
+    let latestPartialHarvestAt = source.latestPartialHarvestAt;
+    if (replayed && input.harvestType === 'PARTIAL') {
+        // The saved event must not invalidate its own pre-harvest evidence on retry.
+        const [previous] = await tx.$queryRaw`SELECT max(harvested_at) AS at FROM harvest_events
+            WHERE season_id = ${seasonId}::uuid AND harvest_type = 'partial'
+                AND harvested_at < ${harvestedAt}`;
+        latestPartialHarvestAt = previous?.at;
+    }
+    const population = source.estimatedPopulation ?? source.latestPopulation;
+    if (
+        !populationMatches(source) ||
+        !(Number(source.estimatedBiomassKg) > 0) ||
+        (latestPartialHarvestAt && source.recordedAt <= latestPartialHarvestAt) ||
+        source.recordedAt > harvestedAt ||
+        harvestedAt - source.recordedAt > PRODUCTION_PROTOCOL_LIMITS.biomassMaxAgeHours * 3600000 ||
+        population == null ||
+        !new Prisma.Decimal(population.toString()).gt(0)
+    ) return null;
+    const ownerTotal = new Prisma.Decimal(input.quantityCount ?? '0').add(
+        input.harvestType === 'FINAL' ? '0' : input.estimatedRemainingCount,
+    );
+    const biomassPop = new Prisma.Decimal(population.toString());
+    const difference = ownerTotal.sub(biomassPop).abs();
+    if (!difference.gt(biomassPop.mul(HARVEST_LIMITS.biomassDeviationRatio))) return null;
+    const percent = difference.div(biomassPop).mul(100).toDecimalPlaces(1).toString();
+    const date = source.recordedAt.toLocaleDateString('vi-VN', { timeZone: 'Asia/Ho_Chi_Minh' });
+    return M.BIOMASS_DEVIATION(percent, date);
+};
 
 // Use the supplied client so ownership checks and row locks share the caller's transaction.
 const scope = async (tx, ownerId, seasonId, write = false) => {
@@ -75,23 +122,6 @@ const readRows = (tx, where, tail = Prisma.empty) =>
     SELECT h.*, a.full_name AS recorder_name FROM harvest_events h
     JOIN accounts a ON a.id = h.recorded_by WHERE ${where} ${tail}`);
 
-// The latest corrected estimate replaces the old baseline, even when it rises.
-// New writes must advance harvested_at under the season lock. For legacy tied
-// rows, retain the conservative minimum without inventing an execution order.
-const populationAvailable = (season, at) => Prisma.sql`(SELECT
-    CASE WHEN capacity < 0 THEN 0 ELSE capacity END FROM (SELECT
-        CASE WHEN h.id IS NULL THEN ${season.initialQuantity}::bigint
-            WHEN h.harvest_type = 'final' THEN 0
-            ELSE h.estimated_remaining_count END
-        - (SELECT coalesce(sum(l.mortality_count), 0) FROM shrimp_health_logs l
-            WHERE l.season_id = ${season.id}::uuid AND l.is_voided = false AND l.recorded_at <= ${at}
-                AND (h.id IS NULL OR l.recorded_at > h.harvested_at)) AS capacity
-        FROM (SELECT 1) anchor LEFT JOIN LATERAL (
-            SELECT id, harvest_type, harvested_at, estimated_remaining_count FROM harvest_events
-            WHERE season_id = ${season.id}::uuid AND harvested_at <= ${at}
-            ORDER BY harvested_at DESC, estimated_remaining_count ASC NULLS LAST, id DESC LIMIT 1
-        ) h ON true) population)`;
-
 // Calendar-day age in Vietnam; stocking day has zero elapsed days.
 const earlyHarvestWarning = (season, harvestedAt) => {
     const typicalDays = SHRIMP_CULTIVATION[season.shrimpType]?.typicalHarvestMinDays;
@@ -141,6 +171,7 @@ const list = (ownerId, seasonId, query = {}) =>
         FROM harvest_events h WHERE ${where}`);
             const items = rows.slice(0, limit).map((row) => normalize(row, season));
             const hasNextPage = rows.length > limit;
+            const withdrawalState = await withdrawal.readWithdrawal(tx, seasonId, populationAt);
             return {
                 items,
                 meta: {
@@ -152,6 +183,12 @@ const list = (ownerId, seasonId, query = {}) =>
                     totalRevenue: Number(totals.revenue),
                     availableQuantityCount:
                         totals.available == null ? null : String(totals.available),
+                    withdrawal: {
+                        ...withdrawalState,
+                        ...(withdrawalState.latestEndAt != null
+                            ? { latestEndAt: withdrawalState.latestEndAt.toISOString() }
+                            : {}),
+                    },
                 },
             };
         },
@@ -217,6 +254,8 @@ const create = async (ownerId, seasonId, body, key) => {
                         event: {
                             ...saved,
                             warnings: [
+                                harvestSizeWarning(saved.avgSizePerKg),
+                                await biomassDeviationWarning(tx, seasonId, input, true),
                                 earlyHarvestWarning(season, existing.harvested_at),
                                 !HARVEST_POLICY.withdrawalEnabled
                                     ? M.WITHDRAWAL_UNVERIFIED_WARNING
@@ -258,6 +297,34 @@ const create = async (ownerId, seasonId, body, key) => {
                 const available = history.remaining;
                 const quantity = input.quantityCount == null ? 0n : BigInt(input.quantityCount);
                 const remaining = BigInt(input.estimatedRemainingCount);
+                if (input.harvestType === 'FINAL') {
+                    if (input.quantityCount == null || quantity <= 0n) {
+                        throw validationError(M.FINAL_COUNT_REQUIRED, HARVEST_ERROR_CODE.FINAL_COUNT_REQUIRED);
+                    }
+                    if (!input.varianceReason) {
+                        const activeCase = await tx.diseaseCase.findFirst({
+                            where: {
+                                seasonId,
+                                status: { in: [DISEASE_CASE_STATUS.OPEN, DISEASE_CASE_STATUS.IN_TREATMENT] },
+                            },
+                            select: { id: true },
+                        });
+                        // Approved treatment can remain on a monitoring case outside the active-case check.
+                        const treatment = activeCase ? null : await tx.protocol.findFirst({
+                            where: {
+                                seasonId,
+                                protocolType: PROTOCOL_TYPE.TREATMENT,
+                                status: PROTOCOL_STATUS.APPROVED,
+                                diseaseCaseId: { not: null },
+                                diseaseCase: { is: { status: { not: DISEASE_CASE_STATUS.RESOLVED } } },
+                            },
+                            select: { id: true },
+                        });
+                        if (activeCase || treatment) {
+                            throw validationError(M.FINAL_REASON_REQUIRED, HARVEST_ERROR_CODE.FINAL_REASON_REQUIRED);
+                        }
+                    }
+                }
                 if (input.harvestType === 'PARTIAL') {
                     // Run after idempotent replay so legacy saved requests still reconcile.
                     if (input.quantityCount == null || quantity <= 0n) {
@@ -283,6 +350,7 @@ const create = async (ownerId, seasonId, body, key) => {
                         HARVEST_ERROR_CODE.VARIANCE_REASON_REQUIRED,
                     );
                 }
+                const biomassWarning = await biomassDeviationWarning(tx, seasonId, input);
                 const withdrawalWarning = await withdrawal.checkHarvest(tx, seasonId, harvestedAt);
                 // Decimal arithmetic avoids binary floating-point drift in revenue and size calculations.
                 const weight = new Prisma.Decimal(input.totalWeightKg);
@@ -293,8 +361,12 @@ const create = async (ownerId, seasonId, body, key) => {
                     quantity === 0n
                         ? null
                         : new Prisma.Decimal(quantity.toString()).div(weight).toDecimalPlaces(2);
-                // Reject values outside the SQL numeric column limits before inserting.
-                if (revenue?.gte('10000000000000000') || size?.gte('100000000') || size?.lte(0))
+                // Preserve monetary storage limits while rejecting implausible harvest sizes.
+                if (
+                    revenue?.gte('10000000000000000') ||
+                    size?.lt(HARVEST_LIMITS.sizeMinPerKg) ||
+                    size?.gt(HARVEST_LIMITS.sizeMaxPerKg)
+                )
                     throw ApiError.badRequest(M.INVALID_QUANTITY);
                 const [row] = await tx.$queryRaw(Prisma.sql`INSERT INTO harvest_events
                 (season_id, harvest_type, harvested_at, quantity_count, total_weight_kg,
@@ -305,6 +377,7 @@ const create = async (ownerId, seasonId, body, key) => {
                     ${size}::numeric, ${price}::numeric, ${revenue}::numeric, ${remaining.toString()}::bigint,
                     ${input.buyerName}, ${input.buyerContact}, ${input.note}, ${input.varianceReason}, ${ownerId}::uuid, ${key}::uuid)
                 RETURNING *, (SELECT full_name FROM accounts WHERE id = ${ownerId}::uuid) AS recorder_name`);
+                await recalculateHealthPopulations(tx, season);
                 if (input.harvestType === 'FINAL') {
                     // The event and season completion must commit together or both roll back.
                     const changed = await tx.aquacultureSeason.updateMany({
@@ -366,7 +439,7 @@ const create = async (ownerId, seasonId, body, key) => {
                 return {
                     event: {
                         ...normalize(row, season),
-                        warnings: [warning, withdrawalWarning].filter(Boolean),
+                        warnings: [warning, withdrawalWarning, biomassWarning, harvestSizeWarning(size)].filter(Boolean),
                     },
                     replayed: false,
                     notificationAccountIds,

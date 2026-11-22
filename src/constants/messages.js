@@ -443,6 +443,10 @@ const messages = {
     },
 
     HARVEST: {
+        SIZE_WARNING: (size) =>
+            `Cỡ tôm ${size} con/kg nằm ngoài khoảng thường gặp 10–500 con/kg. Kiểm tra lại khối lượng hoặc số con.`,
+        BIOMASS_DEVIATION: (percent, date) =>
+            `Số thu và số còn lại lệch ${percent}% so với quần thể ước tính từ lần chài mẫu ngày ${date}. Kiểm tra lại số con hoặc lý do hiệu chỉnh.`,
         NOTE_TOO_LONG: (limit) => `Ghi chú thu hoạch tối đa ${limit} ký tự.`,
         VARIANCE_REASON_REQUIRED:
             'Số thu thực tế và số còn lại vượt ước tính hiện có. Vui lòng nhập lý do hiệu chỉnh ước tính.',
@@ -470,6 +474,9 @@ const messages = {
         INVALID_DATE_RANGE: 'Ngày bắt đầu không được sau ngày kết thúc.',
         POPULATION_IN_FUTURE: 'Thời điểm ước tính số tôm không được ở tương lai.',
         PARTIAL_COUNT_REQUIRED: 'Vui lòng nhập số con thu hoạch khi thu tỉa.',
+        FINAL_COUNT_REQUIRED: 'Vui lòng nhập số con thu hoạch khi thu hoạch cuối.',
+        FINAL_REASON_REQUIRED:
+            'Vui lòng nhập lý do thu hoạch cuối khi còn ca bệnh đang mở hoặc đang điều trị.',
         POPULATION_UNKNOWN:
             'Chưa xác định được số tôm hiện có. Vui lòng cập nhật số lượng trước khi thu tỉa.',
         PARTIAL_MISMATCH: (available, quantity, expected) =>
@@ -506,6 +513,8 @@ const messages = {
     },
 
     SHRIMP_HEALTH_LOG: {
+        POPULATION_FETCHED: 'Lấy số tôm còn lại tham chiếu thành công',
+        RECORDING_CONFLICT: 'Dữ liệu vụ nuôi vừa thay đổi. Vui lòng kiểm tra và lưu lại bản ghi.',
         CREATED: 'Ghi nhận sức khỏe tôm thành công',
         LIST_FETCHED: 'Lấy danh sách nhật ký sức khỏe tôm thành công',
         DETAIL_FETCHED: 'Lấy chi tiết nhật ký sức khỏe tôm thành công',
@@ -516,7 +525,6 @@ const messages = {
         NO_ASSIGNMENT: 'Bạn không được phân công phụ trách vụ nuôi này',
         ALREADY_VOIDED: 'Bản ghi sức khỏe này đã bị hủy hiệu lực',
         VOID_FORBIDDEN_STATE: 'Chỉ được hủy hiệu lực bản ghi của vụ nuôi đang hoạt động',
-        VOID_ONLY_TODAY: 'Chỉ được hủy hiệu lực bản ghi sức khỏe tôm trong ngày hôm nay',
         VOIDED: 'Hủy hiệu lực bản ghi sức khỏe tôm thành công',
         VOID_REASON_REQUIRED: 'Lý do hủy bản ghi là bắt buộc',
         AT_LEAST_ONE_METRIC: 'Phải nhập ít nhất một chỉ số sức khỏe hoặc thể trạng tôm',

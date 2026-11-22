@@ -36,14 +36,15 @@ const create = {
         harvestedAt: Joi.date().iso().required(),
         totalWeightKg: decimal(99999999999.999, 3).required(),
         // Fresh PARTIAL requires a count in the service, after legacy replay lookup.
-        quantityCount: count.allow(null),
-        // Zero means a free sale; null or omission means the price is unknown.
-        pricePerKg: decimal(999999999999.99, 2).allow(0, null),
+        quantityCount: Joi.when('harvestType', {
+            is: 'FINAL', then: count.required(), otherwise: count.allow(null),
+        }),
+        pricePerKg: decimal(999999999999.99, 2).required(),
         // Partial harvests need a new population estimate; final harvests leave none.
         estimatedRemainingCount: Joi.when('harvestType', {
             is: 'PARTIAL', then: count.required(), otherwise: Joi.valid(0, null),
         }),
-        buyerName: Joi.string().trim().max(255).allow('', null),
+        buyerName: Joi.string().trim().min(1).max(255).required(),
         buyerContact: Joi.string().trim().max(255).allow('', null),
         // Let saved legacy payloads reach replay; the service limits new notes after lookup.
         note: Joi.string().trim().max(HARVEST_LIMITS.legacyNoteMaxLength).allow('', null),
