@@ -443,6 +443,8 @@ const messages = {
     },
 
     HARVEST: {
+        SIZE_WARNING: (size) =>
+            `Cỡ tôm ${size} con/kg nằm ngoài khoảng thường gặp 10–500 con/kg. Kiểm tra lại khối lượng hoặc số con.`,
         BIOMASS_DEVIATION: (percent, date) =>
             `Số thu và số còn lại lệch ${percent}% so với quần thể ước tính từ lần chài mẫu ngày ${date}. Kiểm tra lại số con hoặc lý do hiệu chỉnh.`,
         NOTE_TOO_LONG: (limit) => `Ghi chú thu hoạch tối đa ${limit} ký tự.`,

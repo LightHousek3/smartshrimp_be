@@ -24,6 +24,14 @@ const { emitNotification } = require('../realtime');
 const withdrawal = require('./harvestWithdrawal.service');
 const { readSources, populationMatches } = require('./seasonBiomass.service');
 
+const harvestSizeWarning = (value) => {
+    if (value == null) return null;
+    const size = new Prisma.Decimal(value);
+    return size.lt(HARVEST_LIMITS.usualSizeMinPerKg) || size.gt(HARVEST_LIMITS.usualSizeMaxPerKg)
+        ? M.SIZE_WARNING(size.toString())
+        : null;
+};
+
 const biomassDeviationWarning = async (tx, seasonId, input, replayed = false) => {
     const harvestedAt = new Date(input.harvestedAt);
     const source = (await readSources(tx, [seasonId], harvestedAt)).get(seasonId);
@@ -252,6 +260,7 @@ const create = async (ownerId, seasonId, body, key) => {
                         event: {
                             ...saved,
                             warnings: [
+                                harvestSizeWarning(saved.avgSizePerKg),
                                 await biomassDeviationWarning(tx, seasonId, input, true),
                                 earlyHarvestWarning(season, existing.harvested_at),
                                 !HARVEST_POLICY.withdrawalEnabled
@@ -330,8 +339,12 @@ const create = async (ownerId, seasonId, body, key) => {
                     quantity === 0n
                         ? null
                         : new Prisma.Decimal(quantity.toString()).div(weight).toDecimalPlaces(2);
-                // Reject values outside the SQL numeric column limits before inserting.
-                if (revenue?.gte('10000000000000000') || size?.gte('100000000') || size?.lte(0))
+                // Preserve monetary storage limits while rejecting implausible harvest sizes.
+                if (
+                    revenue?.gte('10000000000000000') ||
+                    size?.lt(HARVEST_LIMITS.sizeMinPerKg) ||
+                    size?.gt(HARVEST_LIMITS.sizeMaxPerKg)
+                )
                     throw ApiError.badRequest(M.INVALID_QUANTITY);
                 const [row] = await tx.$queryRaw(Prisma.sql`INSERT INTO harvest_events
                 (season_id, harvest_type, harvested_at, quantity_count, total_weight_kg,
@@ -403,7 +416,7 @@ const create = async (ownerId, seasonId, body, key) => {
                 return {
                     event: {
                         ...normalize(row, season),
-                        warnings: [warning, withdrawalWarning, biomassWarning].filter(Boolean),
+                        warnings: [warning, withdrawalWarning, biomassWarning, harvestSizeWarning(size)].filter(Boolean),
                     },
                     replayed: false,
                     notificationAccountIds,

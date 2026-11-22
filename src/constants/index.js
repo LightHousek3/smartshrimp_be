@@ -45,6 +45,10 @@ const HARVEST_LIMITS = Object.freeze({
     noteMaxLength: 500,
     legacyNoteMaxLength: 5000,
     biomassDeviationRatio: 0.2,
+    sizeMinPerKg: 1,
+    sizeMaxPerKg: 10000,
+    usualSizeMinPerKg: 10,
+    usualSizeMaxPerKg: 500,
 });
 
 // Advisory defaults, not harvest eligibility rules. Approximate months as 30 days.
