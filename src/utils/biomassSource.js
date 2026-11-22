@@ -1,12 +1,14 @@
 /** Population observations cannot silently renew or contradict a quantitative measurement. */
 const populationMatches = (source) =>
-    !source.populationAt ||
-    !source.recordedAt ||
-    source.populationAt < source.recordedAt ||
-    source.populationId === source.id ||
-    (source.estimatedPopulation != null &&
-        source.latestPopulation != null &&
-        String(source.estimatedPopulation) === String(source.latestPopulation));
+    (source.estimatedPopulation == null || Number(source.estimatedPopulation) > 0) &&
+    (source.latestPopulation == null || Number(source.latestPopulation) > 0) &&
+    (!source.populationAt ||
+        !source.recordedAt ||
+        source.populationAt < source.recordedAt ||
+        source.populationId === source.id ||
+        (source.estimatedPopulation != null &&
+            source.latestPopulation != null &&
+            String(source.estimatedPopulation) === String(source.latestPopulation)));
 
 const newestFirst = (a, b) =>
     new Date(b.recordedAt) - new Date(a.recordedAt) ||

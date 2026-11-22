@@ -513,6 +513,8 @@ const messages = {
     },
 
     SHRIMP_HEALTH_LOG: {
+        POPULATION_FETCHED: 'Lấy số tôm còn lại tham chiếu thành công',
+        RECORDING_CONFLICT: 'Dữ liệu vụ nuôi vừa thay đổi. Vui lòng kiểm tra và lưu lại bản ghi.',
         CREATED: 'Ghi nhận sức khỏe tôm thành công',
         LIST_FETCHED: 'Lấy danh sách nhật ký sức khỏe tôm thành công',
         DETAIL_FETCHED: 'Lấy chi tiết nhật ký sức khỏe tôm thành công',
@@ -523,7 +525,6 @@ const messages = {
         NO_ASSIGNMENT: 'Bạn không được phân công phụ trách vụ nuôi này',
         ALREADY_VOIDED: 'Bản ghi sức khỏe này đã bị hủy hiệu lực',
         VOID_FORBIDDEN_STATE: 'Chỉ được hủy hiệu lực bản ghi của vụ nuôi đang hoạt động',
-        VOID_ONLY_TODAY: 'Chỉ được hủy hiệu lực bản ghi sức khỏe tôm trong ngày hôm nay',
         VOIDED: 'Hủy hiệu lực bản ghi sức khỏe tôm thành công',
         VOID_REASON_REQUIRED: 'Lý do hủy bản ghi là bắt buộc',
         AT_LEAST_ONE_METRIC: 'Phải nhập ít nhất một chỉ số sức khỏe hoặc thể trạng tôm',

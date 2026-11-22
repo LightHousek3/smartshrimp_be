@@ -14,6 +14,13 @@ const router = express.Router({ mergeParams: true });
 router.use(authenticate, authorize(ACCOUNT_ROLE.TECHNICIAN));
 
 /**
+ * @route   GET /api/v1/technician/seasons/:seasonId/shrimp-health-logs/population
+ * @desc    Preview the live population at the health observation time
+ * @access  Assigned Technician of an ACTIVE season
+ */
+router.get('/population', validate(shrimpHealthValidator.getPopulation), shrimpHealthController.getPopulation);
+
+/**
  * @route   POST /api/v1/technician/seasons/:seasonId/shrimp-health-logs
  * @desc    UC-KTV-13: Create a shrimp health log
  * @access  Technician

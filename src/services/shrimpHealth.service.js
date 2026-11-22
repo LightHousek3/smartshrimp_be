@@ -1,3 +1,4 @@
+const { availableAt, recalculateHealthPopulations } = require('./seasonPopulation.service');
 const prisma = require('../config/prisma');
 const { assertCalculationStorage } = require('../utils/jobStorage');
 const { ApiError } = require('../utils');
@@ -207,65 +208,6 @@ const idempotencySet = (key, value) => {
     idempotencyStore.set(key, { ...value, expiresAt: Date.now() + IDEMPOTENCY_TTL_MS });
 };
 
-/**
- * Cascade recalculate estimatedPopulation and estimatedBiomassKg for active logs in a season.
- * Ensures that if a log is added or voided, subsequent logs have their herd population
- * (and derived biomass) adjusted based on remaining active mortalities.
- */
-const cascadeRecalculatePopulations = async (tx, seasonId, initialQuantity) => {
-    const initialQty =
-        initialQuantity !== null && initialQuantity !== undefined
-            ? Number(initialQuantity)
-            : null;
-
-    const activeLogs = await tx.shrimpHealthLog.findMany({
-        where: { seasonId, isVoided: false },
-        orderBy: [{ recordedAt: 'asc' }, { createdAt: 'asc' }, { id: 'asc' }],
-    });
-
-    let runningPopulation = initialQty;
-    for (const activeLog of activeLogs) {
-        const mort = Number(activeLog.mortalityCount || 0);
-        if (runningPopulation !== null) {
-            const newPop = Math.max(0, runningPopulation - mort);
-            const avgWeight =
-                activeLog.avgWeightG !== null && activeLog.avgWeightG !== undefined
-                    ? Number(activeLog.avgWeightG)
-                    : null;
-            let newBiomass =
-                activeLog.estimatedBiomassKg !== null && activeLog.estimatedBiomassKg !== undefined
-                    ? Number(activeLog.estimatedBiomassKg)
-                    : null;
-            if (avgWeight && avgWeight > 0) {
-                newBiomass =
-                    newPop > 0 ? Math.round(((newPop * avgWeight) / 1000) * 1000) / 1000 : 0;
-            }
-
-            const currentPopNum =
-                activeLog.estimatedPopulation !== null && activeLog.estimatedPopulation !== undefined
-                    ? Number(activeLog.estimatedPopulation)
-                    : null;
-            const currentBiomassNum =
-                activeLog.estimatedBiomassKg !== null && activeLog.estimatedBiomassKg !== undefined
-                    ? Number(activeLog.estimatedBiomassKg)
-                    : null;
-
-            if (currentPopNum !== newPop || currentBiomassNum !== newBiomass) {
-                await tx.shrimpHealthLog.update({
-                    where: { id: activeLog.id },
-                    data: {
-                        estimatedPopulation: BigInt(newPop),
-                        estimatedBiomassKg: newBiomass,
-                    },
-                });
-            }
-            runningPopulation = newPop;
-        } else if (activeLog.estimatedPopulation !== null && activeLog.estimatedPopulation !== undefined) {
-            runningPopulation = Number(activeLog.estimatedPopulation);
-        }
-    }
-};
-
 /** Record a new quantitative shrimp health observation. */
 
 const createShrimpHealthLog = async (accountId, seasonId, data, idempotencyKey = '') => {
@@ -311,22 +253,6 @@ const createShrimpHealthLog = async (accountId, seasonId, data, idempotencyKey =
             : null;
     const healthStatus = data.healthStatus || HEALTH_STATUS.GOOD;
     const note = (data.note || '').trim() || null;
-
-    // Estimated live population must not exceed the season initial stocking quantity.
-    const initialQty =
-        season.initialQuantity !== null && season.initialQuantity !== undefined
-            ? Number(season.initialQuantity)
-            : null;
-    if (
-        initialQty &&
-        initialQty > 0 &&
-        estimatedPopulation !== null &&
-        estimatedPopulation > initialQty
-    ) {
-        throw ApiError.badRequest(
-            `Ước tính đàn (${estimatedPopulation.toLocaleString('vi-VN')} con) không được vượt quá số lượng giống thả ban đầu (${initialQty.toLocaleString('vi-VN')} con)`,
-        );
-    }
 
     // Infer biomass from population and mean body weight when an explicit weight is omitted.
     if (
@@ -412,7 +338,7 @@ const createShrimpHealthLog = async (accountId, seasonId, data, idempotencyKey =
                     },
                 });
 
-                await cascadeRecalculatePopulations(tx, seasonId, season.initialQuantity);
+                await recalculateHealthPopulations(tx, season);
 
                 const fresh = await tx.shrimpHealthLog.findUnique({ where: { id: log.id } });
                 return fresh || log;
@@ -427,6 +353,9 @@ const createShrimpHealthLog = async (accountId, seasonId, data, idempotencyKey =
         return { log: normalizeLog(created, season.stockingDate, accountMap), duplicate: false };
     } catch (error) {
         idempotencyStore.delete(key);
+        if (error.code === 'P2034') {
+            throw ApiError.conflict(messages.SHRIMP_HEALTH_LOG.RECORDING_CONFLICT);
+        }
         throw error;
     }
 };
@@ -557,13 +486,6 @@ const voidShrimpHealthLog = async (accountId, seasonId, logId, { voidReason }) =
 
     const season = await resolveKtvScope(accountId, seasonId);
 
-    // Voiding is restricted to observations recorded on the current calendar day in the farm timezone (UTC+7).
-    const nowFarm = new Date(Date.now() + FARM_TZ_OFFSET_MS);
-    const startOfTodayFarm = new Date(
-        Date.UTC(nowFarm.getUTCFullYear(), nowFarm.getUTCMonth(), nowFarm.getUTCDate()) -
-            FARM_TZ_OFFSET_MS,
-    );
-
     const updated = await prisma.$transaction(async (tx) => {
         // Shared order with generation/execution: season first, then dependent schedules.
         await tx.$queryRaw`SELECT id FROM aquaculture_seasons WHERE id = ${seasonId}::uuid FOR UPDATE`;
@@ -582,9 +504,6 @@ const voidShrimpHealthLog = async (accountId, seasonId, logId, { voidReason }) =
         const log = await tx.shrimpHealthLog.findFirst({ where: { id: logId, seasonId } });
         if (!log) throw ApiError.notFound(messages.SHRIMP_HEALTH_LOG.NOT_FOUND);
         if (log.isVoided) throw ApiError.conflict(messages.SHRIMP_HEALTH_LOG.ALREADY_VOIDED);
-        if (new Date(log.recordedAt).getTime() < startOfTodayFarm.getTime()) {
-            throw ApiError.badRequest(messages.SHRIMP_HEALTH_LOG.VOID_ONLY_TODAY);
-        }
         const voidedAt = new Date();
         await assertCalculationStorage(tx);
         const changed = await tx.shrimpHealthLog.updateMany({
@@ -617,7 +536,7 @@ const voidShrimpHealthLog = async (accountId, seasonId, logId, { voidReason }) =
         });
 
         // Recalculate estimatedPopulation and estimatedBiomassKg for remaining active logs
-        await cascadeRecalculatePopulations(tx, seasonId, season.initialQuantity);
+        await recalculateHealthPopulations(tx, season);
 
         return {
             ...log,
@@ -792,7 +711,16 @@ const getStatistics = async (accountId, seasonId, query = {}, scope = 'ktv') => 
     };
 };
 
+/** Return a population preview only to the assigned Technician of an active season. */
+const getPopulation = async (accountId, seasonId, at = new Date()) => {
+    const season = await resolveKtvScope(accountId, seasonId, { requireActiveSeason: true });
+    const available = await availableAt(prisma, season, new Date(at));
+    return { availableQuantityCount: available == null ? null : available.toString(),
+        at: new Date(at).toISOString() };
+};
+
 module.exports = {
+    getPopulation,
     createShrimpHealthLog,
     listShrimpHealthLogs,
     getShrimpHealthLogDetail,

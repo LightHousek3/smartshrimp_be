@@ -1,3 +1,4 @@
+const { populationAvailable, recalculateHealthPopulations } = require('./seasonPopulation.service');
 /**
  * Read immutable harvest history and record partial or final harvests for farm owners.
  * Writes coordinate through the season row lock; final harvest also completes the season.
@@ -120,23 +121,6 @@ const readRows = (tx, where, tail = Prisma.empty) =>
     tx.$queryRaw(Prisma.sql`
     SELECT h.*, a.full_name AS recorder_name FROM harvest_events h
     JOIN accounts a ON a.id = h.recorded_by WHERE ${where} ${tail}`);
-
-// The latest corrected estimate replaces the old baseline, even when it rises.
-// New writes must advance harvested_at under the season lock. For legacy tied
-// rows, retain the conservative minimum without inventing an execution order.
-const populationAvailable = (season, at) => Prisma.sql`(SELECT
-    CASE WHEN capacity < 0 THEN 0 ELSE capacity END FROM (SELECT
-        CASE WHEN h.id IS NULL THEN ${season.initialQuantity}::bigint
-            WHEN h.harvest_type = 'final' THEN 0
-            ELSE h.estimated_remaining_count END
-        - (SELECT coalesce(sum(l.mortality_count), 0) FROM shrimp_health_logs l
-            WHERE l.season_id = ${season.id}::uuid AND l.is_voided = false AND l.recorded_at <= ${at}
-                AND (h.id IS NULL OR l.recorded_at > h.harvested_at)) AS capacity
-        FROM (SELECT 1) anchor LEFT JOIN LATERAL (
-            SELECT id, harvest_type, harvested_at, estimated_remaining_count FROM harvest_events
-            WHERE season_id = ${season.id}::uuid AND harvested_at <= ${at}
-            ORDER BY harvested_at DESC, estimated_remaining_count ASC NULLS LAST, id DESC LIMIT 1
-        ) h ON true) population)`;
 
 // Calendar-day age in Vietnam; stocking day has zero elapsed days.
 const earlyHarvestWarning = (season, harvestedAt) => {
@@ -393,6 +377,7 @@ const create = async (ownerId, seasonId, body, key) => {
                     ${size}::numeric, ${price}::numeric, ${revenue}::numeric, ${remaining.toString()}::bigint,
                     ${input.buyerName}, ${input.buyerContact}, ${input.note}, ${input.varianceReason}, ${ownerId}::uuid, ${key}::uuid)
                 RETURNING *, (SELECT full_name FROM accounts WHERE id = ${ownerId}::uuid) AS recorder_name`);
+                await recalculateHealthPopulations(tx, season);
                 if (input.harvestType === 'FINAL') {
                     // The event and season completion must commit together or both roll back.
                     const changed = await tx.aquacultureSeason.updateMany({

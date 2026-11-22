@@ -7,6 +7,12 @@ const getIdempotencyKey = (req) => {
     return typeof value === 'string' ? value.trim().slice(0, 128) : '';
 };
 
+/** GET /technician/seasons/:seasonId/shrimp-health-logs/population — preview the recording baseline. */
+const getPopulation = asyncHandler(async (req, res) => {
+    const data = await shrimpHealthService.getPopulation(req.account.id, req.params.seasonId, req.query.at);
+    ResponseHandler.success(res, { message: messages.SHRIMP_HEALTH_LOG.POPULATION_FETCHED, data });
+});
+
 // ---- Technician Handlers (Read/Write) ---------------------------------------
 
 /**
@@ -211,6 +217,7 @@ const getStatisticsAsOwner = asyncHandler(async (req, res) => {
 });
 
 module.exports = {
+    getPopulation,
     createShrimpHealthLog,
     listShrimpHealthLogs,
     getShrimpHealthLogDetail,
