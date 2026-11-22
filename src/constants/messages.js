@@ -474,6 +474,9 @@ const messages = {
         INVALID_DATE_RANGE: 'Ngày bắt đầu không được sau ngày kết thúc.',
         POPULATION_IN_FUTURE: 'Thời điểm ước tính số tôm không được ở tương lai.',
         PARTIAL_COUNT_REQUIRED: 'Vui lòng nhập số con thu hoạch khi thu tỉa.',
+        FINAL_COUNT_REQUIRED: 'Vui lòng nhập số con thu hoạch khi thu hoạch cuối.',
+        FINAL_REASON_REQUIRED:
+            'Vui lòng nhập lý do thu hoạch cuối khi còn ca bệnh đang mở hoặc đang điều trị.',
         POPULATION_UNKNOWN:
             'Chưa xác định được số tôm hiện có. Vui lòng cập nhật số lượng trước khi thu tỉa.',
         PARTIAL_MISMATCH: (available, quantity, expected) =>

@@ -36,7 +36,9 @@ const create = {
         harvestedAt: Joi.date().iso().required(),
         totalWeightKg: decimal(99999999999.999, 3).required(),
         // Fresh PARTIAL requires a count in the service, after legacy replay lookup.
-        quantityCount: count.allow(null),
+        quantityCount: Joi.when('harvestType', {
+            is: 'FINAL', then: count.required(), otherwise: count.allow(null),
+        }),
         // Zero means a free sale; null or omission means the price is unknown.
         pricePerKg: decimal(999999999999.99, 2).allow(0, null),
         // Partial harvests need a new population estimate; final harvests leave none.

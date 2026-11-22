@@ -18,6 +18,9 @@ const {
     PERSONNEL_ROLE,
     SHRIMP_CULTIVATION,
     PRODUCTION_PROTOCOL_LIMITS,
+    DISEASE_CASE_STATUS,
+    PROTOCOL_TYPE,
+    PROTOCOL_STATUS,
 } = require('../constants');
 const M = messages.HARVEST;
 const { emitNotification } = require('../realtime');
@@ -310,6 +313,34 @@ const create = async (ownerId, seasonId, body, key) => {
                 const available = history.remaining;
                 const quantity = input.quantityCount == null ? 0n : BigInt(input.quantityCount);
                 const remaining = BigInt(input.estimatedRemainingCount);
+                if (input.harvestType === 'FINAL') {
+                    if (input.quantityCount == null || quantity <= 0n) {
+                        throw validationError(M.FINAL_COUNT_REQUIRED, HARVEST_ERROR_CODE.FINAL_COUNT_REQUIRED);
+                    }
+                    if (!input.varianceReason) {
+                        const activeCase = await tx.diseaseCase.findFirst({
+                            where: {
+                                seasonId,
+                                status: { in: [DISEASE_CASE_STATUS.OPEN, DISEASE_CASE_STATUS.IN_TREATMENT] },
+                            },
+                            select: { id: true },
+                        });
+                        // Approved treatment can remain on a monitoring case outside the active-case check.
+                        const treatment = activeCase ? null : await tx.protocol.findFirst({
+                            where: {
+                                seasonId,
+                                protocolType: PROTOCOL_TYPE.TREATMENT,
+                                status: PROTOCOL_STATUS.APPROVED,
+                                diseaseCaseId: { not: null },
+                                diseaseCase: { is: { status: { not: DISEASE_CASE_STATUS.RESOLVED } } },
+                            },
+                            select: { id: true },
+                        });
+                        if (activeCase || treatment) {
+                            throw validationError(M.FINAL_REASON_REQUIRED, HARVEST_ERROR_CODE.FINAL_REASON_REQUIRED);
+                        }
+                    }
+                }
                 if (input.harvestType === 'PARTIAL') {
                     // Run after idempotent replay so legacy saved requests still reconcile.
                     if (input.quantityCount == null || quantity <= 0n) {
