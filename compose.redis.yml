@@ -1,0 +1,16 @@
+services:
+  redis:
+    image: redis:7.4-alpine
+    ports:
+      - '127.0.0.1:6379:6379'
+    command: [redis-server, --save, '', --appendonly, 'no', --maxmemory, 64mb, --maxmemory-policy, allkeys-lru]
+  redis-rate-limit:
+    image: redis:7.4-alpine
+    ports:
+      - '127.0.0.1:6380:6379'
+    command: [redis-server, --appendonly, 'yes', --maxmemory, 64mb, --maxmemory-policy, noeviction]
+    volumes:
+      - redis-rate-limit-data:/data
+
+volumes:
+  redis-rate-limit-data:

@@ -3,8 +3,10 @@ const config = require('../config');
 const logger = require('../config/logger');
 const { ACCOUNT_ROLE } = require('../constants');
 const { loadActiveAccount } = require('../middlewares');
+const { openNotificationAdapter } = require('./notificationAdapter');
 
 let io;
+let closeAdapter;
 
 const accountRoom = (accountId) => `account:${accountId}`;
 const allowedRoles = new Set([
@@ -14,8 +16,11 @@ const allowedRoles = new Set([
 ]);
 
 const attachNotificationSocket = (httpServer) => {
+    const { adapter, close } = openNotificationAdapter(config.redis?.socketUrl, config.redis?.keyPrefix);
+    closeAdapter = close;
     io = new Server(httpServer, {
         cors: { origin: config.cors.origin, credentials: true },
+        ...(adapter && { adapter }),
     });
 
     io.use(async (socket, next) => {
@@ -42,6 +47,12 @@ const attachNotificationSocket = (httpServer) => {
     return io;
 };
 
+const closeNotificationAdapter = () => {
+    closeAdapter?.();
+    closeAdapter = undefined;
+    io = undefined;
+};
+
 const emitNotification = (accountId, event, payload) => {
     if (!io) return;
     try {
@@ -52,4 +63,4 @@ const emitNotification = (accountId, event, payload) => {
     }
 };
 
-module.exports = { attachNotificationSocket, emitNotification };
+module.exports = { attachNotificationSocket, closeNotificationAdapter, emitNotification };

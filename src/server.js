@@ -4,8 +4,9 @@ const config = require('./config');
 const logger = require('./config/logger');
 const connectDB = require('./config/db');
 const prisma = require('./config/prisma');
+const redis = require('./config/redis');
 const jobs = require('./jobs');
-const { attachNotificationSocket } = require('./realtime/notification.socket');
+const { attachNotificationSocket, closeNotificationAdapter } = require('./realtime/notification.socket');
 const { errorDetail } = require('./utils/productionSchedule');
 
 let server;
@@ -41,6 +42,7 @@ const startServer = async () => {
     });
     server.on('error', (error) => fatal('HTTP server failure', error));
     if (shuttingDown) return;
+    redis.start();
     await jobs.start();
 };
 
@@ -58,7 +60,7 @@ const shutdown = (reason, exitCode = 0) => {
 
     shuttingDown = (async () => {
         const stoppedJobs = jobs.stop();
-        socketServer?.disconnectSockets(true);
+        socketServer?.local.disconnectSockets(true);
         if (server?.listening) {
             await new Promise((resolve) => {
                 server.close(resolve);
@@ -67,6 +69,8 @@ const shutdown = (reason, exitCode = 0) => {
         }
         await stoppedJobs;
         if (socketServer) await new Promise((resolve) => socketServer.close(resolve));
+        closeNotificationAdapter();
+        redis.stop();
         await prisma.$disconnect();
         clearTimeout(timeout);
         logger.info('Shutdown completed.');

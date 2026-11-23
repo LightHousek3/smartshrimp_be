@@ -40,6 +40,12 @@ const config = {
     port: parseInt(process.env.PORT, 10) || 3000,
     apiPrefix: API_PREFIX,
     database: { url: process.env.DATABASE_URL },
+    redis: {
+        url: process.env.REDIS_URL?.trim(),
+        rateLimitUrl: process.env.REDIS_RATE_LIMIT_URL?.trim(),
+        socketUrl: process.env.REDIS_SOCKET_URL?.trim(),
+        keyPrefix: process.env.REDIS_KEY_PREFIX?.trim() || `smartshrimp:${process.env.NODE_ENV || 'development'}`,
+    },
     app: {
         backendUrl: BASE_URL || undefined,
         webBaseUrl: WEB_BASE_URL,

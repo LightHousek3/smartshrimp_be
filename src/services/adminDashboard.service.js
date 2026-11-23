@@ -1,5 +1,32 @@
 const prisma = require('../config/prisma');
+const redis = require('../config/redis');
+const config = require('../config');
+const logger = require('../config/logger');
+const Joi = require('joi');
 const { ACCOUNT_STATUS } = require('../constants');
+
+const CACHE_TTL_SECONDS = 30;
+const pendingOverviews = new Map();
+const count = Joi.number().integer().min(0).required();
+const metric = Joi.number().required();
+const dayFields = { date: Joi.string().required(), fullDate: Joi.string().required(), total: count };
+const overviewSchema = Joi.object({
+    systemOverview: Joi.object({
+        totalAccounts: count, managedAccounts: count, activeAccounts: count, pendingActivation: count,
+        blockedAccounts: count, inactiveAccounts: count, activeFarms: count, activeSeasons: count,
+        aiRequestsToday: count, ragQuestionsToday: count,
+    }).required(),
+    aiDailyMetrics: Joi.array().items(Joi.object({
+        ...dayFields, success: count, errors: count, avgConfidence: metric, avgProcessingMs: count,
+    })).length(7).required(),
+    ragDailyMetrics: Joi.array().items(Joi.object({
+        ...dayFields, answered: count, noSource: count, lowMatch: count, avgRating: metric,
+    })).length(7).required(),
+    accountStatusBreakdown: Joi.array().items(Joi.object({
+        label: Joi.string().required(), status: Joi.string().valid(...Object.values(ACCOUNT_STATUS)).required(),
+        count, color: Joi.string().required(), bg: Joi.string().required(),
+    })).length(4).required(),
+}).prefs({ convert: false });
 
 /**
  * Format a Date object to YYYY-MM-DD in Vietnam timezone
@@ -14,13 +41,22 @@ const formatVietnamDate = (date) => {
  * Get system overview metrics, 7-day AI metrics, 7-day RAG metrics, and account status breakdown
  * @returns {Promise<Object>}
  */
-const getSystemOverview = async () => {
-    const [overviewRows] = await prisma.$queryRaw`SELECT * FROM v_admin_system_overview LIMIT 1`;
-
-    const accountsGroup = await prisma.account.groupBy({
-        by: ['status'],
-        _count: { _all: true },
-    });
+const readSystemOverview = async () => {
+    // The view and the seven-day window share the same database clock and snapshot.
+    const [[overviewRows], accountsGroup, aiRows, ragRows] = await prisma.$transaction([
+        prisma.$queryRaw`SELECT *, CURRENT_TIMESTAMP AS snapshot_at FROM v_admin_system_overview`,
+        prisma.account.groupBy({ by: ['status'], _count: { _all: true } }),
+        prisma.$queryRaw`
+            SELECT * FROM v_ai_daily_analytics
+            WHERE metric_date BETWEEN (CURRENT_TIMESTAMP AT TIME ZONE 'Asia/Ho_Chi_Minh')::date - 6
+                                  AND (CURRENT_TIMESTAMP AT TIME ZONE 'Asia/Ho_Chi_Minh')::date
+        `,
+        prisma.$queryRaw`
+            SELECT * FROM v_rag_daily_analytics
+            WHERE metric_date BETWEEN (CURRENT_TIMESTAMP AT TIME ZONE 'Asia/Ho_Chi_Minh')::date - 6
+                                  AND (CURRENT_TIMESTAMP AT TIME ZONE 'Asia/Ho_Chi_Minh')::date
+        `,
+    ], { isolationLevel: 'RepeatableRead' });
 
     const statusCounts = {
         [ACCOUNT_STATUS.ACTIVE]: 0,
@@ -36,7 +72,7 @@ const getSystemOverview = async () => {
     }
 
     // Build continuous 7-day window
-    const now = new Date();
+    const now = overviewRows.snapshot_at;
     const dates = [];
     for (let i = 6; i >= 0; i -= 1) {
         const d = new Date(now.getTime() - i * 86400000);
@@ -44,21 +80,6 @@ const getSystemOverview = async () => {
         const label = `${dateStr.slice(8, 10)}/${dateStr.slice(5, 7)}`;
         dates.push({ dateStr, label });
     }
-
-    const startDateStr = dates[0].dateStr;
-
-    const [aiRows, ragRows] = await Promise.all([
-        prisma.$queryRaw`
-            SELECT * FROM v_ai_daily_analytics
-            WHERE metric_date >= ${startDateStr}::date
-            ORDER BY metric_date ASC
-        `,
-        prisma.$queryRaw`
-            SELECT * FROM v_rag_daily_analytics
-            WHERE metric_date >= ${startDateStr}::date
-            ORDER BY metric_date ASC
-        `,
-    ]);
 
     const aiMap = new Map();
     for (const row of aiRows) {
@@ -176,6 +197,47 @@ const getSystemOverview = async () => {
         ragDailyMetrics,
         accountStatusBreakdown,
     };
+};
+
+const readCached = async (key, day) => {
+    const raw = await redis.get(key);
+    if (raw === null) return null;
+    try {
+        const overview = JSON.parse(raw);
+        if (!overviewSchema.validate(overview).error &&
+            overview.aiDailyMetrics.at(-1).fullDate === day &&
+            overview.ragDailyMetrics.at(-1).fullDate === day) {
+            return overview;
+        }
+    } catch (error) {
+        if (!(error instanceof SyntaxError)) throw error;
+    }
+    return null;
+};
+
+const loadOverview = async (key, day) => {
+    const cached = await readCached(key, day);
+    if (cached) {
+        logger.debug('Admin dashboard cache hit.');
+        return cached;
+    }
+    logger.debug('Admin dashboard cache miss.');
+    const overview = await readSystemOverview();
+    // A request crossing Vietnam midnight must not populate the previous day's key.
+    if (overview.aiDailyMetrics.at(-1).fullDate === day && formatVietnamDate(new Date()) === day) {
+        await redis.set(key, JSON.stringify(overview), CACHE_TTL_SECONDS);
+    }
+    return overview;
+};
+
+const getSystemOverview = () => {
+    if (!config.redis?.url) return readSystemOverview();
+    const day = formatVietnamDate(new Date());
+    const key = `${config.redis.keyPrefix}:cache:admin-overview:v1:${day}`;
+    if (!pendingOverviews.has(key)) {
+        pendingOverviews.set(key, loadOverview(key, day).finally(() => pendingOverviews.delete(key)));
+    }
+    return pendingOverviews.get(key);
 };
 
 module.exports = {
