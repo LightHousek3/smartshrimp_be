@@ -177,7 +177,7 @@ const getAssignedSeason = async (accountId, seasonId) => {
                     orderBy: [{ role: 'asc' }, { assignedAt: 'desc' }],
                 },
                 healthLogs: {
-                    where: { isVoided: false },
+                    where: { isVoided: false, estimatedBiomassKg: { not: null, gt: 0 } },
                     select: { estimatedBiomassKg: true },
                     orderBy: [{ recordedAt: 'desc' }, { id: 'desc' }],
                     take: 1,

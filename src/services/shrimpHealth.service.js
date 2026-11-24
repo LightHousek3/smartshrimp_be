@@ -1,3 +1,4 @@
+const { Prisma } = require('@prisma/client');
 const { availableAt, recalculateHealthPopulations } = require('./seasonPopulation.service');
 const prisma = require('../config/prisma');
 const { assertCalculationStorage } = require('../utils/jobStorage');
@@ -215,7 +216,7 @@ const createShrimpHealthLog = async (accountId, seasonId, data, idempotencyKey =
 
     const recordedAt = new Date(data.recordedAt);
     if (Number.isNaN(recordedAt.getTime())) {
-        throw ApiError.badRequest('Thời điểm ghi nhận không hợp lệ');
+        throw ApiError.badRequest(messages.SHRIMP_HEALTH_LOG.INVALID_RECORDED_AT);
     }
     if (recordedAt.getTime() > Date.now() + RECORDED_AT_FUTURE_TOLERANCE_MS) {
         throw ApiError.badRequest(messages.SHRIMP_HEALTH_LOG.RECORDED_AT_TOO_FAR_FUTURE);
@@ -228,7 +229,7 @@ const createShrimpHealthLog = async (accountId, seasonId, data, idempotencyKey =
     );
 
     if (recordedAt.getTime() < startOfTodayFarm.getTime()) {
-        throw ApiError.badRequest('Chỉ được ghi nhận sức khỏe tôm trong ngày hôm nay');
+        throw ApiError.badRequest(messages.SHRIMP_HEALTH_LOG.RECORDED_AT_PAST_DAY);
     }
 
     let sampleSize =
@@ -243,16 +244,53 @@ const createShrimpHealthLog = async (accountId, seasonId, data, idempotencyKey =
         data.mortalityCount !== undefined && data.mortalityCount !== null
             ? Number(data.mortalityCount)
             : 0;
+
+    if (mortalityCount < 0) {
+        throw ApiError.badRequest(messages.SHRIMP_HEALTH_LOG.MORTALITY_INVALID);
+    }
+
+    const liveAvailable = await availableAt(prisma, season, recordedAt);
+    if (liveAvailable !== null && BigInt(mortalityCount) > BigInt(liveAvailable)) {
+        throw ApiError.badRequest(messages.SHRIMP_HEALTH_LOG.MORTALITY_EXCEEDS_AVAILABLE);
+    }
     let estimatedPopulation =
         data.estimatedPopulation !== undefined && data.estimatedPopulation !== null
             ? Number(data.estimatedPopulation)
             : null;
+
+    if (
+        estimatedPopulation !== null &&
+        season.initialQuantity &&
+        BigInt(estimatedPopulation) > BigInt(season.initialQuantity)
+    ) {
+        throw ApiError.badRequest(messages.SHRIMP_HEALTH_LOG.ESTIMATED_POPULATION_EXCEEDS_INITIAL);
+    }
+
     let estimatedBiomassKg =
         data.estimatedBiomassKg !== undefined && data.estimatedBiomassKg !== null
             ? Number(data.estimatedBiomassKg)
             : null;
     const healthStatus = data.healthStatus || HEALTH_STATUS.GOOD;
     const note = (data.note || '').trim() || null;
+
+    // If mean body weight is omitted (e.g. mortality-only log), inherit latest valid weight & length prior to recordedAt
+    if (avgWeightG === null || avgWeightG <= 0) {
+        const previousObservation = await prisma.shrimpHealthLog.findFirst({
+            where: {
+                seasonId,
+                isVoided: false,
+                avgWeightG: { not: null, gt: 0 },
+                recordedAt: { lte: recordedAt },
+            },
+            orderBy: [{ recordedAt: 'desc' }, { id: 'desc' }],
+        });
+        if (previousObservation) {
+            avgWeightG = Number(previousObservation.avgWeightG);
+            if ((avgLengthCm === null || avgLengthCm <= 0) && previousObservation.avgLengthCm) {
+                avgLengthCm = Number(previousObservation.avgLengthCm);
+            }
+        }
+    }
 
     // Infer biomass from population and mean body weight when an explicit weight is omitted.
     if (
@@ -633,28 +671,94 @@ const getStatistics = async (accountId, seasonId, query = {}, scope = 'ktv') => 
         });
     }
 
-    // Resolve latest valid observation for summary metrics card
-    const latestValidLog = await prisma.shrimpHealthLog.findFirst({
-        where: { seasonId, isVoided: false },
-        orderBy: { recordedAt: 'desc' },
-    });
+    // Resolve latest valid observations for summary metrics card:
+    // Take the latest valid non-voided measurement for each indicator.
+    const [
+        latestValidLog,
+        latestBiomassLog,
+        latestAvgWeightLog,
+        latestAvgLengthLog,
+        latestPopulationLog,
+    ] = await Promise.all([
+        prisma.shrimpHealthLog.findFirst({
+            where: { seasonId, isVoided: false },
+            orderBy: [{ recordedAt: 'desc' }, { id: 'desc' }],
+        }),
+        prisma.shrimpHealthLog.findFirst({
+            where: { seasonId, isVoided: false, estimatedBiomassKg: { not: null, gt: 0 } },
+            orderBy: [{ recordedAt: 'desc' }, { id: 'desc' }],
+        }),
+        prisma.shrimpHealthLog.findFirst({
+            where: { seasonId, isVoided: false, avgWeightG: { not: null, gt: 0 } },
+            orderBy: [{ recordedAt: 'desc' }, { id: 'desc' }],
+        }),
+        prisma.shrimpHealthLog.findFirst({
+            where: { seasonId, isVoided: false, avgLengthCm: { not: null, gt: 0 } },
+            orderBy: [{ recordedAt: 'desc' }, { id: 'desc' }],
+        }),
+        prisma.shrimpHealthLog.findFirst({
+            where: { seasonId, isVoided: false, estimatedPopulation: { not: null } },
+            orderBy: [{ recordedAt: 'desc' }, { id: 'desc' }],
+        }),
+    ]);
 
     const initialQty =
         season.initialQuantity !== null && season.initialQuantity !== undefined
             ? Number(season.initialQuantity)
             : null;
+
+    // Use availableAt to accurately account for partial/final harvests and post-harvest mortalities
+    const liveAvailable = await availableAt(prisma, season, to);
     const currentPop =
-        latestValidLog?.estimatedPopulation !== null &&
-        latestValidLog?.estimatedPopulation !== undefined
-            ? Number(latestValidLog.estimatedPopulation)
-            : null;
+        liveAvailable !== null
+            ? Number(liveAvailable)
+            : (latestPopulationLog?.estimatedPopulation !== null &&
+               latestPopulationLog?.estimatedPopulation !== undefined
+                ? Number(latestPopulationLog.estimatedPopulation)
+                : (latestValidLog?.estimatedPopulation !== null &&
+                   latestValidLog?.estimatedPopulation !== undefined
+                    ? Number(latestValidLog.estimatedPopulation)
+                    : null));
+
+    // Harvested animals survived; query total harvested to calculate accurate survival rate
+    const [harvestAgg] = await prisma.$queryRaw(Prisma.sql`
+        SELECT coalesce(sum(quantity_count), 0)::bigint AS total_harvested
+        FROM harvest_events
+        WHERE season_id = ${seasonId}::uuid AND harvested_at <= ${to}
+    `);
+    const totalHarvestedCount = harvestAgg?.total_harvested != null
+        ? Number(harvestAgg.total_harvested)
+        : 0;
 
     let survivalRatePercent = null;
     if (initialQty && initialQty > 0 && currentPop !== null) {
+        const totalLivingOrHarvested = currentPop + totalHarvestedCount;
         survivalRatePercent = Math.min(
             100,
-            Math.max(0, Math.round((currentPop / initialQty) * 10000) / 100),
+            Math.max(0, Math.round((totalLivingOrHarvested / initialQty) * 10000) / 100),
         );
+    }
+
+    // Resolve current biomass; adjust if partial harvest occurred after the latest biomass measurement
+    const [latestHarvest] = await prisma.$queryRaw(Prisma.sql`
+        SELECT id, harvest_type, harvested_at
+        FROM harvest_events
+        WHERE season_id = ${seasonId}::uuid AND harvested_at <= ${to}
+        ORDER BY harvested_at DESC, id DESC LIMIT 1
+    `);
+    let currentBiomassKg = toNumberOrNull(latestBiomassLog?.estimatedBiomassKg);
+    if (latestHarvest) {
+        if (latestHarvest.harvest_type === 'final') {
+            currentBiomassKg = 0;
+        } else if (
+            latestBiomassLog &&
+            new Date(latestHarvest.harvested_at) > new Date(latestBiomassLog.recordedAt) &&
+            latestAvgWeightLog?.avgWeightG &&
+            currentPop != null &&
+            currentPop > 0
+        ) {
+            currentBiomassKg = Math.round(((currentPop * Number(latestAvgWeightLog.avgWeightG)) / 1000) * 10) / 10;
+        }
     }
 
     const totalValidLogs = rows.length;
@@ -696,9 +800,9 @@ const getStatistics = async (accountId, seasonId, query = {}, scope = 'ktv') => 
         stockingDate: season.stockingDate ? season.stockingDate.toISOString().slice(0, 10) : null,
         initialQuantity: initialQty,
         summary: {
-            currentBiomassKg: toNumberOrNull(latestValidLog?.estimatedBiomassKg),
-            currentAvgWeightG: toNumberOrNull(latestValidLog?.avgWeightG),
-            currentAvgLengthCm: toNumberOrNull(latestValidLog?.avgLengthCm),
+            currentBiomassKg,
+            currentAvgWeightG: toNumberOrNull(latestAvgWeightLog?.avgWeightG),
+            currentAvgLengthCm: toNumberOrNull(latestAvgLengthLog?.avgLengthCm),
             currentPopulation: currentPop,
             currentHealthStatus: latestValidLog?.healthStatus || null,
             survivalRatePercent,
