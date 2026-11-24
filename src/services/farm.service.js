@@ -77,6 +77,9 @@ const FARM_DETAIL_SELECT = {
     },
 };
 
+/**
+ * Convert selected Prisma decimals to JSON numbers and preserve fields omitted by the query.
+ */
 const normalizeFarm = (farm) => {
     const normalized = { ...farm };
     for (const field of ['latitude', 'longitude', 'totalAreaHectares']) {

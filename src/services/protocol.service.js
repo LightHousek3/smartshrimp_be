@@ -140,6 +140,9 @@ const anchorDate = (protocol) => {
               .slice(0, 10)
         : null;
 };
+/**
+ * Derive the Vietnam calendar date used to compare protocol schedule days.
+ */
 const localDate = (timestamp) =>
     new Date(timestamp.getTime() + VIETNAM_OFFSET_MS).toISOString().slice(0, 10);
 
@@ -215,6 +218,9 @@ const quantityAudit = (protocol, schedule) => {
         protocol.allowedVariancePct ?? 10,
     );
 };
+/**
+ * Match a Prisma timestamp within the millisecond precision available to the client.
+ */
 const timestampWindow = (date) => ({
     gte: new Date(date),
     lt: new Date(new Date(date).getTime() + 1),
@@ -911,6 +917,9 @@ const review = async (ownerId, id, { updatedAt, reason, materialSelections = [] 
     return result.data;
 };
 
+/**
+ * Check protocol ownership and read replacement materials from one consistent database snapshot.
+ */
 const materialOptions = async (ownerId, id, { itemId, search }) =>
     prisma.$transaction(
         async (client) => {

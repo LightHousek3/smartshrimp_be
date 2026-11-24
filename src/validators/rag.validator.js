@@ -1,4 +1,7 @@
 const Joi = require('joi');
+/**
+ * Require version 4 UUIDs for RAG conversation and query identifiers.
+ */
 const uuid = () => Joi.string().uuid({ version: 'uuidv4' });
 const pagination = { page: Joi.number().integer().min(1).max(100000).default(1), limit: Joi.number().integer().min(1).max(50).default(20) };
 module.exports = {

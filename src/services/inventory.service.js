@@ -115,8 +115,17 @@ const TRANSACTION_SELECT = {
     createdAt: true,
 };
 
+/**
+ * Treat absent totals as zero while keeping inventory arithmetic in Prisma Decimal.
+ */
 const decimal = (value) => new Prisma.Decimal(value ?? 0);
+/**
+ * Compare numeric quantities independently of their database or request representation.
+ */
 const decimalEqual = (left, right) => decimal(left).equals(decimal(right));
+/**
+ * Round the movement value to two decimal places and reject amounts above the inventory limit.
+ */
 const calculateTransactionAmount = (quantity, unitPrice) => {
     const amount = decimal(quantity).mul(unitPrice).toDecimalPlaces(2);
     if (amount.gt(INVENTORY_LIMITS.MAX_TRANSACTION_AMOUNT)) {
@@ -125,6 +134,9 @@ const calculateTransactionAmount = (quantity, unitPrice) => {
     return amount;
 };
 
+/**
+ * Use a case-insensitive Vietnamese name key with collapsed spaces for product comparisons.
+ */
 const normalizeNameKey = (value) => value.trim().replace(/\s+/gu, ' ').toLocaleLowerCase('vi');
 // API dates have millisecond precision; PostgreSQL rows may retain microseconds.
 const versionRange = (date) => ({
@@ -302,6 +314,9 @@ const requireUniqueProductNameUnit = async (client, farmId, name, unit, excluded
     }
 };
 
+/**
+ * Reject stock mutations against archived products.
+ */
 const requireActiveProduct = (product) => {
     if (product.status !== PRODUCT_STATUS.ACTIVE) {
         throw new ApiError(httpStatus.CONFLICT, messages.INVENTORY.PRODUCT_ARCHIVED);
@@ -601,8 +616,11 @@ const createProduct = async (farmId, productData, ownerId) => {
                 await requireOwnedFarm(transaction, farmId, ownerId);
                 const proposal = protocolProposal
                     ? await protocolReview.prepareCreation(
-                        transaction, ownerId, farmId, protocolProposal,
-                    )
+                          transaction,
+                          ownerId,
+                          farmId,
+                          protocolProposal,
+                      )
                     : null;
                 await requireSelectableSupplier(transaction, ownerId, data.manufacturerId, true);
                 await requireUniqueProductNameUnit(transaction, farmId, data.name, data.unit);
@@ -622,7 +640,10 @@ const createProduct = async (farmId, productData, ownerId) => {
                         select: protocolReview.materialSelect,
                     });
                     await protocolReview.linkCreatedMaterial(
-                        transaction, proposal, material, ownerId,
+                        transaction,
+                        proposal,
+                        material,
+                        ownerId,
                     );
                 }
                 return created;
@@ -843,6 +864,10 @@ const inventoryRecipients = async (client, farmId, productId, ownerId, seasonIds
     return [...new Set([ownerId, ...assignments.map((assignment) => assignment.accountId)])];
 };
 
+/**
+ * Save inventory notices using the caller's database client and return identifiers for delivery after
+ * commit.
+ */
 const saveInventoryNotifications = async (client, recipients, data) =>
     Promise.all(
         recipients.map((accountId) =>
@@ -1444,6 +1469,9 @@ const updateLotExpiry = async (farmId, productId, balanceId, input, ownerId) => 
     }
 };
 
+/**
+ * Read total recorded stock across all balances for the product.
+ */
 const getProductStock = async (client, productId) => {
     const stock = await client.inventoryBalance.aggregate({
         where: { productId },
@@ -1469,7 +1497,13 @@ const findIdempotentTransaction = (client, idempotencyKey) =>
         },
     });
 
+/**
+ * Treat empty and absent text as equivalent when checking a retry payload.
+ */
 const nullableTextEqual = (left, right) => (left || null) === (right || null);
+/**
+ * Compare timestamps by instant so equivalent date representations match on retry.
+ */
 const dateEqual = (left, right) => new Date(left).getTime() === new Date(right).getTime();
 
 /**
@@ -1510,6 +1544,9 @@ const idempotentTransactionMatches = (existing, farmId, productId, ownerId, data
     );
 };
 
+/**
+ * Recognize duplicate retry keys separately from other unique-constraint errors.
+ */
 const isIdempotencyUniqueError = (error) =>
     error?.code === 'P2002' && JSON.stringify(error.meta?.target || '').includes('idempotency');
 
@@ -1950,8 +1987,14 @@ const getInventoryHistory = async (farmId, ownerId, query) => {
 
 module.exports = {
     notifyStockChange,
+    /**
+     * Choose the list reader supported by the installed inventory schema.
+     */
     getProducts: async (...args) =>
         ((await legacyRead.isV2()) ? getProducts : legacyRead.getProducts)(...args),
+    /**
+     * Choose the detail reader supported by the installed inventory schema.
+     */
     getProduct: async (...args) =>
         ((await legacyRead.isV2()) ? getProduct : legacyRead.getProduct)(...args),
     createProduct: legacyRead.guardWrite(createProduct),

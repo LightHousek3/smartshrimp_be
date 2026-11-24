@@ -4,10 +4,8 @@ const {
     AI_LABEL_NAMES,
 } = require('../constants/aiDiagnosis');
 
-/** Apply the public recognition policy to a saved successful inference. */
-const recognitionResult = (row) => {
-    // SQL rounds confidence; use the original JSON probability at the cutoff.
-    const confidence = row.predictions[0].probability;
+/** Apply the recognition policy using the original JSON probability when available. */
+const recognitionResult = (row, confidence = row.predictions[0].probability) => {
     const recognized = confidence >= AI_MIN_RECOGNITION_CONFIDENCE;
     return {
         recognitionStatus: recognized ? AI_RECOGNITION_STATUS.RECOGNIZED : AI_RECOGNITION_STATUS.UNRECOGNIZED,

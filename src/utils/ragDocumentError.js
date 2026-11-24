@@ -1,6 +1,9 @@
 const ApiError = require('./ApiError');
 const { RAG_DOCUMENT_ERRORS } = require('../constants');
 
+/**
+ * Attach the stable RAG document error code to its configured HTTP status and message.
+ */
 const createDocumentError = (errorCode) => {
     const { status, message } = RAG_DOCUMENT_ERRORS[errorCode];
     return Object.assign(new ApiError(status, message), { errorCode });

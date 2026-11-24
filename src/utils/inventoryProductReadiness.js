@@ -10,6 +10,9 @@ const receiptPrefixes = {
     [PRODUCT_REGULATORY_TYPE.DUAL_PURPOSE]: '03-',
 };
 
+/**
+ * Require one to three valid HTTPS label image URLs for catalog readiness.
+ */
 const hasLabelImages = (product) => Array.isArray(product?.imageUrls)
     && product.imageUrls.length >= 1 && product.imageUrls.length <= 3
     && product.imageUrls.every((value) => {
@@ -42,6 +45,9 @@ const complianceConsistencyIssue = (compliance) => {
 /** Check required catalog and declaration facts without inferring legal approval. */
 const isCompleteInventoryProduct = (product) => {
     const compliance = product?.compliance;
+    /**
+     * Treat blank dossier fields as missing during readiness checks.
+     */
     const textPresent = (value) => typeof value === 'string' && value.trim().length > 0;
     return Boolean(product && textPresent(product.manufacturerId) && hasLabelImages(product)
         && compliance && classifiedTypes.includes(compliance.regulatoryType)

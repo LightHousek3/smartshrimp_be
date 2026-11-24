@@ -39,6 +39,10 @@ const quantityComparison = (plannedQuantity, actualQuantity, allowedVariancePct)
     };
 };
 
+/**
+ * Classify execution against planned time and its grace period, or report the current state of an
+ * unexecuted schedule.
+ */
 const timingComparison = (schedule, dueAtMinutes, now = new Date()) => {
     const scheduledAt = new Date(schedule.scheduledAt);
     if (

@@ -8,22 +8,37 @@ const hasSharedMealDeadline = (meal) =>
         meal.items.map((item) => item.dueAtMinutes ?? PRODUCTION_PROTOCOL_LIMITS.defaultDueAtMinutes),
     ).size <= 1;
 
+/**
+ * Report malformed saved protocol data as a service availability error.
+ */
 const invalidStoredContent = () =>
     new ApiError(
         httpStatus.SERVICE_UNAVAILABLE,
         messages.PRODUCTION_PROTOCOL.STORED_CONTENT_INVALID,
     );
+/**
+ * Require the exact stored structure keys before rebuilding groups from persisted data.
+ */
 const objectWithKeys = (value, keys) =>
     value &&
     typeof value === 'object' &&
     !Array.isArray(value) &&
     keys.every((key) => Object.hasOwn(value, key)) &&
     Object.keys(value).every((key) => keys.includes(key));
+/**
+ * Require a UUID-shaped identifier for stored stage and meal metadata.
+ */
 const uuid = (value) =>
     typeof value === 'string' &&
     /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(value);
+/**
+ * Restrict stored day anchors to the supported one-based day-of-culture range.
+ */
 const doc = (value) =>
     Number.isInteger(value) && value >= 1 && value <= PRODUCTION_PROTOCOL_LIMITS.maxDoc;
+/**
+ * Normalize optional wall-clock times to the format persisted in protocol metadata.
+ */
 const timeText = (value) =>
     value == null
         ? null
@@ -58,6 +73,9 @@ const assertStructure = (structure) => {
         throw invalidStoredContent();
     const ids = new Set(),
         ranges = [];
+    /**
+     * Require unique stage and meal IDs across the structure regardless of letter casing.
+     */
     const identity = (id) => {
         if (!uuid(id) || ids.has(id.toLowerCase())) throw invalidStoredContent();
         ids.add(id.toLowerCase());

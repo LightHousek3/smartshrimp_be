@@ -1,9 +1,15 @@
+/**
+ * Reject invalid pagination inputs before sending skip or take values to Prisma.
+ */
 const assertPositiveInteger = (value, name) => {
     if (!Number.isInteger(value) || value < 1) {
         throw new TypeError(`${name} must be a positive integer`);
     }
 };
 
+/**
+ * Count and page the same filter so response metadata describes the full result set.
+ */
 const paginateOffset = async ({ delegate, where = {}, page, limit, ...findManyArgs }) => {
     assertPositiveInteger(page, 'page');
     assertPositiveInteger(limit, 'limit');
@@ -31,6 +37,9 @@ const paginateOffset = async ({ delegate, where = {}, page, limit, ...findManyAr
     };
 };
 
+/**
+ * Read one extra row to detect a next page and count all rows matching the original filter.
+ */
 const paginateCursor = async ({
     delegate,
     where = {},

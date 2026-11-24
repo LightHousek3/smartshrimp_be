@@ -3,6 +3,9 @@ const { FARM_STATUS } = require('../constants');
 
 const farmId = Joi.string().uuid({ version: 'uuidv4' });
 
+/**
+ * Canonicalize farm names and addresses by trimming and collapsing whitespace.
+ */
 const normalizeWhitespace = (value) => value.trim().replace(/\s+/gu, ' ');
 
 /**

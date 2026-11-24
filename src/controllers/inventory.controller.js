@@ -2,6 +2,9 @@ const { inventoryService, inventoryLabelService } = require('../services');
 const { asyncHandler, ResponseHandler } = require('../utils');
 const { messages } = require('../constants');
 
+/**
+ * POST /owner/farms/:farmId/products/scan-label
+ */
 const scanLabel = asyncHandler(async (req, res) => {
     const result = await inventoryLabelService.scanLabel(req.params.farmId, req.account.id, req.body.images);
     ResponseHandler.success(res, { message: messages.INVENTORY_LABEL.SCANNED, data: result });

@@ -28,6 +28,9 @@ const { emitNotification } = require('../realtime');
 const withdrawal = require('./harvestWithdrawal.service');
 const { readSources, populationMatches } = require('./seasonBiomass.service');
 
+/**
+ * Flag shrimp size outside the reference range while allowing the harvest to be recorded.
+ */
 const harvestSizeWarning = (value) => {
     if (value == null) return null;
     const size = new Prisma.Decimal(value);
@@ -36,6 +39,10 @@ const harvestSizeWarning = (value) => {
         : null;
 };
 
+/**
+ * Compare harvest quantities with eligible sampling evidence and preserve the pre-harvest basis when
+ * replaying a partial harvest.
+ */
 const biomassDeviationWarning = async (tx, seasonId, input, replayed = false) => {
     const harvestedAt = new Date(input.harvestedAt);
     const source = (await readSources(tx, [seasonId], harvestedAt)).get(seasonId);
@@ -131,6 +138,10 @@ const earlyHarvestWarning = (season, harvestedAt) => {
     return days < typicalDays ? messages.HARVEST.EARLY_WARNING(days, typicalDays) : null;
 };
 
+/**
+ * Detect unresolved cases or unfinished treatments that restrict harvest.
+ * A final harvest requires a reason when a blocker is present.
+ */
 const hasDiseaseBlocker = async (tx, seasonId) => {
     const activeCase = await tx.diseaseCase.findFirst({
         where: { seasonId, status: { not: DISEASE_CASE_STATUS.RESOLVED } },
@@ -484,6 +495,9 @@ const readProfessionalHistory = (tx, seasonId, at) =>
     FROM harvest_events WHERE season_id = ${seasonId}::uuid AND harvested_at <= ${at}
     ORDER BY harvested_at ASC, estimated_remaining_count DESC NULLS FIRST, id ASC`);
 
+/**
+ * Find the most recent harvest event at or before the calculation time.
+ */
 const latestHarvestAt = async (tx, seasonId, at) => {
     const [row] = await tx.$queryRaw`SELECT max(harvested_at) AS at FROM harvest_events
         WHERE season_id = ${seasonId}::uuid AND harvested_at <= ${at}`;

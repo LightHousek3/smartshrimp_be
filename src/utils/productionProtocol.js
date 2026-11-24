@@ -4,11 +4,18 @@ const ApiError = require('./ApiError');
 /** SQL DATE is a calendar date; stocking day is DOC 1 regardless of the host timezone. */
 const expectedHarvestDoc = ({ stockingDate, expectedEndDate } = {}) => {
     if (!stockingDate || !expectedEndDate) return null;
+    /**
+     * Compare stocking and expected harvest as calendar dates regardless of their input
+     * representation.
+     */
     const dateOnly = value => value instanceof Date ? value.toISOString().slice(0, 10) : String(value).slice(0, 10);
     const doc = (Date.parse(dateOnly(expectedEndDate)) - Date.parse(dateOnly(stockingDate))) / (24 * 60 * 60 * 1000) + 1;
     return Number.isInteger(doc) && doc >= 1 ? doc : null;
 };
 
+/**
+ * Require protocol stages to cover the season's expected harvest day when one is known.
+ */
 const assertProtocolHarvestCoverage = (stages, season) => {
     const minimumDoc = expectedHarvestDoc(season);
     if (minimumDoc == null) return;
@@ -23,6 +30,10 @@ const hasOverlappingStages = (stages) => stages.some((stage, index) => (
     ))
 ));
 
+/**
+ * Check the allowed dose basis for the operation and day, including the percentage limit and mass
+ * units.
+ */
 const isProductionProtocolDoseValid = (item, offset) => (
     allowedProductionProtocolDoseBases(item.operationType, offset).includes(item.doseBasis)
     && (item.doseBasis !== DOSE_BASIS.PERCENT_BIOMASS

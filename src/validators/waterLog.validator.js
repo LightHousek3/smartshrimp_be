@@ -2,10 +2,9 @@ const Joi = require('joi');
 const { WATER_METRIC_DEFINITIONS, WATER_NOTE_MAX_LENGTH, messages } = require('../constants');
 
 /**
- * Validators cho nhật ký đo nước (water_quality_logs).
- * - Khoảng vật lý khớp DB CHECK trong smartshrimp.sql (BR-WATER-01).
- * - recordedAt vượt quá hiện tại +5 phút bị chặn ở service (D3), vì Joi
- *   không tính được "now" động tại thời điểm validate.
+ * Water quality log validation follows the physical ranges in the database CHECK
+ * constraints (BR-WATER-01). The service checks the five-minute future tolerance
+ * against the current time when recording an observation (D3).
  */
 
 const seasonIdParam = Joi.string().uuid({ version: 'uuidv4' }).required();

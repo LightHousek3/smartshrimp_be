@@ -10,6 +10,9 @@ const { RAG_DOCUMENT_STATUS, RAG_DOCUMENT_MAX_FILE_BYTES, RAG_DOCUMENT_CATEGORIE
 
 const include = { uploader: { select: { id: true, fullName: true } } };
 const CONFIRMED_STATUSES = [RAG_DOCUMENT_STATUS.PENDING, RAG_DOCUMENT_STATUS.PROCESSING, RAG_DOCUMENT_STATUS.READY, RAG_DOCUMENT_STATUS.FAILED];
+/**
+ * Normalize legacy category casing and expose a stable ingestion error code.
+ */
 const publicDocument = ({ storageKey, storageProvider, storageResourceType, fileHash, nextAttemptAt, ...row }) => ({
     ...row, category: row.category === 'khác' ? 'Khác' : row.category, errorCode: getDocumentErrorCode(row.errorMessage) || (row.status === RAG_DOCUMENT_STATUS.FAILED ? 'RAG_INGESTION_FAILED' : null),
 });
@@ -240,6 +243,10 @@ const downloadDocument = async (id) => {
         throw error;
     }
 };
+/**
+ * Require the internal retrieval service configuration and prevent redirects from forwarding its
+ * credential.
+ */
 const internal = () => {
     if (!config.rag.serviceUrl || !config.rag.internalApiKey) throw new ApiError(503, messages.RAG_DOCUMENT.UNAVAILABLE);
     return { timeout: config.rag.ingestionTimeoutMs, maxRedirects: 0, headers: { 'X-Internal-Key': config.rag.internalApiKey } };

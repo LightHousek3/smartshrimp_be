@@ -46,6 +46,9 @@ const guardWrite =
         return work(...args);
     };
 
+/**
+ * Translate legacy SQL column names to the API's camel-case fields.
+ */
 const camel = (row) =>
     Object.fromEntries(
         Object.entries(row).map(([key, value]) => [
@@ -53,6 +56,9 @@ const camel = (row) =>
             value,
         ]),
     );
+/**
+ * Keep legacy stock arithmetic exact and treat absent amounts as zero.
+ */
 const amount = (value) => new Prisma.Decimal(value ?? 0);
 const flags = {
     schemaVersion: 1,
@@ -72,6 +78,9 @@ const requireFarm = async (farmId, ownerId) => {
     return farm;
 };
 
+/**
+ * Map a legacy lot to the current DTO with exact quantity text and its historical supplier name.
+ */
 const balanceDto = (row) => {
     const b = camel(row);
     const quantity = amount(b.quantityExact ?? b.quantity);
@@ -87,6 +96,9 @@ const balanceDto = (row) => {
     };
 };
 
+/**
+ * Derive legacy stock, value and alert-unit totals from the returned lot balances.
+ */
 const productDto = (row, balances, includeLots = false) => {
     const p = camel(row);
     const stock = balances.reduce((sum, b) => sum.add(b.quantityExact), amount(0));
@@ -197,6 +209,9 @@ const getProduct = async (farmId, productId, ownerId) => {
     };
 };
 
+/**
+ * Expose a legacy supplier with a receipt count and flags appropriate to the available schema.
+ */
 const supplierDto = (row) => {
     const s = camel(row);
     return {
@@ -211,6 +226,9 @@ const supplierDto = (row) => {
     };
 };
 
+/**
+ * Read suppliers through their legacy farm ownership and count receipts within the owner's inventory.
+ */
 const supplierRows = (ownerId, supplierId) =>
     prisma.$queryRaw(Prisma.sql`
     SELECT to_jsonb(s) || jsonb_build_object('owner_id',f.owner_id,'receipt_count',

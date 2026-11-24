@@ -9,10 +9,13 @@ const list = asyncHandler(async (req, res) => {
 });
 
 /** Return the clinical record and its timeline in the authenticated owner scope. */
-const detail = asyncHandler(async (req, res) =>
+const detail = asyncHandler(async (req, res) => {
+    const data = await service.detail(req.account.id, req.params.caseId);
+    res.set('Cache-Control', 'private, no-store');
     ResponseHandler.success(res, {
-        data: await service.detail(req.account.id, req.params.caseId),
+        data,
         message: messages.DISEASE_CASE.FETCHED,
-    }));
+    });
+});
 
 module.exports = { list, detail };

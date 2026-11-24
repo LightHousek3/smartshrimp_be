@@ -1,6 +1,9 @@
 const Joi = require('joi');
 
 const uuid = Joi.string().uuid({ version: 'uuidv4' });
+/**
+ * Use consistent spacing for season names and other validated text.
+ */
 const normalizeWhitespace = (value) => value.trim().replace(/\s+/gu, ' ');
 const name = Joi.string().custom(normalizeWhitespace).min(1).max(255);
 
@@ -39,6 +42,9 @@ const seasonFields = {
     initialQuantity: Joi.number().integer().positive().max(Number.MAX_SAFE_INTEGER).strict().allow(null),
 };
 
+/**
+ * Reject an expected end date before stocking when both dates are supplied in the request.
+ */
 const validateDateRange = (value, helpers) => {
     const plannedDate = value.plannedStockingDate ?? value.stockingDate;
     if (plannedDate && value.expectedEndDate && value.expectedEndDate < plannedDate) {

@@ -24,6 +24,9 @@ const {
 } = require('../constants');
 
 const DAY_MS = 86400000;
+/**
+ * Provide the season identifiers and location labels used by technician dashboard cards.
+ */
 const context = (season) => ({
     seasonId: season.id,
     seasonName: season.name,
@@ -82,6 +85,9 @@ const effectiveProtocol = {
         { protocolType: PROTOCOL_TYPE.TREATMENT, diseaseCase: { status: 'IN_TREATMENT' } },
     ],
 };
+/**
+ * Limit planned operations to the dashboard seasons and their selected protocols.
+ */
 const plannedWhere = (ids, protocols) => ({
     seasonId: { in: ids },
     status: OPERATION_STATUS.PLANNED,

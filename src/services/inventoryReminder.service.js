@@ -63,6 +63,10 @@ const remindProduct = async (productId, now = new Date()) => {
     return result;
 };
 
+/**
+ * Sweep products on active farms in bounded batches and continue when an individual product check
+ * fails.
+ */
 const remind = async ({ now = new Date(), isRunning = () => true } = {}) => {
     let cursor,
         rows,

@@ -109,7 +109,13 @@ const ASSIGNMENT_SELECT = {
     },
 };
 
+/**
+ * Expose optional season calendar dates in the API's YYYY-MM-DD format.
+ */
 const toDateOnly = (value) => (value ? value.toISOString().slice(0, 10) : null);
+/**
+ * Store an input calendar date at UTC midnight to preserve the date across time zones.
+ */
 const parseDateOnly = (value) => (value == null ? null : new Date(`${value}T00:00:00.000Z`));
 
 // PostgreSQL keeps microseconds, but JavaScript dates and JSON only keep
@@ -123,17 +129,26 @@ const updatedAtApiWindow = (value) => {
     };
 };
 
+/**
+ * Count from the stocking date as day one using today's date in Vietnam.
+ */
 const dayOfCulture = (stockingDate) => {
     const days = cultureDay(stockingDate, new Date());
     return days > 0 ? days : null;
 };
 
+/**
+ * Use numeric pond areas and the farm status casing expected by the season response.
+ */
 const normalizePondSummary = ({ farm: { ownerId, ...farm }, ...pond }) => ({
     ...pond,
     areaM2: pond.areaM2 == null ? null : Number(pond.areaM2),
     farm: { ...farm, status: farm.status?.toLowerCase() ?? null },
 });
 
+/**
+ * Preserve stocking quantity precision and expose day of culture for active seasons.
+ */
 const normalizeSeasonBase = (season) => ({
     ...season,
     stockingDate: toDateOnly(season.stockingDate),
@@ -146,11 +161,17 @@ const normalizeSeasonBase = (season) => ({
     dayOfCulture: season.status === SEASON_STATUS.ACTIVE ? dayOfCulture(season.stockingDate) : null,
 });
 
+/**
+ * Return the season fields and pond context required by the owner's list.
+ */
 const normalizeSeasonSummary = ({ pond, ...season }) => ({
     ...normalizeSeasonBase(season),
     pond: normalizePondSummary(pond),
 });
 
+/**
+ * Select a current assignment only when the assignee's account is active.
+ */
 const getActiveAssignment = (assignments, role) =>
     assignments.find(
         (assignment) =>
@@ -159,9 +180,16 @@ const getActiveAssignment = (assignments, role) =>
             assignment.account.status === ACCOUNT_STATUS.ACTIVE,
     ) || null;
 
+/**
+ * Use the input's newest-first order to recover the most recent assignment for the role.
+ */
 const getLatestAssignment = (assignments, role) =>
     assignments.find((assignment) => assignment.role === role) || null;
 
+/**
+ * Provide the same eligibility check to the details view and activation transaction, including both
+ * staff roles and a single approved production protocol.
+ */
 const buildActivationEligibility = (season, ownerId) => {
     const missingConditions = [];
     const countEligible = (role) => season.personnelAssignments.filter(
@@ -192,6 +220,9 @@ const buildActivationEligibility = (season, ownerId) => {
     };
 };
 
+/**
+ * Assemble the season's location, current personnel, operational counts and activation eligibility.
+ */
 const normalizeSeasonDetail = ({
     personnelAssignments,
     protocols = [],
@@ -250,6 +281,9 @@ const normalizeSeasonDetail = ({
     };
 };
 
+/**
+ * Scope the list to the owner's farms before applying pond, status and search filters.
+ */
 const buildSeasonWhere = (ownerId, { farmId, pondId, status, search } = {}) => ({
     pond: {
         ...(pondId && { id: pondId }),
@@ -262,6 +296,9 @@ const buildSeasonWhere = (ownerId, { farmId, pondId, status, search } = {}) => (
     ...(search && { name: { contains: search, mode: 'insensitive' } }),
 });
 
+/**
+ * Use the caller's database client to load a season through its farm ownership.
+ */
 const findOwnedSeason = async (client, seasonId, ownerId, select = SEASON_DETAIL_SELECT) => {
     const season = await client.aquacultureSeason.findFirst({
         where: {
@@ -276,6 +313,9 @@ const findOwnedSeason = async (client, seasonId, ownerId, select = SEASON_DETAIL
     return season;
 };
 
+/**
+ * Detect installations where optional season dependencies have not been provisioned.
+ */
 const dependencyTableExists = async (client, tableName) => {
     const [result] = await client.$queryRawUnsafe(
         'SELECT to_regclass($1) IS NOT NULL AS "exists"',
@@ -284,6 +324,10 @@ const dependencyTableExists = async (client, tableName) => {
     return result?.exists === true;
 };
 
+/**
+ * Read versions eligible for activation and retain a second match so ambiguous activation can be
+ * rejected.
+ */
 const getApprovedProductionProtocols = async (client, seasonId) => {
     if (!(await dependencyTableExists(client, 'protocols'))) return [];
     return client.$queryRawUnsafe(
@@ -302,6 +346,9 @@ const getApprovedProductionProtocols = async (client, seasonId) => {
     );
 };
 
+/**
+ * Count production and treatment protocols and use zero totals when protocol storage is unavailable.
+ */
 const getProtocolCounts = async (client, seasonId) => {
     if (!client.protocol || typeof client.protocol.groupBy !== 'function') {
         return { production: 0, treatment: 0, total: 0 };
@@ -337,6 +384,9 @@ const getProtocolCounts = async (client, seasonId) => {
     }
 };
 
+/**
+ * Count resolved and unresolved cases and use zero totals when case storage is unavailable.
+ */
 const getDiseaseCaseCounts = async (client, seasonId) => {
     if (!client.diseaseCase || typeof client.diseaseCase.groupBy !== 'function') {
         return { active: 0, resolved: 0, total: 0 };
@@ -371,6 +421,9 @@ const getDiseaseCaseCounts = async (client, seasonId) => {
     }
 };
 
+/**
+ * Load the dependencies used by season detail and activation from the same database client.
+ */
 const findOwnedSeasonDetail = async (client, seasonId, ownerId) => {
     const season = await findOwnedSeason(client, seasonId, ownerId);
     const [protocols, protocolCounts, diseaseCaseCounts] = await Promise.all([
@@ -381,6 +434,9 @@ const findOwnedSeasonDetail = async (client, seasonId, ownerId) => {
     return { ...season, protocols, protocolCounts, diseaseCaseCounts };
 };
 
+/**
+ * Page the owner's filtered seasons and reject a cursor outside the visible result set.
+ */
 const getSeasons = async (ownerId, query = {}) => {
     const { cursor, limit = 20 } = query;
     const where = buildSeasonWhere(ownerId, query);
@@ -468,6 +524,9 @@ const getSeason = async (seasonId, ownerId) => {
     };
 };
 
+/**
+ * Derive stocking density from initial quantity and pond area and enforce the permitted range.
+ */
 const calculateInitialDensity = (initialQuantity, areaM2) => {
     if (initialQuantity == null || areaM2 == null) return null;
 
@@ -478,12 +537,18 @@ const calculateInitialDensity = (initialQuantity, areaM2) => {
     return density;
 };
 
+/**
+ * Require the planned end date to be on or after stocking when both dates are provided.
+ */
 const assertDateRange = (stockingDate, expectedEndDate) => {
     if (stockingDate && expectedEndDate && expectedEndDate < stockingDate) {
         throw new ApiError(httpStatus.BAD_REQUEST, messages.SEASON.INVALID_DATE_RANGE);
     }
 };
 
+/**
+ * Normalize calendar dates and derive density before creating the season.
+ */
 const buildCreateData = (seasonData, ownerId, areaM2) => {
     const plannedStockingDate = parseDateOnly(seasonData.plannedStockingDate ?? seasonData.stockingDate);
     const expectedEndDate = parseDateOnly(seasonData.expectedEndDate);
@@ -502,6 +567,9 @@ const buildCreateData = (seasonData, ownerId, areaM2) => {
     };
 };
 
+/**
+ * Require an available aquaculture pond under an active farm.
+ */
 const assertEligiblePond = (pond) => {
     if (pond.farm.status !== FARM_STATUS.ACTIVE) {
         throw new ApiError(httpStatus.CONFLICT, messages.SEASON.FARM_NOT_ACTIVE);
@@ -514,6 +582,9 @@ const assertEligiblePond = (pond) => {
     }
 };
 
+/**
+ * Translate duplicate open seasons, stale pond references and write conflicts into season API errors.
+ */
 const mapWriteError = (error) => {
     if (error instanceof ApiError) throw error;
     if (error.code === 'P2002') {
@@ -528,6 +599,10 @@ const mapWriteError = (error) => {
     throw error;
 };
 
+/**
+ * Create a planning season only after checking ownership, pond eligibility and the absence of an open
+ * season in the same transaction.
+ */
 const createSeason = async (seasonData, ownerId) => {
     try {
         const season = await prisma.$transaction(
@@ -575,9 +650,15 @@ const createSeason = async (seasonData, ownerId) => {
     }
 };
 
+/**
+ * Use the Vietnamese personnel role label in assignment notifications.
+ */
 const assignmentRoleLabel = (role) =>
     role === PERSONNEL_ROLE.TECHNICIAN ? 'Kỹ thuật viên' : 'Chuyên gia thủy sản';
 
+/**
+ * Require an active account with the requested role managed by the same owner.
+ */
 const requireEligiblePersonnel = async (client, accountId, role, ownerId) => {
     const account = await client.account.findFirst({
         where: {
@@ -594,6 +675,9 @@ const requireEligiblePersonnel = async (client, accountId, role, ownerId) => {
     return account;
 };
 
+/**
+ * Map concurrent assignment or reference changes to the operation-specific conflict response.
+ */
 const mapPersonnelAssignmentWriteError = (error, conflictMessage) => {
     if (error instanceof ApiError) throw error;
     if (error.code === 'P2002' || error.code === 'P2003' || error.code === 'P2034') {
@@ -602,6 +686,9 @@ const mapPersonnelAssignmentWriteError = (error, conflictMessage) => {
     throw error;
 };
 
+/**
+ * Check ownership and restrict staffing changes to assignable season states.
+ */
 const requireAssignableSeason = async (client, seasonId, ownerId) => {
     const season = await findOwnedSeason(client, seasonId, ownerId, {
         id: true,
@@ -614,6 +701,9 @@ const requireAssignableSeason = async (client, seasonId, ownerId) => {
     return season;
 };
 
+/**
+ * Reserve the role and account slots in one transaction after checking current assignments.
+ */
 const assignPersonnel = async (seasonId, { accountId, role }, ownerId) => {
     try {
         const result = await prisma.$transaction(
@@ -680,6 +770,10 @@ const assignPersonnel = async (seasonId, { accountId, role }, ownerId) => {
     }
 };
 
+/**
+ * Move open technician tasks or unresolved expert cases to the replacement within the assignment
+ * transaction.
+ */
 const transferReplacementWork = async (
     client,
     { seasonId, role, previousAccountId, replacementAccountId, replacedAt },
@@ -714,6 +808,10 @@ const transferReplacementWork = async (
     return { transferredTaskCount: 0, transferredDiseaseCaseCount };
 };
 
+/**
+ * Use the expected current assignment to prevent stale replacements and transfer ongoing work
+ * atomically.
+ */
 const replacePersonnel = async (
     seasonId,
     role,
@@ -866,6 +964,9 @@ const replacePersonnel = async (
     }
 };
 
+/**
+ * Validate the merged date range and recalculate density when the stocking quantity changes.
+ */
 const buildUpdateData = (seasonData, current) => {
     const data = {};
     for (const key of ['name', 'shrimpType']) {
@@ -899,6 +1000,9 @@ const buildUpdateData = (seasonData, current) => {
     return data;
 };
 
+/**
+ * Apply changes only while the season is still planning and matches the client's expected version.
+ */
 const updateSeason = async (seasonId, seasonData, ownerId) => {
     const { expectedUpdatedAt, ...editableData } = seasonData;
     try {
@@ -936,6 +1040,9 @@ const updateSeason = async (seasonId, seasonData, ownerId) => {
     }
 };
 
+/**
+ * Prepare one status notification per active current assignee for persistence with the season change.
+ */
 const buildStatusNotifications = (season, content) => {
     const accountIds = [
         ...new Set(
@@ -961,12 +1068,18 @@ const buildStatusNotifications = (season, content) => {
     };
 };
 
+/**
+ * Signal committed season status changes to the affected inboxes.
+ */
 const emitStatusNotifications = (accountIds, seasonId) => {
     accountIds.forEach((accountId) => {
         emitNotification(accountId, 'notification:new', { referenceId: seasonId });
     });
 };
 
+/**
+ * Cancel pending operations when a season closes and tolerate installations without schedule storage.
+ */
 const cancelPlannedOperationSchedules = async (client, seasonId, reason, ownerId, cancelledAt) => {
     if (!(await dependencyTableExists(client, 'operation_schedules'))) return 0;
     return client.$executeRawUnsafe(
@@ -986,6 +1099,9 @@ const cancelPlannedOperationSchedules = async (client, seasonId, reason, ownerId
     );
 };
 
+/**
+ * End every current assignment using the season cancellation timestamp.
+ */
 const unassignCurrentSeasonPersonnel = async (client, seasonId, ownerId, unassignedAt) =>
     client.seasonPersonnelAssignment.updateMany({
         where: {
@@ -998,6 +1114,10 @@ const unassignCurrentSeasonPersonnel = async (client, seasonId, ownerId, unassig
         },
     });
 
+/**
+ * Check activation prerequisites and the expected version in a transaction, then wake schedule
+ * generation after commit.
+ */
 const activateSeason = async (seasonId, { expectedUpdatedAt, actualStockingDate, activationDelayReason }, ownerId) => {
     try {
         const result = await prisma.$transaction(
@@ -1074,6 +1194,10 @@ const activateSeason = async (seasonId, { expectedUpdatedAt, actualStockingDate,
     }
 };
 
+/**
+ * Cancel the season, close protocols, end assignments and retire planned operations in one
+ * transaction.
+ */
 const cancelSeason = async (seasonId, { reason, expectedUpdatedAt }, ownerId) => {
     try {
         const result = await prisma.$transaction(

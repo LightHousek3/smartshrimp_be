@@ -67,6 +67,9 @@ let quotaDay = '';
 let dailyCalls = 0;
 let cooldownUntil = 0;
 
+/**
+ * Identify supported images from file signatures before sending them to OCR.
+ */
 const imageMimeType = (bytes) => {
     if (bytes.length >= 3 && bytes[0] === 255 && bytes[1] === 216 && bytes[2] === 255) return 'image/jpeg';
     if (bytes.length >= 8 && bytes.subarray(0, 8).equals(Buffer.from([137, 80, 78, 71, 13, 10, 26, 10]))) return 'image/png';
@@ -74,6 +77,9 @@ const imageMimeType = (bytes) => {
     throw ApiError.badRequest(messages.INVENTORY_LABEL.INVALID_IMAGE_TYPE);
 };
 
+/**
+ * Load inline bytes or an image from the configured Cloudinary account, then enforce file limits.
+ */
 const loadImage = async (image) => {
     let bytes;
     if (image.data) {
@@ -103,6 +109,9 @@ const loadImage = async (image) => {
     return { inlineData: { mimeType: imageMimeType(bytes), data: bytes.toString('base64') }, size: bytes.length };
 };
 
+/**
+ * Accept only complete model responses that match the label extraction schema.
+ */
 const parseResult = (body) => {
     const candidate = body?.candidates?.[0];
     if (candidate?.finishReason !== 'STOP') {
@@ -132,6 +141,10 @@ const parseResult = (body) => {
     return { ...result, substanceCheck: checkIngredients(result.ingredientsText) };
 };
 
+/**
+ * Enforce the combined image budget and track the process-local daily OCR quota on the Vietnam
+ * calendar.
+ */
 const requestGemini = async (images) => {
     const loaded = await Promise.all(images.map(loadImage));
     if (loaded.reduce((sum, image) => sum + image.size, 0) > limits.MAX_TOTAL_BYTES) {
@@ -183,6 +196,9 @@ const requestGemini = async (images) => {
     }
 };
 
+/**
+ * Check farm ownership and reuse identical in-flight or recent scans within the owner's farm.
+ */
 const scanLabel = async (farmId, ownerId, images) => {
     const farm = await prisma.farm.findFirst({ where: { id: farmId, ownerId }, select: { id: true } });
     if (!farm) throw ApiError.notFound(messages.INVENTORY.FARM_NOT_FOUND);

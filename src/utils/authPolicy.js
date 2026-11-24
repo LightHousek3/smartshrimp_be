@@ -5,6 +5,9 @@ const VERIFICATION_ROLES = Object.freeze([
     ACCOUNT_ROLE.FARM_OWNER, ACCOUNT_ROLE.TECHNICIAN, ACCOUNT_ROLE.EXPERT,
 ]);
 
+/**
+ * Pair the localized auth error with a machine-readable code for clients.
+ */
 const createAuthError = (key, statusCode = 400) => Object.assign(
     new ApiError(statusCode, messages.AUTH[key]), { errorCode: `AUTH_${key}` },
 );

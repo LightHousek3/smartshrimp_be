@@ -8,6 +8,9 @@ const {
     PRODUCTION_PROTOCOL_LIMITS,
 } = require('../constants');
 
+/**
+ * Create a fresh Joi schema for identifiers used in production protocol requests.
+ */
 const uuid = () => Joi.string().uuid();
 const { productCompliance, manufacturer } = require('./materialCompliance.validator');
 const proposal = Joi.object({

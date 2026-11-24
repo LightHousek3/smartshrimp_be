@@ -3,6 +3,9 @@ const { occursOn } = require('./protocolStructure');
 const { quantityComparison, timingComparison, TIMING } = require('./protocolExecution');
 
 const DAY_MS = 86400000;
+/**
+ * Map a one-based protocol day to a calendar date relative to the timeline anchor.
+ */
 const calendarAt = (anchor, day) =>
     new Date(Date.parse(anchor) + (day - 1) * DAY_MS).toISOString().slice(0, 10);
 /** Count stocking as day one using Vietnam calendar dates rather than elapsed 24-hour periods. */

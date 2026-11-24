@@ -5,7 +5,14 @@ const splitIngredientText = (text) => {
     const brackets = [];
     let quote = null;
     const closing = { '(': ')', '[': ']', '{': '}' };
+    /**
+     * Recognize standard and full-width digits when reading adjacent numeric locants.
+     */
     const digit = (index) => /[0-9０-９]/u.test(text[index] || '');
+    /**
+     * Keep a comma inside adjacent chemical locants so their name stays intact during ingredient
+     * matching.
+     */
     const chemicalComma = (index) => {
         let left = index - 1;
         let right = index + 1;

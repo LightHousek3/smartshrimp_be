@@ -11,16 +11,34 @@ const { VERIFICATION_ROLES, createAuthError, accountStateError } = require('../u
 const authTransaction = require('../utils/authTransaction');
 
 const MAX_FAILED_ATTEMPTS = 5;
+/**
+ * Identify the current unconsumed challenge for one account and verification purpose.
+ */
 const activeChallengeWhere = (accountId, purpose) => ({
     accountId,
     purpose,
     consumedAt: null,
     supersededAt: null,
 });
+/**
+ * Derive a keyed digest for a verification credential before storage.
+ */
 const hash = (value, pepper) => crypto.createHmac('sha256', pepper).update(value).digest('hex');
+/**
+ * Use the OTP-specific pepper to protect the short verification code at rest.
+ */
 const hashOtp = (code) => hash(code, config.email.otpPepper);
+/**
+ * Use a separate pepper for the token that completes verification.
+ */
 const hashActionToken = (token) => hash(token, config.email.actionTokenPepper);
+/**
+ * Calculate a credential deadline from the transaction's chosen timestamp.
+ */
 const addMinutes = (date, minutes) => new Date(date.getTime() + minutes * 60000);
+/**
+ * Compare stored and submitted digests in constant time when their lengths match.
+ */
 const matchesHash = (left, right) => {
     const a = Buffer.from(left, 'hex');
     const b = Buffer.from(right, 'hex');
@@ -73,6 +91,10 @@ const requestOtp = async (email, purpose) => {
     }
 };
 
+/**
+ * Commit failed attempts and issue an action token only when the current OTP still passes purpose and
+ * state checks.
+ */
 const verifyOtp = async (email, code, purpose) => {
     const outcome = await authTransaction(async (transaction) => {
         const account = await transaction.account.findUnique({ where: { email } });
@@ -140,6 +162,10 @@ const verifyOtp = async (email, code, purpose) => {
     return outcome.actionToken;
 };
 
+/**
+ * Resolve a verified, unused challenge only when the action token still matches its purpose and
+ * expiry.
+ */
 const findActionChallenge = async (database, actionToken, purpose) => {
     const challenge = await database.emailVerificationChallenge.findUnique({
         where: { actionTokenHash: hashActionToken(actionToken) },
@@ -160,6 +186,10 @@ const findActionChallenge = async (database, actionToken, purpose) => {
     return challenge;
 };
 
+/**
+ * Consume the action token and update the account atomically, including session revocation on password
+ * reset.
+ */
 const completeVerification = async (purpose, { actionToken, password, fullName, phone }) => {
     // Reject invalid tokens before spending bcrypt work; recheck after hashing in the transaction.
     await findActionChallenge(prisma, actionToken, purpose);

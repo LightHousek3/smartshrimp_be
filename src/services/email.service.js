@@ -55,6 +55,9 @@ const getTransporter = () => {
     return transporter;
 };
 
+/**
+ * Escape interpolated values before inserting them into HTML email markup.
+ */
 const escapeHtml = (value) =>
     String(value)
         .replace(/&/g, '&amp;')
@@ -63,6 +66,9 @@ const escapeHtml = (value) =>
         .replace(/"/g, '&quot;')
         .replace(/'/g, '&#39;');
 
+/**
+ * Choose purpose-specific OTP copy and fall back to a general verification message.
+ */
 const getEmailContent = (purpose) =>
     EMAIL_CONTENT_BY_PURPOSE[purpose] || {
         subject: `Mã xác minh ${BRAND_NAME}`,
@@ -74,6 +80,9 @@ const getEmailContent = (purpose) =>
         actionName: 'xác minh email',
     };
 
+/**
+ * Provide a plain-text equivalent with the relevant activation instructions or OTP expiry.
+ */
 const buildTextEmail = ({ code, content, expiresMinutes, instructions = '' }) =>
     [
         content.greeting,
@@ -92,6 +101,9 @@ const buildTextEmail = ({ code, content, expiresMinutes, instructions = '' }) =>
         .filter(Boolean)
         .join('\n\n');
 
+/**
+ * Render a branded email with escaped copy and optional OTP or invitation instructions.
+ */
 const buildHtmlEmail = ({ code, content, expiresMinutes, instructions = '' }) => {
     const safeCode = code ? escapeHtml(code) : '';
 
@@ -157,6 +169,9 @@ const buildHtmlEmail = ({ code, content, expiresMinutes, instructions = '' }) =>
 </html>`;
 };
 
+/**
+ * Build both mail formats using the same verification lifetime.
+ */
 const buildEmail = ({ code, content, instructions }) => {
     const expiresMinutes = config.email.verificationExpiresMinutes;
     return {
@@ -166,9 +181,15 @@ const buildEmail = ({ code, content, instructions }) => {
     };
 };
 
+/**
+ * Select the OTP template for the verification purpose so the email identifies the requested action.
+ */
 const buildOtpEmail = ({ code, purpose }) =>
     buildEmail({ code, content: getEmailContent(purpose) });
 
+/**
+ * Offer mobile links to owner and technician accounts and a web activation link to every role.
+ */
 const buildInvitationInstructions = ({ email, role }) => {
     const path = '/activate-account?email=' + encodeURIComponent(email);
     const web = config.app.webBaseUrl + path;
@@ -207,14 +228,23 @@ const sendEmail = async (email, content) => {
     }
 };
 
+/**
+ * Deliver the OTP for the requested verification purpose to the account email.
+ */
 const sendOtp = ({ email, code, purpose }) => sendEmail(email, buildOtpEmail({ code, purpose }));
 
+/**
+ * Build the invitation with activation links that lead the recipient to request their own OTP.
+ */
 const buildActivationInviteEmail = ({ email, role }) =>
     buildEmail({
         content: ACTIVATION_INVITE_CONTENT,
         instructions: buildInvitationInstructions({ email, role }),
     });
 
+/**
+ * Deliver the account activation invitation using the links available to the recipient's role.
+ */
 const sendAccountActivationEmail = ({ email, role }) =>
     sendEmail(email, buildActivationInviteEmail({ email, role }));
 

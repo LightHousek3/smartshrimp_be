@@ -4,13 +4,23 @@ const { selectBiomass } = require('./biomassSource');
 
 const DAY_MS = 86400000;
 const VIETNAM_OFFSET_MS = 7 * 60 * 60 * 1000;
+/**
+ * Resolve the Vietnam calendar date used to anchor the rolling schedule window.
+ */
 const dateInVietnam = (at) => new Date(at.getTime() + VIETNAM_OFFSET_MS).toISOString().slice(0, 10);
+/**
+ * Reject missing or nonpositive calculation inputs before dose multiplication.
+ */
 const positive = (value) => value != null && new Prisma.Decimal(value).gt(0);
 
 /** Compare freshness at the occurrence, not just when the worker happens to run. */
 const biomassAt = (logs, scheduledAt, now, maxAgeHours, latestHarvestAt = null) =>
     selectBiomass(logs, scheduledAt, now, maxAgeHours, latestHarvestAt) ?? undefined;
 
+/**
+ * Derive the scheduled dose from its declared basis and preserve the calculation inputs or a blocker
+ * code.
+ */
 const calculate = (
     item,
     doc,
@@ -88,6 +98,9 @@ const occurrences = (protocol, now) => {
 
 /** Log diagnostic identifiers only; Prisma messages/meta may contain SQL values or credentials. */
 const errorDetail = (error) => {
+    /**
+     * Allow only bounded identifier text in calculation error diagnostics.
+     */
     const identifier = (value) =>
         typeof value === 'string' && /^[A-Za-z0-9_.-]{1,80}$/.test(value) ? value : 'unknown';
     const target = [error?.meta?.target].flat().map(identifier).join(',');

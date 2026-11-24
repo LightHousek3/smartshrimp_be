@@ -2,6 +2,9 @@ const { adminAccountService } = require('../services');
 const { asyncHandler, ResponseHandler } = require('../utils');
 const { messages } = require('../constants');
 
+/**
+ * GET /admin/accounts
+ */
 const getListAccount = asyncHandler(async (req, res) => {
     const { accounts, meta } = await adminAccountService.getListAccount(req.query);
 
@@ -12,6 +15,9 @@ const getListAccount = asyncHandler(async (req, res) => {
     });
 });
 
+/**
+ * GET /admin/accounts/:accountId
+ */
 const getAccount = asyncHandler(async (req, res) => {
     const account = await adminAccountService.getAccountById(req.params.accountId);
 
@@ -21,6 +27,9 @@ const getAccount = asyncHandler(async (req, res) => {
     });
 });
 
+/**
+ * POST /admin/accounts
+ */
 const createAccount = asyncHandler(async (req, res) => {
     const account = await adminAccountService.createAccount(req.body, req.account.id);
 
@@ -30,6 +39,9 @@ const createAccount = asyncHandler(async (req, res) => {
     });
 });
 
+/**
+ * POST /admin/accounts/:accountId/resend-activation
+ */
 const resendActivation = asyncHandler(async (req, res) => {
     const result = await adminAccountService.resendActivation(req.params.accountId);
 
@@ -39,6 +51,9 @@ const resendActivation = asyncHandler(async (req, res) => {
     });
 });
 
+/**
+ * PATCH /admin/accounts/:accountId
+ */
 const updatePendingAccount = asyncHandler(async (req, res) => {
     const account = await adminAccountService.updatePendingAccount(
         req.params.accountId,
@@ -51,6 +66,9 @@ const updatePendingAccount = asyncHandler(async (req, res) => {
     });
 });
 
+/**
+ * PATCH /admin/accounts/:accountId/status
+ */
 const updateAccountStatus = asyncHandler(async (req, res) => {
     const account = await adminAccountService.updateAccountStatus(
         req.params.accountId,

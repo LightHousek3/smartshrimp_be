@@ -2,6 +2,9 @@ const { shrimpHealthService } = require('../services');
 const { asyncHandler, ResponseHandler } = require('../utils');
 const { messages } = require('../constants');
 
+/**
+ * Normalize the optional client retry key to the length accepted by the health log service.
+ */
 const getIdempotencyKey = (req) => {
     const value = req.headers['idempotency-key'];
     return typeof value === 'string' ? value.trim().slice(0, 128) : '';

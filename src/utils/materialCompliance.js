@@ -7,7 +7,14 @@ const {
 const { checkIngredients } = require('./inventorySubstances');
 const { complianceConsistencyIssue, hasLabelImages } = require('./inventoryProductReadiness');
 
+/**
+ * Read the compliance profile from either the Prisma relation or a normalized product shape.
+ */
 const complianceOf = (product) => product.productCompliance ?? product.compliance;
+/**
+ * Screen declared ingredients and product text together so matches in any of those fields are
+ * considered.
+ */
 const checkProductIngredients = (product) => checkIngredients(
     [product.name, product.description, complianceOf(product)?.ingredientsText]
         .filter(Boolean).join('\n'),

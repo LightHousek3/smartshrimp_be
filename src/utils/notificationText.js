@@ -6,11 +6,20 @@ const TASK_REFERENCE_FIELDS = Object.freeze({
     assignedTo: 'assignee',
 });
 const uuid = '[0-9a-fA-F]{8}(?:-[0-9a-fA-F]{4}){3}-[0-9a-fA-F]{12}';
+/**
+ * Locate UUID changes in the stored task update message format for label hydration.
+ */
 const referenceChangePattern = () => new RegExp(
     `(^Nhiệm vụ đã cập nhật: |; )(Trang trại|Vụ nuôi|Kỹ thuật viên): (${uuid}|—) → (${uuid}|—)(?=;|$)`, 'g',
 );
+/**
+ * Map each localized task field caption back to its resource type.
+ */
 const keyForLabel = (label) => Object.keys(TASK_REFERENCE_FIELDS)
     .find((key) => messages.TASK.FIELD_LABELS[key] === label);
+/**
+ * Restrict reference substitution to task update messages that use the expected format.
+ */
 const taskUpdate = (row) => row?.type === 'TASK_UPDATED' && row.referenceType === 'task'
     && typeof row.content === 'string' && row.content.startsWith('Nhiệm vụ đã cập nhật: ');
 const dateFormatter = new Intl.DateTimeFormat('vi-VN', {

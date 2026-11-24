@@ -1,8 +1,9 @@
 const prisma = require('../config/prisma');
 const caseCare = require('./caseCare.service');
 const lifecycle = require('./protocolLifecycle.service');
+const { readCaseAssessment } = require('./aiDiagnosis.service');
 const {
-    AI_LABEL_NAMES, AI_MIN_RECOGNITION_CONFIDENCE, AI_RUN_STATUS,
+    AI_LABEL_NAMES, AI_MIN_RECOGNITION_CONFIDENCE, AI_RECOGNITION_STATUS, AI_RUN_STATUS,
     DISEASE_CASE_STATUS, HEALTH_STATUS, PROTOCOL_STATUS, PROTOCOL_TYPE,
     checkWaterThresholds, messages,
 } = require('../constants');
@@ -10,6 +11,7 @@ const { ApiError } = require('../utils');
 const { lifecycleReason } = require('../utils/protocolPresentation');
 
 const { RESOLVED } = DISEASE_CASE_STATUS;
+const UUID_PATTERN = /^[0-9a-f]{8}(?:-[0-9a-f]{4}){3}-[0-9a-f]{12}$/i;
 const NAME_SELECT = { select: { fullName: true } };
 const CARD_SELECT = {
     id: true,
@@ -21,25 +23,52 @@ const CARD_SELECT = {
     aiDiagnosisId: true,
     expert: NAME_SELECT,
 };
+const WATER_LEGACY_FIELDS = {
+    temperatureC: ['temperature_c'],
+    ph: [],
+    dissolvedOxygenMgL: ['dissolved_oxygen_mg_l', 'doMgL', 'do_mg_l'],
+    salinityPpt: ['salinity_ppt'],
+    nh3MgL: ['nh3_mg_l'],
+    no2MgL: ['no2_mg_l'],
+    alkalinityMgLCaCO3: ['alkalinity_mg_l_caco3', 'alkalinity_mg_l_ca_co3'],
+    h2sMgL: ['h2s_mg_l'],
+};
 
+/**
+ * Treat blank or malformed text in a stored snapshot as missing.
+ */
 const textValue = (value) => typeof value === 'string' ? value.trim() || null : null;
+/**
+ * Accept nonnegative finite measurements from historical snapshots, including numeric strings.
+ */
 const numberValue = (value) => {
     if (typeof value !== 'number' && !textValue(value)) return null;
     const number = Number(value);
     return Number.isFinite(number) && number >= 0 ? number : null;
 };
+/**
+ * Parse a historical snapshot timestamp only when the stored text is a valid date.
+ */
 const dateValue = (value) => {
     const date = textValue(value);
     return date && Number.isFinite(Date.parse(date)) ? new Date(date) : null;
 };
 
+/** Older case snapshots stored confidence as either a probability or a percentage. */
+const probabilityValue = (value) => {
+    const confidence = numberValue(value);
+    const probability = confidence > 1 ? confidence / 100 : confidence;
+    return probability !== null && probability <= 1 ? probability : null;
+};
+
 /** The case may already carry the human-readable AI assessment from when it was opened. */
 const snapshotLabel = (snapshot) => {
     const diagnosis = snapshot?.aiDiagnosis;
+    if (diagnosis?.recognitionStatus === AI_RECOGNITION_STATUS.UNRECOGNIZED) return null;
     const label = textValue(diagnosis?.disease) ?? textValue(diagnosis?.label) ?? textValue(diagnosis?.predictedLabel);
-    const confidence = numberValue(diagnosis?.confidence);
-    const probability = confidence > 1 ? confidence / 100 : confidence;
-    if (probability !== null && (probability < AI_MIN_RECOGNITION_CONFIDENCE || probability > 1)) return null;
+    const confidence = probabilityValue(diagnosis?.confidence);
+    if (confidence !== null && confidence < AI_MIN_RECOGNITION_CONFIDENCE) return null;
+    if (numberValue(diagnosis?.confidence) > 100) return null;
     return label && (Object.hasOwn(AI_LABEL_NAMES, label) ? AI_LABEL_NAMES[label] : label);
 };
 
@@ -64,42 +93,112 @@ const aiLabels = async (client, seasonId, rows) => {
 };
 
 /** Keep the case card identical in list and detail without exposing raw snapshots or accounts. */
-const card = (row, labels, responseCount) => ({
+const card = (row, responseCount, aiDiagnosis) => ({
     id: row.id,
     title: row.title,
     description: row.description,
     status: row.status,
     severity: row.severity,
     expertName: row.expert.fullName,
-    aiDiagnosis: snapshotLabel(row.caseSnapshot) ?? labels.get(row.aiDiagnosisId) ?? null,
+    aiDiagnosis,
     responseCount,
 });
 
+/** Prefer the recorded recognition result and fill missing detail from the linked inference. */
+const caseAssessment = (snapshot, linked) => {
+    const stored = snapshot?.aiDiagnosis;
+    const confidence = probabilityValue(stored?.confidence) ?? linked?.confidence ?? null;
+    const label = snapshotLabel(snapshot) ?? linked?.predictedLabel ?? null;
+    const unrecognized = stored?.recognitionStatus === AI_RECOGNITION_STATUS.UNRECOGNIZED ||
+        (confidence !== null && confidence < AI_MIN_RECOGNITION_CONFIDENCE);
+    const predictedLabel = unrecognized ? null : label;
+    const recognitionStatus = unrecognized ? AI_RECOGNITION_STATUS.UNRECOGNIZED
+        : predictedLabel ? AI_RECOGNITION_STATUS.RECOGNIZED
+            : linked?.recognitionStatus ?? null;
+    const createdAt = dateValue(stored?.createdAt ?? stored?.created_at) ?? linked?.createdAt ?? null;
+    if (!recognitionStatus && confidence === null && !createdAt && !linked) return null;
+
+    return {
+        predictedLabel,
+        recognitionStatus,
+        confidence,
+        recommendation: predictedLabel ? textValue(linked?.recommendation ?? stored?.recommendation) : null,
+        createdAt,
+        processingTimeMs: linked?.processingTimeMs ?? null,
+        imageUrls: linked?.imageUrls ?? [],
+        imageUrlsExpireAt: linked?.imageUrlsExpireAt ?? null,
+    };
+};
+
+/** Read only the exact historical source when a snapshot predates water log metadata. */
+const openingWaterSource = async (client, row) => {
+    const snapshot = row.caseSnapshot;
+    const water = snapshot?.waterIndicators;
+    const id = textValue(snapshot?.waterLogId ?? snapshot?.water_log_id);
+    if (!id || !UUID_PATTERN.test(id) || (water && Object.hasOwn(water, 'recordedByName') &&
+        Object.hasOwn(water, 'note'))) return null;
+    const source = await client.waterQualityLog.findFirst({
+        where: {
+            id, seasonId: row.season.id, recordedAt: { lte: row.createdAt },
+            createdAt: { lte: row.createdAt },
+        },
+        select: {
+            recordedBy: true, recordedAt: true, note: true,
+            ...Object.fromEntries(Object.keys(WATER_LEGACY_FIELDS).map((field) => [field, true])),
+        },
+    });
+    if (!source) return null;
+    const recorder = await client.account.findUnique({
+        where: { id: source.recordedBy },
+        select: { fullName: true },
+    });
+    return { ...source, recordedByName: recorder?.fullName };
+};
+
 /** Older case snapshots use waterIndicators, snake_case measurements and a seven-day loss count. */
-const openingSnapshot = (snapshot, shrimpType) => {
+const openingSnapshot = (snapshot, shrimpType, source) => {
     const health = snapshot?.shrimpHealth ?? snapshot?.health ?? snapshot;
     const water = snapshot?.waterIndicators ?? snapshot?.waterQuality ?? snapshot?.water ?? snapshot;
+    const waterMetrics = Object.fromEntries(Object.entries(WATER_LEGACY_FIELDS).map(([field, aliases]) => {
+        const keys = [field, ...aliases];
+        const value = keys.map((key) => numberValue(water?.[key] ?? snapshot?.[key]))
+            .find((value) => value !== null);
+        return [field, value ?? (source?.[field] == null ? null : Number(source[field]))];
+    }));
     const metrics = {
         avgWeightG: numberValue(health?.avgWeightG ?? health?.avg_weight_g),
         mortalityCount: numberValue(health?.mortalityCount ?? health?.mortality_count ??
             health?.mortality7d ?? health?.mortality_7d),
-        ph: numberValue(water?.ph),
-        no2MgL: numberValue(water?.no2MgL ?? water?.no2_mg_l),
-        nh3MgL: numberValue(water?.nh3MgL ?? water?.nh3_mg_l),
+        ...waterMetrics,
     };
     const healthStatus = textValue(health?.healthStatus ?? health?.health_status)?.toUpperCase();
     const status = Object.values(HEALTH_STATUS).includes(healthStatus) ? healthStatus : null;
     const capturedAt = dateValue(snapshot?.capturedAt ?? snapshot?.captured_at ??
         health?.recordedAt ?? health?.recorded_at ?? water?.recordedAt ?? water?.recorded_at);
+    // Use source-specific timestamps so the case capture time cannot stand in for a reading.
+    const healthRecordedAt = dateValue(snapshot?.healthRecordedAt ?? snapshot?.health_recorded_at) ??
+        (health === snapshot ? null : dateValue(health?.recordedAt ?? health?.recorded_at));
+    const waterRecordedAt = dateValue(snapshot?.waterRecordedAt ?? snapshot?.water_recorded_at) ??
+        (water === snapshot ? null : dateValue(water?.recordedAt ?? water?.recorded_at)) ??
+        source?.recordedAt ?? null;
+    const waterRecordedByName = textValue(water?.recordedByName ?? water?.recorded_by_name ??
+        snapshot?.waterRecordedByName) ?? source?.recordedByName ?? null;
+    const waterNote = textValue(water === snapshot ? snapshot?.waterNote : water?.note) ??
+        textValue(source?.note);
     const signs = snapshot?.observedSigns ?? snapshot?.symptoms;
     const note = textValue(snapshot?.note) ?? textValue(health?.note) ??
         (Array.isArray(signs) ? signs.map(textValue).filter(Boolean).join(', ') || null : textValue(signs));
-    if (!capturedAt && !status && !note && Object.values(metrics).every((value) => value === null)) {
+    if (!capturedAt && !status && !note && !healthRecordedAt &&
+        !waterRecordedAt && !waterRecordedByName && !waterNote &&
+        Object.values(metrics).every((value) => value === null)) {
         return null;
     }
 
-    const exceeded = checkWaterThresholds(shrimpType, metrics).map(({ field }) => field);
-    return { capturedAt, healthStatus: status, note, ...metrics, exceededWaterMetrics: exceeded };
+    const exceededWaterMetrics = checkWaterThresholds(shrimpType, waterMetrics).map(({ field }) => field);
+    return {
+        capturedAt, healthStatus: status, note, ...metrics, exceededWaterMetrics,
+        healthRecordedAt, waterRecordedAt, waterRecordedByName, waterNote,
+    };
 };
 
 /** Read the list and both counts from the same database snapshot during status transitions. */
@@ -127,7 +226,11 @@ const list = (ownerId, { seasonId, resolved, page, limit }) => prisma.$transacti
     const totalPages = Math.ceil(totalResults / limit);
 
     return {
-        data: rows.map((row) => card(row, labels, row._count.responses)),
+        data: rows.map((row) => card(
+            row,
+            row._count.responses,
+            snapshotLabel(row.caseSnapshot) ?? labels.get(row.aiDiagnosisId) ?? null,
+        )),
         meta: {
             page, limit, totalResults, totalPages, hasNextPage: page < totalPages,
             activeCount, resolvedCount, seasonName: season.name, pondName: season.pond.name,
@@ -151,6 +254,7 @@ const detail = (ownerId, caseId) => prisma.$transaction(async (client) => {
         where: { id: caseId, season: { pond: { farm: { ownerId } } } },
         select: {
             ...CARD_SELECT,
+            reportedBy: true,
             createdAt: true,
             updatedAt: true,
             resolutionSummary: true,
@@ -191,9 +295,14 @@ const detail = (ownerId, caseId) => prisma.$transaction(async (client) => {
     if (!row) throw ApiError.notFound(messages.DISEASE_CASE.NOT_FOUND);
 
     const { season } = row;
-    const labels = await aiLabels(client, season.id, [row]);
+    const [linkedAssessment, waterSource] = await Promise.all([
+        readCaseAssessment(client, { ...row, seasonId: season.id }),
+        openingWaterSource(client, row),
+    ]);
+    const aiAssessment = caseAssessment(row.caseSnapshot, linkedAssessment);
     return {
-        card: card(row, labels, row.responses.length),
+        card: card(row, row.responses.length, aiAssessment?.predictedLabel ?? null),
+        aiAssessment,
         seasonName: season.name,
         pondName: season.pond.name,
         farmName: season.pond.farm.name,
@@ -201,7 +310,7 @@ const detail = (ownerId, caseId) => prisma.$transaction(async (client) => {
         updatedAt: row.updatedAt,
         resolutionSummary: lifecycleReason(row.resolutionSummary),
         reporterName: row.reporter.fullName,
-        snapshot: openingSnapshot(row.caseSnapshot, season.shrimpType),
+        snapshot: openingSnapshot(row.caseSnapshot, season.shrimpType, waterSource),
         attachments: row.attachments.map(({ uploader, ...attachment }) => ({
             ...attachment, uploaderName: uploader.fullName,
         })),

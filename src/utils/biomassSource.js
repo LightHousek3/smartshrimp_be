@@ -10,6 +10,9 @@ const populationMatches = (source) =>
             source.latestPopulation != null &&
             String(source.estimatedPopulation) === String(source.latestPopulation)));
 
+/**
+ * Prefer the latest observation, then break ties by creation time and ID for deterministic selection.
+ */
 const newestFirst = (a, b) =>
     new Date(b.recordedAt) - new Date(a.recordedAt) ||
     new Date(b.createdAt ?? 0) - new Date(a.createdAt ?? 0) ||

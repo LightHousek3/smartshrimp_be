@@ -9,19 +9,19 @@ const KPI_CONFIG_BY_ROLE = Object.freeze({
     [ACCOUNT_ROLE.TECHNICIAN]: {
         delegate: 'technicianKpi',
         idField: 'technicianId',
+
         normalize: (kpi) => ({
             seasonsParticipated: Number(kpi?.seasonsParticipated ?? 0),
             completedTasks: Number(kpi?.completedTasks ?? 0),
             onTimeCompletedTasks: Number(kpi?.onTimeCompletedTasks ?? 0),
             onTimeCompletionRatePct:
-                kpi?.onTimeCompletionRatePct == null
-                    ? null
-                    : Number(kpi.onTimeCompletionRatePct),
+                kpi?.onTimeCompletionRatePct == null ? null : Number(kpi.onTimeCompletionRatePct),
         }),
     },
     [ACCOUNT_ROLE.EXPERT]: {
         delegate: 'expertKpi',
         idField: 'expertId',
+
         normalize: (kpi) => ({
             seasonsParticipated: Number(kpi?.seasonsParticipated ?? 0),
             diseaseCasesHandled: Number(kpi?.diseaseCasesHandled ?? 0),
@@ -46,6 +46,10 @@ const PERSONNEL_SELECT = {
     updatedAt: true,
 };
 
+/**
+ * Limit personnel results to staff managed by the owner and apply the same filters to the page and
+ * count.
+ */
 const buildWhere = (ownerId, { role, status, search }) => ({
     managedByOwnerId: ownerId,
     role: role || { in: STAFF_ROLES },
@@ -59,6 +63,9 @@ const buildWhere = (ownerId, { role, status, search }) => ({
     }),
 });
 
+/**
+ * Use deterministic ties for cursor pagination and place unnamed staff last in identity order.
+ */
 const buildOrderBy = (sortBy, sortOrder) => {
     const direction = sortOrder === 'desc' ? 'desc' : 'asc';
     if (sortBy === 'createdAt') return [{ createdAt: direction }, { id: direction }];
@@ -69,6 +76,9 @@ const buildOrderBy = (sortBy, sortOrder) => {
     ];
 };
 
+/**
+ * Summarize current assignments for a page of staff without querying each account separately.
+ */
 const attachAssignmentCounts = async (accounts) => {
     if (accounts.length === 0) return [];
 
@@ -106,6 +116,9 @@ const attachAssignmentCounts = async (accounts) => {
     }));
 };
 
+/**
+ * Flatten the nested location into the fields the assignment history displays.
+ */
 const assignmentSummary = ({ season, ...assignment }) => ({
     ...assignment,
     seasonId: season.id,
@@ -116,6 +129,9 @@ const assignmentSummary = ({ season, ...assignment }) => ({
     pondName: season.pond.name,
 });
 
+/**
+ * Combine the owner's visible assignments with role-specific performance metrics.
+ */
 const getPersonnelDetails = async (account, ownerId) => {
     const kpiConfig = KPI_CONFIG_BY_ROLE[account.role];
     const [assignments, kpi] = await Promise.all([
@@ -157,32 +173,29 @@ const getPersonnelDetails = async (account, ownerId) => {
 
     const currentAssignments = assignments.filter(
         (assignment) =>
-            assignment.unassignedAt == null
-            && OPEN_SEASON_STATUSES.includes(assignment.season.status),
+            assignment.unassignedAt == null &&
+            OPEN_SEASON_STATUSES.includes(assignment.season.status),
     );
-    const assignmentHistory = assignments.filter(
-        (assignment) => assignment.unassignedAt != null,
-    );
+    const assignmentHistory = assignments.filter((assignment) => assignment.unassignedAt != null);
 
     return {
         ...account,
-        currentSeasonAssignments:
-            new Set(currentAssignments.map((assignment) => assignment.season.id)).size,
+        currentSeasonAssignments: new Set(
+            currentAssignments.map((assignment) => assignment.season.id),
+        ).size,
         kpi: kpiConfig.normalize(kpi),
         currentAssignments: currentAssignments.map(assignmentSummary),
         assignmentHistory: assignmentHistory.map(assignmentSummary),
     };
 };
 
-const getListPersonnel = async (ownerId, {
-    cursor,
-    limit = 20,
-    role,
-    status,
-    search,
-    sortBy = 'identity',
-    sortOrder = 'asc',
-} = {}) => {
+/**
+ * Require a cursor from the filtered staff set before reading the page.
+ */
+const getListPersonnel = async (
+    ownerId,
+    { cursor, limit = 20, role, status, search, sortBy = 'identity', sortOrder = 'asc' } = {},
+) => {
     const where = buildWhere(ownerId, { role, status, search });
     if (cursor) {
         const cursorAccount = await prisma.account.findFirst({
@@ -218,6 +231,9 @@ const getListPersonnel = async (ownerId, {
     };
 };
 
+/**
+ * Scope personnel detail to a technician or expert managed by the requesting owner.
+ */
 const getPersonnelById = async (ownerId, personnelId) => {
     const account = await prisma.account.findFirst({
         where: {

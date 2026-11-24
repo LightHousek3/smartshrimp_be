@@ -2,6 +2,9 @@ const { seasonService } = require('../services');
 const { asyncHandler, ResponseHandler } = require('../utils');
 const { messages } = require('../constants');
 
+/**
+ * GET /owner/seasons
+ */
 const getSeasons = asyncHandler(async (req, res) => {
     const { seasons, meta } = await seasonService.getSeasons(req.account.id, req.query);
     ResponseHandler.paginated(res, {
@@ -11,16 +14,25 @@ const getSeasons = asyncHandler(async (req, res) => {
     });
 });
 
+/**
+ * GET /owner/seasons/:seasonId
+ */
 const getSeason = asyncHandler(async (req, res) => {
     const season = await seasonService.getSeason(req.params.seasonId, req.account.id);
     ResponseHandler.success(res, { message: messages.SEASON.FETCHED, data: season });
 });
 
+/**
+ * POST /owner/seasons
+ */
 const createSeason = asyncHandler(async (req, res) => {
     const season = await seasonService.createSeason(req.body, req.account.id);
     ResponseHandler.created(res, { message: messages.SEASON.CREATED, data: season });
 });
 
+/**
+ * POST /owner/seasons/:seasonId/personnel-assignments
+ */
 const assignPersonnel = asyncHandler(async (req, res) => {
     const assignment = await seasonService.assignPersonnel(
         req.params.seasonId,
@@ -33,6 +45,9 @@ const assignPersonnel = asyncHandler(async (req, res) => {
     });
 });
 
+/**
+ * POST /owner/seasons/:seasonId/personnel-assignments/:role/replace
+ */
 const replacePersonnel = asyncHandler(async (req, res) => {
     const result = await seasonService.replacePersonnel(
         req.params.seasonId,
@@ -46,6 +61,9 @@ const replacePersonnel = asyncHandler(async (req, res) => {
     });
 });
 
+/**
+ * PATCH /owner/seasons/:seasonId
+ */
 const updateSeason = asyncHandler(async (req, res) => {
     const season = await seasonService.updateSeason(
         req.params.seasonId,
@@ -55,6 +73,9 @@ const updateSeason = asyncHandler(async (req, res) => {
     ResponseHandler.success(res, { message: messages.SEASON.UPDATED, data: season });
 });
 
+/**
+ * PATCH /owner/seasons/:seasonId/activate
+ */
 const activateSeason = asyncHandler(async (req, res) => {
     const season = await seasonService.activateSeason(
         req.params.seasonId,
@@ -64,6 +85,9 @@ const activateSeason = asyncHandler(async (req, res) => {
     ResponseHandler.success(res, { message: messages.SEASON.ACTIVATED, data: season });
 });
 
+/**
+ * PATCH /owner/seasons/:seasonId/cancel
+ */
 const cancelSeason = asyncHandler(async (req, res) => {
     const result = await seasonService.cancelSeason(
         req.params.seasonId,

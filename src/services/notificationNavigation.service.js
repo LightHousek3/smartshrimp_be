@@ -3,6 +3,9 @@ const { ApiError } = require('../utils');
 const { ACCOUNT_ROLE, httpStatus, messages } = require('../constants');
 
 const seasonSelect = { id: true, pondId: true, pond: { select: { farmId: true } } };
+/**
+ * Expose the location identifiers required to navigate to a notification's season.
+ */
 const seasonContext = (season) =>
     season
         ? {
@@ -11,6 +14,9 @@ const seasonContext = (season) =>
               farmId: season.pond.farmId,
           }
         : {};
+/**
+ * Apply ownership or assignment rules before including a notification's season destination.
+ */
 const seasonScope = (accountId, role) =>
     role === ACCOUNT_ROLE.FARM_OWNER
         ? { pond: { farm: { ownerId: accountId } } }

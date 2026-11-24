@@ -13,6 +13,9 @@ const presentNotifications = async (rows, accountId, client = prisma) => {
     });
     const ownerId = account?.role === ACCOUNT_ROLE.FARM_OWNER ? account.id : account?.managedByOwnerId;
     if (!ownerId) return rows.map((row) => localizeNotification(row));
+    /**
+     * Deduplicate referenced IDs by resource type so notification text can be hydrated in batches.
+     */
     const ids = (key) => [...new Set(references.filter((ref) => ref.key === key).map((ref) => ref.id))];
     const farmIds = ids('farmId');
     const seasonIds = ids('seasonId');
@@ -87,6 +90,9 @@ const NOTIFICATION_GROUP_TYPES = {
     system: [NOTIFICATION_TYPE.SYSTEM],
 };
 
+/**
+ * Page the account's inbox using the requested read state and type filters.
+ */
 const getListNotification = async (accountId, {
     cursor,
     page,
@@ -154,6 +160,9 @@ const getListNotification = async (accountId, {
     };
 };
 
+/**
+ * Persist the inbox item before emitting its identifier over the socket.
+ */
 const createNotification = async (data) => {
     const notification = await prisma.notification.create({
         data,
@@ -163,6 +172,9 @@ const createNotification = async (data) => {
     return (await presentNotifications([notification], data.accountId))[0];
 };
 
+/**
+ * Open an owned notification and preserve the first read timestamp across concurrent requests.
+ */
 const getNotificationById = async (accountId, notificationId) => {
     const { notification, firstRead } = await prisma.$transaction(async (transaction) => {
         // Update only unread, owned records so concurrent opens keep the first readAt.
@@ -192,6 +204,9 @@ const getNotificationById = async (accountId, notificationId) => {
     return (await presentNotifications([notification], accountId))[0];
 };
 
+/**
+ * Apply one timestamp to the account's unread items and emit a socket update when records changed.
+ */
 const markAllAsRead = async (accountId) => {
     const readAt = new Date();
     const { count: updatedCount } = await prisma.notification.updateMany({

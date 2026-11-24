@@ -485,6 +485,9 @@ const detail = async (expertId, caseId) => {
     };
 };
 
+/**
+ * Notify the owner and current case participants apart from the expert who performed the change.
+ */
 const notifyParticipants = async (tx, diseaseCase, title, content, type) => {
     const recipients = await currentRecipients(
         tx,
@@ -550,6 +553,9 @@ const respond = async (expertId, caseId, data) => {
     return result.response;
 };
 
+/**
+ * Publish persisted case notifications over the socket after the transaction commits.
+ */
 const dispatchNotifications = (notifications) => {
     for (const notification of notifications) {
         try {

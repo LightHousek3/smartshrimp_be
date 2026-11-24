@@ -6,6 +6,9 @@ const { loadActiveAccount } = require('../middlewares');
 
 let io;
 
+/**
+ * Use a private room per account so its authenticated sockets receive the same inbox updates.
+ */
 const accountRoom = (accountId) => `account:${accountId}`;
 const allowedRoles = new Set([
     ACCOUNT_ROLE.TECHNICIAN,
@@ -13,6 +16,10 @@ const allowedRoles = new Set([
     ACCOUNT_ROLE.FARM_OWNER,
 ]);
 
+/**
+ * Authenticate each connection against the current account and restrict room access to supported
+ * roles.
+ */
 const attachNotificationSocket = (httpServer) => {
     io = new Server(httpServer, {
         cors: { origin: config.cors.origin, credentials: true },
@@ -42,6 +49,9 @@ const attachNotificationSocket = (httpServer) => {
     return io;
 };
 
+/**
+ * Deliver an inbox event to the account room on a best-effort basis after persistence.
+ */
 const emitNotification = (accountId, event, payload) => {
     if (!io) return;
     try {

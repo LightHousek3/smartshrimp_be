@@ -20,8 +20,15 @@ const PUBLIC_ACCOUNT_SELECT = {
     updatedAt: true,
 };
 
+/**
+ * Derive the value used to store and look up refresh tokens without persisting the original
+ * credential.
+ */
 const hashToken = (token) => crypto.createHash('sha256').update(token).digest('hex');
 
+/**
+ * Sign a short-lived access credential with the account ID and role.
+ */
 const generateAccessToken = (account) => {
     const payload = {
         sub: account.id,
@@ -81,12 +88,19 @@ const generateRefreshToken = async (account, deviceId, database = prisma, pushSe
     return token;
 };
 
+/**
+ * Issue access and refresh credentials while keeping refresh persistence in the caller's transaction
+ * when supplied.
+ */
 const generateAuthTokens = async (account, deviceId, database = prisma, pushSession) => {
     const accessToken = generateAccessToken(account);
     const refreshToken = await generateRefreshToken(account, deviceId, database, pushSession);
     return { accessToken, refreshToken };
 };
 
+/**
+ * Rotate a valid device session atomically so only one request can consume the old refresh token.
+ */
 const refreshAuthTokens = async (refreshToken) => {
     if (!refreshToken) {
         throw new ApiError(httpStatus.UNAUTHORIZED, messages.AUTH.INVALID_REFRESH_TOKEN);

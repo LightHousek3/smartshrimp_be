@@ -1,6 +1,9 @@
 const Joi = require('joi');
 const { CASE_LIMITS } = require('../constants/diseaseCase');
 
+/**
+ * Create a fresh Joi schema for expert case resource identifiers.
+ */
 const uuid = () => Joi.string().uuid();
 const severities = ['LOW', 'MEDIUM', 'HIGH', 'CRITICAL'];
 

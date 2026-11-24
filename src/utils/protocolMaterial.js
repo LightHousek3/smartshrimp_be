@@ -6,6 +6,9 @@ const messages = require('../constants/messages');
 /** Canonicalize material facts and decimal values used by revision fingerprints. */
 const facts = product => {
     const compliance = product.compliance ?? product.productCompliance ?? {};
+    /**
+     * Canonicalize optional decimal values before saving or comparing the material snapshot.
+     */
     const decimal = value => value == null ? null : new Prisma.Decimal(value).toString();
     return {
         id: product.id,
