@@ -1,7 +1,7 @@
 const { Prisma, ProductionProtocolTemplateStatus: TemplateStatus } = require('@prisma/client');
 const { createHash, randomUUID } = require('crypto');
 const prisma = require('../config/prisma');
-const { wireItem, protocolStages } = require('../utils/protocolPresentation');
+const { wireItem, protocolStages, presentProtocolHistory } = require('../utils/protocolPresentation');
 const { cultureDay, courseCoverage } = require('../utils/protocolTimeline');
 const lifecycle = require('./protocolLifecycle.service');
 const drafts = require('./protocolDraft.service');
@@ -365,7 +365,7 @@ const createWorkflow = ({ protocolType = 'PRODUCTION', diseaseCaseId = null } = 
         });
         const names = new Map(accounts.map((account) => [account.id, account.fullName]));
         return rows.map((row) => ({
-            ...row,
+            ...presentProtocolHistory(row),
             changedByName: row.changedBy
                 ? (names.get(row.changedBy) ?? 'Tài khoản cũ')
                 : 'Hệ thống',
@@ -718,6 +718,11 @@ const createWorkflow = ({ protocolType = 'PRODUCTION', diseaseCaseId = null } = 
         await assertStorageReady(tx);
         if (hasOverlappingStages(stages)) {
             throw ApiError.badRequest(messages.PRODUCTION_PROTOCOL.STAGE_OVERLAP);
+        }
+        if (stages.some((stage) => stage.meals.some(
+            (meal) => meal.mealNumber != null && !structure.hasSharedMealDeadline(meal),
+        ))) {
+            throw ApiError.badRequest(messages.PRODUCTION_PROTOCOL.MEAL_DEADLINE_MISMATCH);
         }
         if (!treatment) assertProtocolHarvestCoverage(stages, season);
         const groups = current ? structure.protocolGroups(current) : [];

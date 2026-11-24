@@ -1800,12 +1800,27 @@ const getInventoryHistory = async (farmId, ownerId, query) => {
         seasonId,
         referenceType,
         referenceId,
+        scheduleId,
         createdFrom,
         createdTo,
         search,
     } = query;
+    const execution = scheduleId
+        ? await prisma.operationExecution.findFirst({
+              where: { scheduleId, schedule: { season: { pond: { farmId } } } },
+              select: { id: true },
+          })
+        : null;
+    if (scheduleId && !execution)
+        throw ApiError.notFound(messages.OPERATION.NOT_FOUND);
+
     const where = {
         product: { farmId },
+        ...(execution && {
+            referenceType: 'operation_execution',
+            referenceId: execution.id,
+            AND: [{ transactionType: INVENTORY_TRANSACTION_TYPE.STOCK_OUT }],
+        }),
         ...(productId && { productId }),
         ...(transactionType && { transactionType }),
         ...(seasonId && { seasonId }),

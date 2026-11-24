@@ -1,6 +1,7 @@
 const crypto = require('crypto');
 const { Prisma } = require('@prisma/client');
 const prisma = require('../config/prisma');
+const { lifecycleReason } = require('../utils/protocolPresentation');
 const config = require('../config');
 const { emitNotification } = require('../realtime');
 const {
@@ -18,9 +19,11 @@ const {
     assertApprovedMaterial,
 } = require('./productionProtocolReview.service');
 const lifecycle = require('./protocolLifecycle.service');
+const { readScheduleWarnings } = require('./technicianDashboard.service');
+const historicalFeeding = require('./historicalFeeding.service');
 const { courseEndsAt } = require('../utils/protocolTimeline');
 const { latestHarvestAt } = require('./harvest.service');
-const { timingComparison, TIMING } = require('../utils/protocolExecution');
+const { quantityComparison, timingComparison, TIMING } = require('../utils/protocolExecution');
 const {
     messages,
     PERSONNEL_ROLE,
@@ -28,7 +31,6 @@ const {
     OPERATION_STATUS,
     OPERATION_TYPE,
     NOTIFICATION_TYPE,
-    PRODUCTION_PROTOCOL_LIMITS,
     FARM_STATUS,
     PROTOCOL_STATUS,
 } = require('../constants');
@@ -107,7 +109,7 @@ const formatSchedule = (s) => {
         s.protocolItem &&
         Object.fromEntries(
             Object.entries(s.protocolItem).filter(
-                ([key]) => !Object.hasOwn(ITEM_STORAGE_SELECT, key),
+                ([key]) => key === 'productionMealId' || !Object.hasOwn(ITEM_STORAGE_SELECT, key),
             ),
         );
     const formattedProduct = s.product
@@ -131,6 +133,7 @@ const formatSchedule = (s) => {
         ...s,
         product: formattedProduct,
         plannedQuantity: toNumber(s.plannedQuantity),
+        cancellationReason: lifecycleReason(s.cancellationReason),
         doseValueSnapshot: toNumber(s.doseValueSnapshot),
         basisQuantity: toNumber(s.basisQuantity),
         protocolItem: s.protocolItem
@@ -186,12 +189,15 @@ const listSchedules = async (technicianId, seasonId, query = {}) => {
             name: true,
             status: true,
             stockingDate: true,
+            activatedAt: true,
+            activationDelayReason: true,
             createdAt: true,
             pond: {
                 select: {
                     id: true,
                     name: true,
-                    farm: { select: { id: true, name: true } },
+                    volumeM3: true,
+                    farm: { select: { id: true, name: true, ownerId: true, status: true } },
                 },
             },
         },
@@ -200,24 +206,13 @@ const listSchedules = async (technicianId, seasonId, query = {}) => {
         throw ApiError.notFound('Không tìm thấy vụ nuôi');
     }
 
-    // Match the generator's freshness policy; future/voided measurements cannot authorize a dose.
     const now = new Date();
-    const freshSince = new Date(
-        now.getTime() - PRODUCTION_PROTOCOL_LIMITS.biomassMaxAgeHours * 3600000,
-    );
-    const recentBiomassLog = await prisma.shrimpHealthLog.findFirst({
-        where: {
-            seasonId,
-            isVoided: false,
-            estimatedBiomassKg: { gt: 0 },
-            recordedAt: { gte: freshSince, lte: now },
-        },
-        select: { id: true, estimatedBiomassKg: true, recordedAt: true },
-        orderBy: { recordedAt: 'desc' },
-    });
-    const hasBiomassWarning = !recentBiomassLog;
-    const biomassWarningMessage = hasBiomassWarning
-        ? messages.PRODUCTION_PROTOCOL.BIOMASS_WARNING
+    const warnings = (!query.date || query.date >= scheduleRules.dateInVietnam(now))
+        ? await readScheduleWarnings(prisma, season, now) : [];
+    const reasonCodes = [...new Set(warnings.flatMap(({ reasonCodes }) => reasonCodes))];
+    const hasBiomassWarning = reasonCodes.length > 0;
+    const biomassWarningMessage = reasonCodes.length
+        ? reasonCodes.map(code => messages.PRODUCTION_PROTOCOL.SCHEDULE_BLOCKERS[code]).filter(Boolean).join(' · ')
         : null;
 
     const counts = await prisma.operationSchedule.groupBy({
@@ -328,7 +323,7 @@ const listSchedules = async (technicianId, seasonId, query = {}) => {
                     },
                 },
             },
-            orderBy: [{ scheduledAt: 'asc' }, { createdAt: 'asc' }],
+            orderBy: [{ scheduledAt: 'asc' }, { createdAt: 'asc' }, { id: 'asc' }],
             skip,
             take: limit,
         }),
@@ -337,9 +332,17 @@ const listSchedules = async (technicianId, seasonId, query = {}) => {
 
     const schedulesWithStock = await attachAvailableStock(schedules, now);
     const formattedSchedules = schedulesWithStock.map(formatSchedule);
+    const historical = (!query.status || query.status === OPERATION_STATUS.PLANNED) &&
+        (!query.operationType || query.operationType === OPERATION_TYPE.FEEDING)
+        ? await historicalFeeding.previews(prisma, season, query.date, now)
+        : { enabled: false, rows: [] };
 
     return {
-        season,
+        season: {
+            id: season.id, name: season.name, status: season.status, stockingDate: season.stockingDate,
+            createdAt: season.createdAt, pond: { id: season.pond.id, name: season.pond.name,
+                farm: { id: season.pond.farm.id, name: season.pond.farm.name } },
+        },
         summary: {
             planned: plannedCount,
             completed: completedCount,
@@ -351,6 +354,8 @@ const listSchedules = async (technicianId, seasonId, query = {}) => {
             message: biomassWarningMessage,
         },
         schedules: formattedSchedules,
+        historicalFeedingAvailable: historical.enabled,
+        historicalSchedules: historical.rows.map(formatSchedule),
         meta: {
             page,
             limit,
@@ -528,7 +533,7 @@ const executeScheduleInTx = async (
     payload,
     actual,
     notifications,
-    { skipScheduleLock = false, skipReconcileAfter = false } = {},
+    { skipScheduleLock = false, skipReconcileAfter = false, historical = false } = {},
 ) => {
     if (!skipScheduleLock) {
         await tx.$queryRaw`SELECT id FROM operation_schedules WHERE id = ${scheduleId}::uuid FOR UPDATE`;
@@ -620,6 +625,8 @@ const executeScheduleInTx = async (
         throw ApiError.conflict(messages.OPERATION.SCHEDULE_NOT_PLANNED);
     const now = new Date();
     const executedAt = payload.executedAt ? new Date(payload.executedAt) : now;
+    if (!Number.isFinite(executedAt.getTime()) || executedAt > now)
+        throw ApiError.badRequest(messages.OPERATION.INVALID_EXECUTION_TIME);
     if (now < schedule.scheduledAt || executedAt < schedule.scheduledAt) {
         throw ApiError.badRequest(messages.OPERATION.EARLY_EXECUTION_NOT_ALLOWED);
     }
@@ -653,6 +660,20 @@ const executeScheduleInTx = async (
     ) {
         throw ApiError.conflict(messages.PRODUCTION_PROTOCOL.STATE);
     }
+    if (historical)
+        await historicalFeeding.assertRecordingTime(tx, schedule, payload.executedAt ? executedAt : null);
+    if (
+        !historical && schedule.season.activatedAt &&
+        (schedule.scheduledAt < schedule.season.activatedAt || executedAt < schedule.season.activatedAt)
+    ) {
+        throw ApiError.badRequest(messages.OPERATION.EXECUTION_BEFORE_ACTIVATION);
+    }
+    const executionTiming = timingComparison(
+        { ...schedule, execution: { executedAt } },
+        schedule.protocolItem.dueAtMinutes,
+    );
+    if ((historical || executionTiming.status === TIMING.LATE) && !payload.note?.trim())
+        throw ApiError.badRequest(messages.OPERATION.EXECUTION_TIME_REASON_REQUIRED);
     structure.assertItemMetadata(schedule.protocolItem);
     if (!approvedMaterial || targetProductId !== schedule.productId)
         throw ApiError.conflict(messages.PRODUCTION_PROTOCOL.MATERIAL_LOCKED);
@@ -693,9 +714,10 @@ const executeScheduleInTx = async (
             throw ApiError.conflict(messages.PRODUCTION_PROTOCOL.BIOMASS_SOURCE_INVALID);
         }
     }
-    const planned = new Prisma.Decimal(schedule.plannedQuantity);
-    const variance = actual.minus(planned).abs().div(planned).mul(100);
-    if (variance.gt(0) && !payload.varianceReason?.trim()) {
+    const variance = quantityComparison(
+        schedule.plannedQuantity, actual, protocol.allowedVariancePct ?? 10,
+    );
+    if (variance?.exceedsThreshold && !payload.varianceReason?.trim()) {
         throw ApiError.badRequest(messages.OPERATION.VARIANCE_REASON_REQUIRED);
     }
     const days = await withdrawal.prepareExecution(
@@ -833,13 +855,35 @@ const executeScheduleInTx = async (
     return { ...execution, actualQuantity: Number(execution.actualQuantity) };
 };
 
+/** Resolve an eligible historical occurrence or its saved idempotent replay. */
+const resolveHistoricalSchedule = async (tx, technicianId, protocolItemId, payload) => {
+    const { seasonId, scheduledAt } = payload.historicalOccurrence;
+    const assignment = await tx.seasonPersonnelAssignment.findFirst({
+        where: { seasonId, accountId: technicianId, role: 'TECHNICIAN', unassignedAt: null },
+        select: { id: true },
+    });
+    if (!assignment) throw ApiError.forbidden(messages.OPERATION.NOT_ASSIGNED_TECHNICIAN);
+    const replay = await tx.operationSchedule.findFirst({
+        where: {
+            seasonId, protocolItemId, scheduledAt,
+            execution: { is: { idempotencyKey: payload.idempotencyKey } },
+        },
+        select: { id: true },
+    });
+    const slot = replay ?? await historicalFeeding.materialize(
+        tx, seasonId, protocolItemId, scheduledAt, new Date(),
+    );
+    return slot.id;
+};
+
 /**
  * Record an authorized planned slot and its FEFO stock deductions in one serializable transaction.
  * Reconcile lifecycle state before accepting new usage; an older executedAt cannot reopen a closed course.
  * A matching idempotent retry returns the saved execution without a second stock deduction.
  */
 const executeSchedule = async (technicianId, scheduleId, payload) => {
-    const pointer = await prisma.operationSchedule.findUnique({
+    const historical = payload.historicalOccurrence;
+    const pointer = historical ?? await prisma.operationSchedule.findUnique({
         where: { id: scheduleId },
         select: { seasonId: true },
     });
@@ -857,13 +901,17 @@ const executeSchedule = async (technicianId, scheduleId, payload) => {
                     await tx.$queryRaw`SELECT id FROM aquaculture_seasons WHERE id = ${pointer.seasonId}::uuid FOR UPDATE`;
                     // A delayed worker must not leave a superseded production slot executable.
                     notifications.push(...(await lifecycle.reconcile(tx, pointer.seasonId)));
+                    const targetId = historical
+                        ? await resolveHistoricalSchedule(tx, technicianId, scheduleId, payload)
+                        : scheduleId;
                     return executeScheduleInTx(
                         tx,
                         technicianId,
-                        scheduleId,
+                        targetId,
                         payload,
                         actual,
                         notifications,
+                        { historical: Boolean(historical) },
                     );
                 },
                 {
@@ -926,19 +974,24 @@ const executeSchedulesBatch = async (technicianId, items) => {
         return { ...item, actual };
     });
 
+    const savedIds = parsedItems.filter((item) => !item.historicalOccurrence)
+        .map((item) => item.scheduleId);
     const pointers = await prisma.operationSchedule.findMany({
-        where: { id: { in: scheduleIds } },
+        where: { id: { in: savedIds } },
         select: { id: true, seasonId: true },
     });
-    if (pointers.length !== scheduleIds.length) {
+    if (pointers.length !== savedIds.length) {
         throw ApiError.notFound(messages.OPERATION.NOT_FOUND);
     }
-    const seasonIds = new Set(pointers.map((p) => p.seasonId));
+    const seasonIds = new Set([
+        ...pointers.map((p) => p.seasonId),
+        ...parsedItems.flatMap((item) => item.historicalOccurrence ? [item.historicalOccurrence.seasonId] : []),
+    ]);
     if (seasonIds.size !== 1) {
         throw ApiError.badRequest('Các lịch ghi nhận cùng lúc phải thuộc cùng một vụ nuôi');
     }
     const [seasonId] = seasonIds;
-    const sortedScheduleIds = [...scheduleIds].sort();
+    const sortedScheduleIds = savedIds.sort();
 
     for (let attempt = 0; attempt < 3; attempt++) {
         try {
@@ -947,22 +1000,26 @@ const executeSchedulesBatch = async (technicianId, items) => {
                 async (tx) => {
                     await tx.$queryRaw`SELECT id FROM aquaculture_seasons WHERE id = ${seasonId}::uuid FOR UPDATE`;
                     notifications.push(...(await lifecycle.reconcile(tx, seasonId)));
-                    await tx.$queryRaw(
+                    if (sortedScheduleIds.length) await tx.$queryRaw(
                         Prisma.sql`SELECT id FROM operation_schedules WHERE id IN (${Prisma.join(
                             sortedScheduleIds.map((id) => Prisma.sql`${id}::uuid`),
                         )}) ORDER BY id FOR UPDATE`,
                     );
                     const executed = [];
                     for (const item of parsedItems) {
+                        const historical = Boolean(item.historicalOccurrence);
+                        const targetId = historical
+                            ? await resolveHistoricalSchedule(tx, technicianId, item.scheduleId, item)
+                            : item.scheduleId;
                         executed.push(
                             await executeScheduleInTx(
                                 tx,
                                 technicianId,
-                                item.scheduleId,
+                                targetId,
                                 item,
                                 item.actual,
                                 notifications,
-                                { skipScheduleLock: true, skipReconcileAfter: true },
+                                { skipScheduleLock: !historical, skipReconcileAfter: true, historical },
                             ),
                         );
                     }

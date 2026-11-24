@@ -3,6 +3,11 @@ const ApiError = require('./ApiError');
 const { assessTemplateProposal } = require('./materialCompliance');
 const { messages, httpStatus, PRODUCTION_PROTOCOL_LIMITS } = require('../constants');
 
+const hasSharedMealDeadline = (meal) =>
+    new Set(
+        meal.items.map((item) => item.dueAtMinutes ?? PRODUCTION_PROTOCOL_LIMITS.defaultDueAtMinutes),
+    ).size <= 1;
+
 const invalidStoredContent = () =>
     new ApiError(
         httpStatus.SERVICE_UNAVAILABLE,
@@ -340,6 +345,7 @@ const templateGroups = (items) => {
 };
 
 module.exports = {
+    hasSharedMealDeadline,
     assertItemMetadata,
     assertStructure,
     storedStructure,

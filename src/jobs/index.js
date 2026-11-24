@@ -7,10 +7,11 @@ const documents = require('./ragDocument.job');
 const tasks = require('./taskReminder.job');
 const inventory = require('./inventoryReminder.job');
 const harvest = require('./harvestReminder.job');
+const stocking = require('./stockingReminder.job');
 const cleanup = require('./technicalCleanup.job');
 const push = require('./pushDelivery.job');
 const firebase = require('../services/firebaseMessaging.service');
-const scheduledJobs = [schedules, reminders, documents, tasks, inventory, harvest, cleanup];
+const scheduledJobs = [schedules, reminders, documents, tasks, inventory, harvest, stocking, cleanup];
 
 let started = false,
     starting,

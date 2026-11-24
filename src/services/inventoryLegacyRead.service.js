@@ -288,6 +288,7 @@ const getInventoryHistory = async (farmId, ownerId, query) => {
         seasonId,
         referenceType,
         referenceId,
+        scheduleId,
         createdFrom,
         createdTo,
         search,
@@ -297,6 +298,13 @@ const getInventoryHistory = async (farmId, ownerId, query) => {
         ${transactionType ? Prisma.sql`AND t.transaction_type::text=${transactionType.toLowerCase()}` : Prisma.empty}
         ${seasonId ? Prisma.sql`AND t.season_id=${seasonId}::uuid` : Prisma.empty}
         ${referenceType ? Prisma.sql`AND t.reference_type=${referenceType} AND t.reference_id=${referenceId}::uuid` : Prisma.empty}
+        ${scheduleId ? Prisma.sql`AND t.transaction_type::text='stock_out'
+            AND t.reference_type='operation_execution'
+            AND t.reference_id=(SELECT e.id FROM operation_executions e
+                JOIN operation_schedules os ON os.id=e.schedule_id
+                JOIN aquaculture_seasons season ON season.id=os.season_id
+                JOIN ponds pond ON pond.id=season.pond_id
+                WHERE e.schedule_id=${scheduleId}::uuid AND pond.farm_id=${farmId}::uuid)` : Prisma.empty}
         ${createdFrom ? Prisma.sql`AND t.created_at>=${createdFrom}` : Prisma.empty}
         ${createdTo ? Prisma.sql`AND t.created_at<=${createdTo}` : Prisma.empty}`;
     const searchWhere = search

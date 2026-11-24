@@ -460,4 +460,14 @@ const getOverview = (accountId, now = new Date()) =>
         { isolationLevel: 'RepeatableRead' },
     );
 
-module.exports = { getOverview };
+const readScheduleWarnings = async (tx, season, now) => {
+    if (season.status !== SEASON_STATUS.ACTIVE || season.pond.farm.status !== FARM_STATUS.ACTIVE) return [];
+    const window = dayWindow(now);
+    const protocols = await readProtocols(tx, [season], now);
+    if (!protocols.size) return [];
+    const sources = await readSources(tx, [season.id], now);
+    return readBlockedAlerts(tx, [season], now,
+        { ...window, end: new Date(window.end.getTime() + 2 * DAY_MS) }, sources, protocols);
+};
+
+module.exports = { getOverview, readScheduleWarnings };

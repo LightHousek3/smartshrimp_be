@@ -1,5 +1,6 @@
 const messages = require('../constants/messages.js');
 const Joi = require('joi');
+const { hasSharedMealDeadline } = require('../utils/protocolStructure');
 const { SHRIMP_TYPE, PRODUCTION_PROTOCOL_LIMITS } = require('../constants');
 const {
     ProductCategory,
@@ -235,6 +236,10 @@ const createTemplate = {
                     });
                 }
                 for (const meal of stage.meals) {
+                    if (!hasSharedMealDeadline(meal))
+                        return helpers.message({
+                            custom: messages.PRODUCTION_PROTOCOL.MEAL_DEADLINE_MISMATCH,
+                        });
                     if (
                         meal.items.some(
                             (item) =>

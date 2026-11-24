@@ -5,6 +5,9 @@ const { ApiError, protocolStructure: structure } = require('../utils');
 const productionReview = require('./productionProtocolReview.service');
 const lifecycle = require('./protocolLifecycle.service');
 const { assertTreatmentCourse } = require('../utils/treatmentProtocolPolicy');
+const { cultureDay, occurrenceRange, scheduledAtDay } = require('../utils/protocolTimeline');
+const { timingComparison, quantityComparison, TIMING } = require('../utils/protocolExecution');
+const { lifecycleReason, presentProtocolHistory } = require('../utils/protocolPresentation');
 const {
     PROTOCOL_TYPE: T,
     PROTOCOL_STATUS: S,
@@ -47,6 +50,7 @@ const CARD_SELECT = {
 };
 const DETAIL_SELECT = {
     ...CARD_SELECT,
+    season: { select: { ...SEASON_SELECT, activatedAt: true, activationDelayReason: true } },
     updatedAt: true,
     reviewedBy: true,
     reviewedAt: true,
@@ -64,6 +68,7 @@ const DETAIL_SELECT = {
             changedBy: true,
             changedAt: true,
             reason: true,
+            eventType: true,
         },
     },
 };
@@ -85,10 +90,12 @@ const ITEM_SELECT = {
     recurrenceAnchorDay: true,
     doseAnchorDay: true,
     materialSnapshot: true,
-    product: { select: { name: true } },
+    dueAtMinutes: true,
+    product: { select: { name: true, imageUrls: true } },
 };
 const SCHEDULE_SELECT = {
     id: true,
+    productId: true,
     protocolItemId: true,
     scheduledAt: true,
     status: true,
@@ -102,7 +109,9 @@ const SCHEDULE_SELECT = {
     execution: {
         select: {
             actualQuantity: true,
+            actualProductId: true,
             varianceReason: true,
+            note: true,
             executedAt: true,
             executor: { select: { fullName: true } },
             actualProduct: { select: { name: true, unit: true } },
@@ -133,6 +142,79 @@ const anchorDate = (protocol) => {
 };
 const localDate = (timestamp) =>
     new Date(timestamp.getTime() + VIETNAM_OFFSET_MS).toISOString().slice(0, 10);
+
+/** Count each occurrence once while retaining replaced cancellation rows in day history. */
+const currentOccurrences = (schedules) => {
+    const occurrences = new Map();
+    for (const schedule of schedules) {
+        const key = `${schedule.protocolItemId}:${schedule.scheduledAt.toISOString()}`;
+        const previous = occurrences.get(key);
+        if (
+            !previous ||
+            (previous.status === 'CANCELLED' &&
+                (schedule.status !== 'CANCELLED' ||
+                    (schedule.cancelledAt?.getTime() ?? 0) >= (previous.cancelledAt?.getTime() ?? 0)))
+        ) {
+            occurrences.set(key, schedule);
+        }
+    }
+    return [...occurrences.values()];
+};
+
+/** Only the production version activated alongside the season can expose historical feed. */
+const delayedActivationAt = async (client, protocol) => {
+    const { activatedAt, activationDelayReason } = protocol.season;
+    return protocol.protocolType === T.PRODUCTION && activatedAt && activationDelayReason &&
+        await lifecycle.isActivationProduction(client, protocol.id, activatedAt)
+        ? activatedAt : null;
+};
+
+const historicalScheduleTime = (protocol, item, day, activatedAt) => {
+    if (!activatedAt || item.operationType !== 'FEEDING') return null;
+    const at = scheduledAtDay(protocol, item, day);
+    return at && at < activatedAt ? at : null;
+};
+
+const dayMarker = (markers, day) => {
+    if (!markers.has(day)) markers.set(day, { day, completed: 0, planned: 0, cancelled: 0, issues: 0 });
+    return markers.get(day);
+};
+
+/** Historical previews remain visible until replaced by a persisted occurrence. */
+const addUnrecordedMarkers = async (client, protocol, activatedAt, occurrences, markers) => {
+    const activationDay = cultureDay(protocol.season.stockingDate, activatedAt);
+    if (activationDay < 1) return;
+    const items = await client.protocolItem.findMany({
+        where: { protocolId: protocol.id, operationType: 'FEEDING',
+            startDayOffset: { lte: activationDay }, plannedTime: { not: null } },
+        select: { id: true, operationType: true, plannedTime: true, startDayOffset: true,
+            endDayOffset: true, repeatIntervalDays: true, recurrenceAnchorDay: true },
+    });
+    const persisted = new Set(occurrences.map((row) => `${row.protocolItemId}:${row.scheduledAt.getTime()}`));
+    for (const item of items) {
+        const range = occurrenceRange(item);
+        if (!range.count) continue;
+        for (let day = range.first; day <= Math.min(range.last, activationDay); day += item.repeatIntervalDays) {
+            const at = historicalScheduleTime(protocol, item, day, activatedAt);
+            if (!at) break;
+            if (persisted.has(`${item.id}:${at.getTime()}`)) continue;
+            const marker = dayMarker(markers, day);
+            marker.unrecorded = (marker.unrecorded ?? 0) + 1;
+        }
+    }
+};
+
+const quantityAudit = (protocol, schedule) => {
+    const execution = schedule?.execution;
+    if (!execution || (execution.actualProductId != null && execution.actualProductId !== schedule.productId)) {
+        return null;
+    }
+    return quantityComparison(
+        schedule.plannedQuantity,
+        execution.actualQuantity,
+        protocol.allowedVariancePct ?? 10,
+    );
+};
 const timestampWindow = (date) => ({
     gte: new Date(date),
     lt: new Date(new Date(date).getTime() + 1),
@@ -258,11 +340,11 @@ const findOwned = async (client, ownerId, id, select = DETAIL_SELECT) => {
  * Return the protocol header and sparse day markers without loading execution payloads.
  * RepeatableRead keeps the current rejection reason, reviewer and history in one snapshot.
  */
-const detail = async (ownerId, id) =>
+const detail = async (ownerId, id, now = new Date()) =>
     prisma.$transaction(
         async (client) => {
             const p = await findOwned(client, ownerId, id);
-            const [refs, duration, schedules] = await Promise.all([
+            const [refs, duration, schedules, activationAt] = await Promise.all([
                 references(
                     client,
                     [p],
@@ -275,43 +357,41 @@ const detail = async (ownerId, id) =>
                 client.operationSchedule.findMany({
                     where: { protocolItem: { protocolId: id } },
                     select: {
+                        protocolItemId: true,
+                        protocolItem: { select: { dueAtMinutes: true } },
                         scheduledAt: true,
                         status: true,
                         plannedQuantity: true,
                         productId: true,
-                        execution: { select: { actualQuantity: true, actualProductId: true } },
+                        cancelledAt: true,
+                        execution: {
+                            select: { actualQuantity: true, actualProductId: true, executedAt: true },
+                        },
                     },
                 }),
+                delayedActivationAt(client, p),
             ]);
             const anchor = anchorDate(p);
             const days = new Map();
-            for (const row of schedules) {
+            const occurrences = currentOccurrences(schedules);
+            for (const row of occurrences) {
                 if (!anchor) continue;
                 const day =
                     Math.round(
                         (Date.parse(localDate(row.scheduledAt)) - Date.parse(anchor)) / DAY_MS,
                     ) + 1;
-                const current = days.get(day) ?? {
-                    day,
-                    completed: 0,
-                    planned: 0,
-                    cancelled: 0,
-                    issues: 0,
-                };
+                const current = dayMarker(days, day);
                 current[row.status.toLowerCase()]++;
-                const plan = Number(row.plannedQuantity);
-                const execution = row.execution;
                 if (
-                    execution &&
-                    plan > 0 &&
-                    (execution.actualProductId == null ||
-                        execution.actualProductId === row.productId) &&
-                    Math.abs(((Number(execution.actualQuantity) - plan) / plan) * 100) >
-                        Number(p.allowedVariancePct ?? 10)
+                    quantityAudit(p, row)?.exceedsThreshold ||
+                    [TIMING.EARLY, TIMING.LATE].includes(
+                        timingComparison(row, row.protocolItem.dueAtMinutes, now).status,
+                    )
                 )
                     current.issues++;
-                days.set(day, current);
             }
+            if (anchor && activationAt)
+                await addUnrecordedMarkers(client, p, activationAt, occurrences, days);
             return {
                 ...card(p, refs),
                 farmId: p.season.pond.farmId,
@@ -327,12 +407,15 @@ const detail = async (ownerId, id) =>
                 rejectionReason: p.rejectionReason,
                 supersededAt: p.supersededAt,
                 dayMarkers: [...days.values()].sort((a, b) => a.day - b.day),
-                history: p.statusHistory.map(({ changedBy, ...h }) => ({
-                    ...h,
-                    changedByName: changedBy
-                        ? (refs.accounts.get(changedBy) ?? 'Tài khoản cũ')
-                        : 'Hệ thống',
-                })),
+                history: p.statusHistory.map((row) => {
+                    const { changedBy, ...h } = presentProtocolHistory(row);
+                    return {
+                        ...h,
+                        changedByName: changedBy
+                            ? (refs.accounts.get(changedBy) ?? 'Tài khoản cũ')
+                            : 'Hệ thống',
+                    };
+                }),
                 sourceTemplateSnapshot: p.sourceTemplateSnapshot ?? null,
                 canReview:
                     p.status === S.PENDING_APPROVAL &&
@@ -354,7 +437,8 @@ const day = async (ownerId, id, selectedDay) =>
                 protocolType: true,
                 status: true,
                 reviewedAt: true,
-                season: { select: { stockingDate: true } },
+                allowedVariancePct: true,
+                season: { select: { stockingDate: true, activatedAt: true, activationDelayReason: true } },
             });
             const duration = await client.protocolItem.aggregate({
                 where: { protocolId: id },
@@ -369,6 +453,10 @@ const day = async (ownerId, id, selectedDay) =>
                 ? new Date(Date.parse(anchor) + offset * DAY_MS).toISOString().slice(0, 10)
                 : null;
             const start = date ? new Date(`${date}T00:00:00+07:00`) : null;
+            const activatedAt = p.season.activatedAt;
+            const activationAt = start && activatedAt && start < activatedAt
+                ? await delayedActivationAt(client, p)
+                : null;
             const [items, schedules] = await Promise.all([
                 client.protocolItem.findMany({
                     where: {
@@ -398,9 +486,11 @@ const day = async (ownerId, id, selectedDay) =>
                 .filter((i) => structure.occursOn(i, selectedDay))
                 .flatMap((i) => {
                     const matches = schedules.filter((s) => s.protocolItemId === i.id);
+                    const beforeActivation = historicalScheduleTime(p, i, selectedDay, activationAt);
                     return (matches.length ? matches : [null]).map((s) => ({
                         itemId: i.id,
                         operationType: i.operationType,
+                        productImageUrls: i.materialSnapshot?.imageUrls ?? i.product?.imageUrls ?? [],
                         productName:
                             i.materialSnapshot?.name ??
                             i.product?.name ??
@@ -419,11 +509,18 @@ const day = async (ownerId, id, selectedDay) =>
                         doseUnit: i.doseUnit,
                         instructions: i.instructions,
                         scheduleId: s?.id ?? null,
+                        productionMealId: i.productionMealId,
+                        scheduledAt: s?.scheduledAt ?? null,
+                        dueAt: s ? timingComparison(s, i.dueAtMinutes).dueAt : null,
+                        dueAtMinutes: i.dueAtMinutes,
+                        quantityExceedsThreshold: s
+                            ? (quantityAudit(p, s)?.exceedsThreshold ?? null)
+                            : null,
                         status:
                             s?.status ??
                             (p.status === S.PENDING_APPROVAL
                                 ? S.PENDING_APPROVAL
-                                : 'NOT_GENERATED'),
+                                : beforeActivation ? 'NOT_RECORDED' : 'NOT_GENERATED'),
                         plannedQuantity: s ? Number(s.plannedQuantity) : null,
                         unit: s?.unit ?? i.doseUnit,
                         basisQuantity: s?.basisQuantity == null ? null : Number(s.basisQuantity),
@@ -434,14 +531,20 @@ const day = async (ownerId, id, selectedDay) =>
                             ? s.unit
                             : (s?.execution?.actualProduct?.unit ?? s?.unit ?? null),
                         varianceReason: s?.execution?.varianceReason ?? null,
+                        note: s?.execution?.note ?? null,
                         executorName: s?.execution?.executor.fullName ?? null,
                         executedAt: s?.execution?.executedAt ?? null,
-                        cancellationReason: s?.cancellationReason ?? null,
+                        cancellationReason: lifecycleReason(s?.cancellationReason) ?? null,
                         cancelledAt: s?.cancelledAt ?? null,
                     }));
                 });
             rows.sort((a, b) => (a.time ?? '').localeCompare(b.time ?? ''));
-            return { day: selectedDay, date, rows };
+            return {
+                day: selectedDay,
+                date,
+                allowedVariancePct: Number(p.allowedVariancePct ?? 10),
+                rows,
+            };
         },
         { isolationLevel: 'RepeatableRead' },
     );
@@ -453,13 +556,14 @@ const inventory = async (ownerId, id, scheduleId) => {
     await findOwned(prisma, ownerId, id, { id: true });
     const schedule = await prisma.operationSchedule.findFirst({
         where: { id: scheduleId, protocolItem: { protocolId: id } },
-        select: { id: true },
+        select: { id: true, execution: { select: { id: true } } },
     });
     if (!schedule) throw ApiError.notFound(messages.PROTOCOL.NOT_FOUND);
+    if (!schedule.execution) return [];
     const rows = await prisma.inventoryTransaction.findMany({
         where: {
             referenceType: 'operation_execution',
-            referenceId: scheduleId,
+            referenceId: schedule.execution.id,
             transactionType: 'STOCK_OUT',
         },
         select: {

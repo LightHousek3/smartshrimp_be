@@ -67,7 +67,7 @@ const assignedSeasonWhere = (accountId, query = {}) => ({
  */
 const seasonSelect = {
     id: true, name: true, status: true, shrimpType: true,
-    stockingDate: true, actualEndDate: true, updatedAt: true,
+    stockingDate: true, plannedStockingDate: true, actualEndDate: true, updatedAt: true,
     pond: { select: {
         name: true,
         farm: { select: { name: true } },
@@ -94,7 +94,8 @@ const normalizeSeason = (season, now) => ({
     farm: { name: season.pond.farm.name },
     shrimpType: season.shrimpType,
     dayOfCulture: dayOfCulture(season, now),
-    stockingDate: season.stockingDate?.toISOString().slice(0, 10) ?? null,
+    stockingDate: dateOnly(season.status === SEASON_STATUS.PLANNING
+        ? season.plannedStockingDate ?? season.stockingDate : season.stockingDate),
     status: season.status,
     productionProtocol: season.protocols[0] ?? null,
     openCaseCount: season.diseaseCases.length,
@@ -144,7 +145,7 @@ const round = (value, scale) => Number(value.toFixed(scale));
 
 /** Only fields rendered by the detail header and stocking card cross the API boundary. */
 const detailSelect = {
-    id: true, name: true, status: true, shrimpType: true, stockingDate: true,
+    id: true, name: true, status: true, shrimpType: true, stockingDate: true, plannedStockingDate: true,
     expectedEndDate: true, actualEndDate: true, updatedAt: true,
     initialQuantity: true, initialDensityPerM2: true,
     pond: { select: {
@@ -282,7 +283,9 @@ const getAssignedSeasonMetrics = (accountId, seasonId, now = new Date()) => pris
         openCaseCount: season._count.diseaseCases,
         stocking: {
             initialQuantity: toNumber(season.initialQuantity), initialDensityPerM2: toNumber(season.initialDensityPerM2),
-            stockingDate: dateOnly(season.stockingDate), expectedEndDate: dateOnly(season.expectedEndDate),
+            stockingDate: dateOnly(season.status === SEASON_STATUS.PLANNING
+                ? season.plannedStockingDate ?? season.stockingDate : season.stockingDate),
+            expectedEndDate: dateOnly(season.expectedEndDate),
         },
         growth: null,
         stock: null,

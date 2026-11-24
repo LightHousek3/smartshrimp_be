@@ -1,5 +1,5 @@
 const Joi = require('joi');
-const { OPERATION_STATUS, OPERATION_TYPE } = require('../constants');
+const { messages, OPERATION_STATUS, OPERATION_TYPE } = require('../constants');
 
 const listSchedules = {
     params: Joi.object().keys({
@@ -8,7 +8,11 @@ const listSchedules = {
     query: Joi.object().keys({
         status: Joi.string().uppercase().valid(...Object.values(OPERATION_STATUS)),
         operationType: Joi.string().uppercase().valid(...Object.values(OPERATION_TYPE)),
-        date: Joi.string().pattern(/^\d{4}-\d{2}-\d{2}$/).message('Ngày phải có định dạng YYYY-MM-DD'),
+        date: Joi.string().pattern(/^\d{4}-\d{2}-\d{2}$/).custom((value, helpers) => {
+            const date = new Date(`${value}T00:00:00Z`);
+            return !Number.isNaN(date.getTime()) && date.toISOString().slice(0, 10) === value
+                ? value : helpers.message({ custom: 'Ngày lọc lịch không hợp lệ' });
+        }).message('Ngày phải có định dạng YYYY-MM-DD'),
         page: Joi.number().integer().min(1).default(1),
         limit: Joi.number().integer().min(1).max(100).default(50),
     }),
@@ -19,6 +23,16 @@ const getSchedule = {
         scheduleId: Joi.string().uuid({ version: 'uuidv4' }).required(),
     }),
 };
+
+const executionTime = Joi.date().iso().max('now').messages({
+    'date.max': messages.OPERATION.INVALID_EXECUTION_TIME,
+    'date.format': messages.OPERATION.INVALID_EXECUTION_TIME,
+});
+
+const historicalOccurrence = Joi.object({
+    seasonId: Joi.string().uuid({ version: 'uuidv4' }).required(),
+    scheduledAt: Joi.date().iso().required(),
+});
 
 const executeSchedule = {
     params: Joi.object().keys({
@@ -33,13 +47,14 @@ const executeSchedule = {
             'any.required': 'Số lượng thực tế là bắt buộc',
         }),
         actualProductId: Joi.string().uuid({ version: 'uuidv4' }).allow(null),
-        executedAt: Joi.date().iso().max('now'),
+        executedAt: executionTime,
         note: Joi.string().trim().max(500).allow('', null),
         varianceReason: Joi.string().trim().max(500).allow('', null),
         idempotencyKey: Joi.string().uuid({ version: 'uuidv4' }).required().messages({
             'string.guid': 'Mã idempotency_key phải là UUID hợp lệ',
             'any.required': 'Mã idempotency_key là bắt buộc',
         }),
+        historicalOccurrence,
     }),
 };
 
@@ -63,7 +78,8 @@ const executeSchedulesBatch = {
                             'any.required': 'Số lượng thực tế là bắt buộc',
                         }),
                     actualProductId: Joi.string().uuid({ version: 'uuidv4' }).allow(null),
-                    executedAt: Joi.date().iso().max('now'),
+                    executedAt: executionTime,
+                    historicalOccurrence,
                     note: Joi.string().trim().max(500).allow('', null),
                     varianceReason: Joi.string().trim().max(500).allow('', null),
                     idempotencyKey: Joi.string()

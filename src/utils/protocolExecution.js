@@ -1,4 +1,5 @@
 const { Prisma } = require('@prisma/client');
+const { lifecycleReason } = require('./protocolPresentation');
 
 const TIMING = Object.freeze({
     ON_TIME: 'ON_TIME',
@@ -112,7 +113,7 @@ const executionRows = (protocol, schedules, now = new Date()) => {
                   }
                 : null,
             mealNumber: item.mealNumber,
-            cancellationReason: schedule.cancellationReason,
+            cancellationReason: lifecycleReason(schedule.cancellationReason),
             cancellationType: schedule.cancellationType,
             cancelledAt: schedule.cancelledAt,
             instructions: item.instructions,

@@ -103,8 +103,13 @@ const materialize = async (target, requestedAt) => {
                       select: { seasonId: true },
                   });
             if (!context) return { created: 0, blocked: [] };
-            await tx.$queryRaw`SELECT id FROM aquaculture_seasons WHERE id=${context.seasonId}::uuid FOR UPDATE`;
-            const now = requestedAt ?? new Date();
+            const locked = await tx.$queryRaw`
+                SELECT activated_at AS "activatedAt"
+                FROM aquaculture_seasons WHERE id=${context.seasonId}::uuid FOR UPDATE`;
+            const requested = requestedAt ?? new Date();
+            const activatedAt = locked?.[0]?.activatedAt;
+            // A sweep can start before activation and acquire the season lock after commit.
+            const now = activatedAt && activatedAt > requested ? activatedAt : requested;
             notifications.push(...(await lifecycle.reconcile(tx, context.seasonId, now)));
             const protocol = target.protocolId
                 ? await tx.protocol.findUnique({ where: { id: target.protocolId }, include })
