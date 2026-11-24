@@ -40,9 +40,9 @@ const create = {
             is: 'FINAL', then: count.required(), otherwise: count.allow(null),
         }),
         pricePerKg: decimal(999999999999.99, 2).required(),
-        // Partial harvests need a new population estimate; final harvests leave none.
+        // Legacy clients may send the exact server-derived remainder; new clients omit it.
         estimatedRemainingCount: Joi.when('harvestType', {
-            is: 'PARTIAL', then: count.required(), otherwise: Joi.valid(0, null),
+            is: 'PARTIAL', then: count.optional(), otherwise: Joi.valid(0, null),
         }),
         buyerName: Joi.string().trim().min(1).max(255).required(),
         buyerContact: Joi.string().trim().max(255).allow('', null),

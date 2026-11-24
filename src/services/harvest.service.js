@@ -131,6 +131,21 @@ const earlyHarvestWarning = (season, harvestedAt) => {
     return days < typicalDays ? messages.HARVEST.EARLY_WARNING(days, typicalDays) : null;
 };
 
+const hasDiseaseBlocker = async (tx, seasonId) => {
+    const activeCase = await tx.diseaseCase.findFirst({
+        where: { seasonId, status: { not: DISEASE_CASE_STATUS.RESOLVED } },
+        select: { id: true },
+    });
+    if (activeCase) return true;
+    // An unfinished treatment remains a restriction even if its linked case was closed.
+    const treatment = await tx.protocol.findFirst({
+        where: { seasonId, protocolType: PROTOCOL_TYPE.TREATMENT,
+            status: { in: [PROTOCOL_STATUS.APPROVED, PROTOCOL_STATUS.ACTIVE, PROTOCOL_STATUS.PAUSED] } },
+        select: { id: true },
+    });
+    return Boolean(treatment);
+};
+
 /**
  * Read the Owner's filtered history, totals and population preview.
  * RepeatableRead keeps page rows and aggregates on the same database snapshot.
@@ -172,6 +187,7 @@ const list = (ownerId, seasonId, query = {}) =>
             const items = rows.slice(0, limit).map((row) => normalize(row, season));
             const hasNextPage = rows.length > limit;
             const withdrawalState = await withdrawal.readWithdrawal(tx, seasonId, populationAt);
+            const finalReasonRequired = season.status === 'ACTIVE' && await hasDiseaseBlocker(tx, seasonId);
             return {
                 items,
                 meta: {
@@ -183,6 +199,7 @@ const list = (ownerId, seasonId, query = {}) =>
                     totalRevenue: Number(totals.revenue),
                     availableQuantityCount:
                         totals.available == null ? null : String(totals.available),
+                    finalReasonRequired: Boolean(finalReasonRequired),
                     withdrawal: {
                         ...withdrawalState,
                         ...(withdrawalState.latestEndAt != null
@@ -224,7 +241,8 @@ const comparable = (body) => ({
     quantityCount: body.quantityCount == null ? null : String(body.quantityCount),
     pricePerKg: body.pricePerKg == null ? null : Number(body.pricePerKg),
     estimatedRemainingCount:
-        body.harvestType === 'FINAL' ? '0' : String(body.estimatedRemainingCount),
+        body.harvestType === 'FINAL' ? '0'
+            : body.estimatedRemainingCount == null ? null : String(body.estimatedRemainingCount),
     buyerName: nullableText(body.buyerName),
     buyerContact: nullableText(body.buyerContact),
     note: nullableText(body.note),
@@ -248,14 +266,19 @@ const create = async (ownerId, seasonId, body, key) => {
                     if (existing.season_id !== seasonId || existing.recorded_by !== ownerId)
                         throw ApiError.conflict(M.KEY_CONFLICT);
                     const saved = normalize(existing, season);
-                    if (JSON.stringify(comparable(saved)) !== JSON.stringify(input))
+                    const savedInput = comparable(saved);
+                    // An omitted derived field is not part of the client's retry fingerprint.
+                    const replayInput = input.harvestType === 'PARTIAL' && input.estimatedRemainingCount == null
+                        ? { ...input, estimatedRemainingCount: savedInput.estimatedRemainingCount }
+                        : input;
+                    if (JSON.stringify(savedInput) !== JSON.stringify(replayInput))
                         throw ApiError.conflict(M.KEY_CONFLICT);
                     return {
                         event: {
                             ...saved,
                             warnings: [
                                 harvestSizeWarning(saved.avgSizePerKg),
-                                await biomassDeviationWarning(tx, seasonId, input, true),
+                                await biomassDeviationWarning(tx, seasonId, savedInput, true),
                                 earlyHarvestWarning(season, existing.harvested_at),
                                 !HARVEST_POLICY.withdrawalEnabled
                                     ? M.WITHDRAWAL_UNVERIFIED_WARNING
@@ -294,35 +317,22 @@ const create = async (ownerId, seasonId, body, key) => {
                 if (input.note?.length > HARVEST_LIMITS.noteMaxLength) {
                     throw ApiError.badRequest(M.NOTE_TOO_LONG(HARVEST_LIMITS.noteMaxLength));
                 }
+                // Withdrawal is unconditional; a reason applies only to disease-related final harvests.
+                const withdrawalWarning = await withdrawal.checkHarvest(tx, seasonId, harvestedAt);
+                if (await hasDiseaseBlocker(tx, seasonId)) {
+                    if (input.harvestType === 'PARTIAL') {
+                        throw validationError(M.DISEASE_ACTIVE, HARVEST_ERROR_CODE.DISEASE_ACTIVE);
+                    }
+                    if (!input.varianceReason) {
+                        throw validationError(M.FINAL_REASON_REQUIRED, HARVEST_ERROR_CODE.FINAL_REASON_REQUIRED);
+                    }
+                }
                 const available = history.remaining;
                 const quantity = input.quantityCount == null ? 0n : BigInt(input.quantityCount);
-                const remaining = BigInt(input.estimatedRemainingCount);
+                let remaining = 0n;
                 if (input.harvestType === 'FINAL') {
                     if (input.quantityCount == null || quantity <= 0n) {
                         throw validationError(M.FINAL_COUNT_REQUIRED, HARVEST_ERROR_CODE.FINAL_COUNT_REQUIRED);
-                    }
-                    if (!input.varianceReason) {
-                        const activeCase = await tx.diseaseCase.findFirst({
-                            where: {
-                                seasonId,
-                                status: { in: [DISEASE_CASE_STATUS.OPEN, DISEASE_CASE_STATUS.IN_TREATMENT] },
-                            },
-                            select: { id: true },
-                        });
-                        // Approved treatment can remain on a monitoring case outside the active-case check.
-                        const treatment = activeCase ? null : await tx.protocol.findFirst({
-                            where: {
-                                seasonId,
-                                protocolType: PROTOCOL_TYPE.TREATMENT,
-                                status: PROTOCOL_STATUS.APPROVED,
-                                diseaseCaseId: { not: null },
-                                diseaseCase: { is: { status: { not: DISEASE_CASE_STATUS.RESOLVED } } },
-                            },
-                            select: { id: true },
-                        });
-                        if (activeCase || treatment) {
-                            throw validationError(M.FINAL_REASON_REQUIRED, HARVEST_ERROR_CODE.FINAL_REASON_REQUIRED);
-                        }
                     }
                 }
                 if (input.harvestType === 'PARTIAL') {
@@ -333,25 +343,25 @@ const create = async (ownerId, seasonId, body, key) => {
                             HARVEST_ERROR_CODE.PARTIAL_COUNT_REQUIRED,
                         );
                     }
+                    if (available == null) {
+                        throw validationError(M.POPULATION_UNKNOWN, HARVEST_ERROR_CODE.POPULATION_UNKNOWN);
+                    }
+                    remaining = BigInt(available) - quantity;
                     if (remaining <= 0n) {
                         throw validationError(
                             messages.HARVEST.PARTIAL_EXHAUSTED,
                             HARVEST_ERROR_CODE.POPULATION_MISMATCH,
                         );
                     }
-                }
-                if (
-                    available != null &&
-                    quantity + remaining > BigInt(available) &&
-                    !input.varianceReason
-                ) {
-                    throw validationError(
-                        M.VARIANCE_REASON_REQUIRED,
-                        HARVEST_ERROR_CODE.VARIANCE_REASON_REQUIRED,
-                    );
+                    if (input.estimatedRemainingCount != null && BigInt(input.estimatedRemainingCount) !== remaining) {
+                        throw validationError(
+                            M.PARTIAL_MISMATCH(String(available), quantity.toString(), remaining.toString()),
+                            HARVEST_ERROR_CODE.POPULATION_MISMATCH,
+                        );
+                    }
+                    input.estimatedRemainingCount = remaining.toString();
                 }
                 const biomassWarning = await biomassDeviationWarning(tx, seasonId, input);
-                const withdrawalWarning = await withdrawal.checkHarvest(tx, seasonId, harvestedAt);
                 // Decimal arithmetic avoids binary floating-point drift in revenue and size calculations.
                 const weight = new Prisma.Decimal(input.totalWeightKg);
                 const price =

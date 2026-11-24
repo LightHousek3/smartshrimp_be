@@ -33,7 +33,7 @@ const readWithdrawal = async (tx, seasonId, at) => {
     };
 };
 
-/** Plan reminders may show this state; only an actual harvest request can establish its own eligibility. */
+/** Enforce withdrawal eligibility for every new harvest, regardless of type or owner reason. */
 const checkHarvest = async (tx, seasonId, harvestedAt) => {
     const state = await readWithdrawal(tx, seasonId, harvestedAt);
     if (!state.verified) return state.warning;
