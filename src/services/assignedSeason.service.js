@@ -4,6 +4,9 @@ const { messages, PERSONNEL_ROLE, SEASON_STATUS, ASSIGNED_SEASON_LIMITS } = requ
 
 // Prisma Decimal serializes as a string by default; the app contract expects number|null.
 const number = (value) => value == null ? null : Number(value);
+/**
+ * Keep database calendar dates as YYYY-MM-DD values in technician responses.
+ */
 const dateOnly = (value) => value?.toISOString().slice(0, 10) ?? null;
 
 /**
@@ -77,6 +80,9 @@ const listSelect = {
     },
 };
 
+/**
+ * Flatten the season assignment and expose the latest health status with pond and farm context.
+ */
 const normalizeListItem = ({ season: { healthLogs = [], pond, ...season }, assignedAt }) => ({
     ...season,
     stockingDate: dateOnly(season.stockingDate),

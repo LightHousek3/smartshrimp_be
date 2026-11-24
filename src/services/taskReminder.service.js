@@ -8,6 +8,10 @@ const { errorDetail } = require('../utils/productionSchedule');
 const halfwayAt = (task) =>
     task.dueAt && new Date(task.createdAt.getTime() + (task.dueAt - task.createdAt) / 2);
 
+/**
+ * Lock and recheck the task before recording reminders so concurrent job runs share the same delivery
+ * state.
+ */
 const remindTask = async (taskId, now = new Date()) => {
     const notifications = [];
     await jobTransaction(async (tx) => {
@@ -59,6 +63,9 @@ const remindTask = async (taskId, now = new Date()) => {
     notices.deliver(notifications);
 };
 
+/**
+ * Sweep scheduled open tasks in bounded batches and continue after individual failures.
+ */
 const remind = async ({ now = new Date(), isRunning = () => true } = {}) => {
     let cursor,
         rows,

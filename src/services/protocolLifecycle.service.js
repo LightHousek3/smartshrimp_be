@@ -23,6 +23,9 @@ const isActivationProduction = async (tx, protocolId, activatedAt) =>
             toStatus: 'ACTIVE', changedAt: activatedAt },
     }));
 
+/**
+ * Write a protocol transition to its audit history inside the caller's transaction.
+ */
 const event = (tx, protocol, status, eventType, changedBy, reason, eventData, at = new Date()) =>
     tx.protocolStatusHistory.create({
         data: {
@@ -243,6 +246,9 @@ const productionReadiness = async (
     at,
     { ignoreHoldIds = [], calculate = false } = {},
 ) => {
+    /**
+     * Return a resume restriction with a reason code and both recovery options disabled by default.
+     */
     const fail = (code, message, extra = {}) => ({
         canResume: false,
         canCloseWithoutProduction: false,
@@ -451,6 +457,9 @@ const pauseProduction = async (tx, seasonId, at) => {
     }
 };
 
+/**
+ * Collect the owner and current active assignees whose account roles still match their assignments.
+ */
 const participants = async (tx, season) => {
     const personnel = await tx.seasonPersonnelAssignment.findMany({
         where: {

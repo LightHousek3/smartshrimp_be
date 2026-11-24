@@ -5,6 +5,8 @@ const { expertProtocolTemplateValidator } = require('../validators');
 const { ACCOUNT_ROLE } = require('../constants');
 
 const router = express.Router();
+
+/** Prevent cached template data from masking recent changes in the editor. */
 router.use((req, res, next) => {
     res.set('Cache-Control', 'private, no-store');
     next();

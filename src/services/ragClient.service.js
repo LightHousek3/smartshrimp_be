@@ -16,6 +16,9 @@ const responseSchema = Joi.object({
     processing_time_ms: Joi.number().integer().min(0).max(2147483647).allow(null).required(),
 });
 
+/**
+ * Send the query to the retrieval service with only active, ready documents eligible as sources.
+ */
 const ask = async ({ accountId, conversationId, seasonId, question, topK }) => {
     const started = Date.now();
     try {

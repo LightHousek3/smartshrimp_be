@@ -14,6 +14,9 @@ const {
 } = require('../constants');
 
 const uuid = Joi.string().uuid({ version: 'uuidv4' });
+/**
+ * Use consistent spacing in stored inventory names and lot numbers.
+ */
 const normalizeWhitespace = (value) => value.trim().replace(/\s+/gu, ' ');
 /**
  * Collapse whitespace before checking persisted name and lot-number lengths.

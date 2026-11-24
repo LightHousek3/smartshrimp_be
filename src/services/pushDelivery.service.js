@@ -7,11 +7,18 @@ const { localizeNotification } = require('../utils');
 const { cleared } = require('./pushDevice.service');
 const { presentNotifications } = require('./notification.service');
 
+/**
+ * Select due push notifications with attempts remaining, including processing leases eligible for
+ * reclaim.
+ */
 const ready = (now) => ({
     pushStatus: { in: ['pending', 'processing'] },
     pushAttempts: { lt: limits.maxAttempts },
     pushNextAttemptAt: { lte: now },
 });
+/**
+ * Limit push text by Unicode code points so truncation preserves surrogate pairs.
+ */
 const short = (text, size) =>
     Array.from(text ?? '')
         .slice(0, size)

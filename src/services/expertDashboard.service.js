@@ -8,6 +8,9 @@ const localDate = new Intl.DateTimeFormat('en-US', {
     day: '2-digit',
 });
 
+/**
+ * Scope dashboard data to current expert assignments in the requested season status.
+ */
 const activeAssignment = (accountId, status) => ({
     accountId,
     role: PERSONNEL_ROLE.EXPERT,
@@ -15,8 +18,14 @@ const activeAssignment = (accountId, status) => ({
     season: { status },
 });
 
+/**
+ * Expose decimal metrics as numbers while preserving missing measurements.
+ */
 const toNumber = (value) => (value == null ? null : Number(value));
 
+/**
+ * Count the stocking date as day one using the Vietnam calendar and return zero before stocking.
+ */
 const getDayOfCulture = (stockingDate, now) => {
     if (!stockingDate) return null;
     const parts = Object.fromEntries(
@@ -29,6 +38,10 @@ const getDayOfCulture = (stockingDate, now) => {
     return Math.max(0, Math.floor((today - stockingDate.getTime()) / 86400000) + 1);
 };
 
+/**
+ * Summarize the latest health sample and calculate survival against the initial stocked quantity when
+ * available.
+ */
 const normalizeSeason = ({ season }, now) => {
     const log = season.healthLogs[0];
     const population = toNumber(log?.estimatedPopulation);
@@ -50,6 +63,9 @@ const normalizeSeason = ({ season }, now) => {
     };
 };
 
+/**
+ * Return only the recent case fields and location labels needed by the dashboard.
+ */
 const normalizeCase = (item) => ({
     id: item.id,
     title: item.title,
@@ -62,6 +78,10 @@ const normalizeCase = (item) => ({
     farm: { name: item.season.pond.farm.name },
 });
 
+/**
+ * Combine current season assignments, cases assigned to the expert and protocols they authored
+ * in one dashboard response.
+ */
 const getExpertDashboard = async (accountId, now = new Date()) => {
     // Batch reads share one connection instead of competing with jobs for the session pool.
     const [

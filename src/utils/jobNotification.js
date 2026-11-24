@@ -33,6 +33,10 @@ const save = async (tx, key, data) => {
         : null;
 };
 
+/**
+ * Publish job notifications after persistence and let the inbox remain available if realtime delivery
+ * fails.
+ */
 const deliver = (notices) => {
     for (const notice of notices.filter(Boolean)) {
         try {

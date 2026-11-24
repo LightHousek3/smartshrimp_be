@@ -3,6 +3,9 @@ const jobTransaction = require('../utils/jobTransaction');
 const DAY_MS = 86400000;
 const BATCH_SIZE = 500;
 const MAX_BATCHES = 20;
+/**
+ * Include absent retention timestamps alongside values at or before the cleanup cutoff.
+ */
 const oldOrEmpty = (field, cutoff) => ({ OR: [{ [field]: null }, { [field]: { lte: cutoff } }] });
 
 /** Retain every live deadline and recent terminal event, rather than deleting by creation time alone. */

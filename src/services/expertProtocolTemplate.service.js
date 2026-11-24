@@ -12,7 +12,13 @@ const {
 const { messages, FARM_STATUS, PRODUCTION_PROTOCOL_LIMITS } = require('../constants');
 const { materialRevision, assertMaterialRevision } = require('../utils/protocolMaterial');
 
+/**
+ * Use the same response for missing templates and templates outside the account's scope.
+ */
 const notFound = () => ApiError.notFound(messages.EXPERT_PROTOCOL_TEMPLATE.NOT_FOUND);
+/**
+ * Limit farm-scoped template operations to active farms owned by the specified account.
+ */
 const activeScope = (ownerId) => ({ farm: { ownerId, status: FARM_STATUS.ACTIVE } });
 // Detached templates remain readable as history but cannot enter any write path.
 const readScope = (account) => ({
@@ -48,6 +54,9 @@ const materialSelect = {
     manufacturerId: true,
     compliance: true,
 };
+/**
+ * Expose the manufacturer with the API's lowercase supplier type when a supplier is linked.
+ */
 const normalizeManufacturer = (row) =>
     row ? { ...row, supplierType: row.supplierType?.toLowerCase() ?? null } : null;
 /** Serialize withdrawal days consistently for catalog and proposal responses. */
@@ -758,6 +767,9 @@ module.exports = {
     getCreationOptions,
     getMaterials,
     createTemplate: saveTemplate,
+    /**
+     * Require an existing template ID before entering the shared create and update flow.
+     */
     updateTemplate: (account, body, templateId) => {
         if (!templateId) throw notFound();
         return saveTemplate(account, body, templateId);

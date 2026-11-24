@@ -11,17 +11,32 @@ const ACCOUNT_FIELD_RULES = Object.freeze({
 const FULL_NAME_PATTERN = /^\p{L}[\p{L}\p{M}]*\.?(?: \p{L}[\p{L}\p{M}]*\.?)*$/u;
 const VIETNAMESE_MOBILE_PATTERN = /^0(?:3[2-9]|5[25689]|7[06789]|8[1-9]|9[0-46-9])\d{7}$/;
 
+/**
+ * Count Unicode code points so surrogate pairs do not count as two characters.
+ */
 const characterCount = (value) => Array.from(value).length;
 
+/**
+ * Normalize names to NFC and collapse whitespace before validation and persistence.
+ */
 const normalizeFullName = (value) => value.normalize('NFC').trim().replace(/\s+/gu, ' ');
 
+/**
+ * Convert international +84 mobile numbers to the domestic form used for storage.
+ */
 const normalizeVietnamesePhone = (value) => {
     const compact = value.trim().replace(/[\s.()-]/g, '');
     return compact.startsWith('+84') ? `0${compact.slice(3)}` : compact;
 };
 
+/**
+ * Report a custom field error through Joi so it follows the standard validation flow.
+ */
 const validationError = (helpers, message) => helpers.message({ 'any.custom': message });
 
+/**
+ * Build the shared ASCII email field with normalized casing and the account storage limit.
+ */
 const emailField = () =>
     Joi.string()
         .trim()
@@ -32,6 +47,9 @@ const emailField = () =>
         .messages({ 'string.email': 'Email không hợp lệ.' })
         .required();
 
+/**
+ * Validate the normalized name's character count and allowed characters before saving it.
+ */
 const fullNameField = ({ required = false } = {}) => {
     let schema = Joi.string().custom((value, helpers) => {
         const normalized = normalizeFullName(value);
@@ -63,6 +81,10 @@ const fullNameField = ({ required = false } = {}) => {
     return schema;
 };
 
+/**
+ * Validate a domestic-format Vietnamese mobile number after normalization and honor the caller's
+ * nullability rules.
+ */
 const vietnamesePhoneField = ({ required = false, allowNull = false } = {}) => {
     let schema = Joi.string().custom((value, helpers) => {
         const normalized = normalizeVietnamesePhone(value);
@@ -78,6 +100,10 @@ const vietnamesePhoneField = ({ required = false, allowNull = false } = {}) => {
     return schema;
 };
 
+/**
+ * Enforce the action's minimum character count and bcrypt's UTF-8 byte limit without altering the
+ * credential.
+ */
 const passwordField = ({ minimumLength = ACCOUNT_FIELD_RULES.passwordMinLength } = {}) =>
     Joi.string()
         .label('Mật khẩu')
@@ -95,6 +121,9 @@ const passwordField = ({ minimumLength = ACCOUNT_FIELD_RULES.passwordMinLength }
         })
         .required();
 
+/**
+ * Classify password strength from length and character groups for profile feedback.
+ */
 const getPasswordStrength = (password) => {
     if (characterCount(password) < ACCOUNT_FIELD_RULES.passwordMinLength) return 'TOO_SHORT';
 

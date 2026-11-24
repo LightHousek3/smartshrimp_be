@@ -4,12 +4,18 @@ const ragClient = require('./ragClient.service');
 const { ApiError } = require('../utils');
 const { ACCOUNT_ROLE, ACCOUNT_STATUS, PERSONNEL_ROLE, SEASON_STATUS, RAG_STATUS, messages } = require('../constants');
 
+/**
+ * Require a currently active technician account for retrieval conversations.
+ */
 const requireTechnician = async (db, accountId) => {
     const account = await db.account.findUnique({ where: { id: accountId }, select: { role: true, status: true } });
     if (account?.role !== ACCOUNT_ROLE.TECHNICIAN || account.status !== ACCOUNT_STATUS.ACTIVE) {
         throw ApiError.forbidden(messages.RAG.FORBIDDEN);
     }
 };
+/**
+ * Require a current season assignment and restrict closed seasons to read operations.
+ */
 const requireSeason = async (db, accountId, seasonId, writing = false) => {
     if (!seasonId) throw ApiError.forbidden(messages.RAG.SEASON_REQUIRED);
     const assignment = await db.seasonPersonnelAssignment.findFirst({
@@ -22,16 +28,25 @@ const requireSeason = async (db, accountId, seasonId, writing = false) => {
     }
     return assignment.season;
 };
+/**
+ * Scope the conversation to its owner and recheck access to the linked season.
+ */
 const requireConversation = async (db, accountId, id, writing = false) => {
     const conversation = await db.ragConversation.findFirst({ where: { id, accountId } });
     if (!conversation) throw ApiError.notFound(messages.RAG.NOT_FOUND);
     const season = await requireSeason(db, accountId, conversation.seasonId, writing);
     return { ...conversation, season };
 };
+/**
+ * Expose numeric similarity and a localized warning for the saved retrieval outcome.
+ */
 const normalizeQuery = (query) => ({
     ...query, topSimilarity: query.topSimilarity == null ? null : Number(query.topSimilarity),
     warning: messages.RAG_WARNINGS[query.queryStatus] || null,
 });
+/**
+ * Use serializable writes and surface concurrent conflicts through the RAG API.
+ */
 const atomic = async (work) => {
     try {
         return await prisma.$transaction(work, { isolationLevel: 'Serializable' });
@@ -72,6 +87,9 @@ const askQuestion = async (accountId, input) => {
         return normalizeQuery(query);
     });
 };
+/**
+ * Build offset pagination metadata from the filtered conversation or query total.
+ */
 const metaFor = (page, limit, totalResults) => ({ page, limit, totalResults, totalPages: Math.ceil(totalResults / limit), hasNextPage: page * limit < totalResults });
 
 /**

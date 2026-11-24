@@ -46,18 +46,27 @@ const SEASON_WITH_FARM_SELECT = {
 
 // Scope resolvers ------------------------------------------------------------
 
+/**
+ * Load season and farm context for health log permission checks.
+ */
 const findSeason = (seasonId) =>
     prisma.aquacultureSeason.findUnique({
         where: { id: seasonId },
         select: SEASON_WITH_FARM_SELECT,
     });
 
+/**
+ * Check that the account still holds the required season role.
+ */
 const hasActiveAssignment = (accountId, seasonId, role) =>
     prisma.seasonPersonnelAssignment.findFirst({
         where: { seasonId, accountId, role, unassignedAt: null },
         select: { id: true },
     });
 
+/**
+ * Require a current technician assignment and an active season when requested.
+ */
 const resolveKtvScope = async (accountId, seasonId, { requireActiveSeason = false } = {}) => {
     const season = await findSeason(seasonId);
     if (!season) {
@@ -73,6 +82,9 @@ const resolveKtvScope = async (accountId, seasonId, { requireActiveSeason = fals
     return season;
 };
 
+/**
+ * Require a current expert assignment to read the season's health logs.
+ */
 const resolveExpertScope = async (accountId, seasonId) => {
     const season = await findSeason(seasonId);
     if (!season) {
@@ -85,6 +97,9 @@ const resolveExpertScope = async (accountId, seasonId) => {
     return season;
 };
 
+/**
+ * Allow owner access only when the season belongs to the account's farm.
+ */
 const resolveOwnerScope = async (accountId, seasonId) => {
     const season = await findSeason(seasonId);
     if (!season || season.pond.farm.ownerId !== accountId) {
@@ -101,10 +116,19 @@ const SCOPE_RESOLVERS = {
 
 // Normalization and formatting helpers ----------------------------------------
 
+/**
+ * Keep missing health measurements distinct from numeric zero in API responses.
+ */
 const toNumberOrNull = (value) => (value === null || value === undefined ? null : Number(value));
 
+/**
+ * Keep absent health log timestamps as null in API responses.
+ */
 const toIsoOrNull = (value) => (value === null || value === undefined ? null : value.toISOString());
 
+/**
+ * Use the stocking date as day one for an observation and require both dates to calculate it.
+ */
 const calculateDoc = (stockingDate, recordedAt) => {
     if (!stockingDate || !recordedAt) return null;
     const stock = new Date(stockingDate);
@@ -114,6 +138,9 @@ const calculateDoc = (stockingDate, recordedAt) => {
     return Math.max(1, diffDays + 1);
 };
 
+/**
+ * Expose observation and voiding details with account names resolved by the caller.
+ */
 const normalizeLog = (log, stockingDate, accountMap = {}) => {
     const recorder = accountMap[log.recordedBy] || null;
     const voider = log.voidedBy ? accountMap[log.voidedBy] || null : null;
@@ -151,6 +178,9 @@ const normalizeLog = (log, stockingDate, accountMap = {}) => {
     };
 };
 
+/**
+ * Load recorder and voider account details together for a page of observations.
+ */
 const fetchAccountMap = async (accountIds) => {
     const validIds = [...new Set(accountIds.filter(Boolean))];
     if (validIds.length === 0) return {};
@@ -169,11 +199,17 @@ const fetchAccountMap = async (accountIds) => {
 
 // Cursor condition ----------------------------------------------------------
 
+/**
+ * Preserve the recorded time and log ID used to order the next page.
+ */
 const encodeCursor = ({ recordedAt, id }) =>
     Buffer.from(JSON.stringify({ recordedAt: recordedAt.toISOString(), logId: id })).toString(
         'base64url',
     );
 
+/**
+ * Reject malformed cursors before using their timestamp and UUID in a query.
+ */
 const decodeCursor = (cursor) => {
     try {
         const value = JSON.parse(Buffer.from(cursor, 'base64url').toString('utf8'));
@@ -193,6 +229,9 @@ const decodeCursor = (cursor) => {
 const IDEMPOTENCY_TTL_MS = 10 * 60 * 1000;
 const idempotencyStore = new Map();
 
+/**
+ * Discard expired process-local retry entries before checking a request.
+ */
 const idempotencyGet = (key) => {
     if (!key) return null;
     const entry = idempotencyStore.get(key);
@@ -204,13 +243,17 @@ const idempotencyGet = (key) => {
     return entry;
 };
 
+/**
+ * Retain the in-flight or completed submission state for the retry window.
+ */
 const idempotencySet = (key, value) => {
     if (!key) return;
     idempotencyStore.set(key, { ...value, expiresAt: Date.now() + IDEMPOTENCY_TTL_MS });
 };
 
-/** Record a new quantitative shrimp health observation. */
-
+/**
+ * Record an authorized observation and recalculate dependent population estimates in one transaction.
+ */
 const createShrimpHealthLog = async (accountId, seasonId, data, idempotencyKey = '') => {
     const season = await resolveKtvScope(accountId, seasonId, { requireActiveSeason: true });
 
@@ -398,8 +441,9 @@ const createShrimpHealthLog = async (accountId, seasonId, data, idempotencyKey =
     }
 };
 
-/** List paginated health observations for the assigned season. */
-
+/**
+ * Apply role-specific season access before reading a filtered cursor page of observations.
+ */
 const listShrimpHealthLogs = async (accountId, seasonId, query = {}, scope = 'ktv') => {
     const resolver = SCOPE_RESOLVERS[scope];
     if (!resolver) {
@@ -495,8 +539,9 @@ const listShrimpHealthLogs = async (accountId, seasonId, query = {}, scope = 'kt
     };
 };
 
-/** Retrieve single health observation detail with actor metadata. */
-
+/**
+ * Read and enrich the observation only within the authorized season.
+ */
 const getShrimpHealthLogDetail = async (accountId, seasonId, logId, scope = 'ktv') => {
     const resolver = SCOPE_RESOLVERS[scope];
     if (!resolver) {
@@ -515,8 +560,10 @@ const getShrimpHealthLogDetail = async (accountId, seasonId, logId, scope = 'ktv
     return normalizeLog(log, season.stockingDate, accountMap);
 };
 
-/** Void an erroneous health observation and recalculate dependent schedules. */
-
+/**
+ * Void the observation, cancel unexecuted schedules that used it, and recalculate remaining estimates
+ * atomically.
+ */
 const voidShrimpHealthLog = async (accountId, seasonId, logId, { voidReason }) => {
     if (!voidReason || !voidReason.trim()) {
         throw ApiError.badRequest(messages.SHRIMP_HEALTH_LOG.VOID_REASON_REQUIRED);
@@ -590,8 +637,9 @@ const voidShrimpHealthLog = async (accountId, seasonId, logId, { voidReason }) =
     return normalizeLog(updated, season.stockingDate, accountMap);
 };
 
-/** Compute growth metrics, health status distribution and day-of-culture time series. */
-
+/**
+ * Label observations by Vietnam calendar day or by the Monday that starts their week.
+ */
 const bucketKeyOf = (date, granularity) => {
     const shifted = new Date(date.getTime() + FARM_TZ_OFFSET_MS);
     const y = shifted.getUTCFullYear();
@@ -605,6 +653,10 @@ const bucketKeyOf = (date, granularity) => {
     return `${y}-${m}-${String(d).padStart(2, '0')}`;
 };
 
+/**
+ * Build the growth series and distribution from valid observations and derive current survival from
+ * the latest valid sample.
+ */
 const getStatistics = async (accountId, seasonId, query = {}, scope = 'ktv') => {
     const resolver = SCOPE_RESOLVERS[scope];
     if (!resolver) {

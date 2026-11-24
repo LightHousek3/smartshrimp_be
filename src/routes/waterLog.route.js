@@ -25,23 +25,15 @@ router.get('/metadata', validate(waterLogValidator.getMetadata), waterLogControl
  * @desc    Create a water quality log for an active assigned season and check warning thresholds
  * @access  Technician
  */
-router.post(
-    '/',
-    validate(waterLogValidator.createWaterLog),
-    waterLogController.createWaterLog,
-);
+router.post('/', validate(waterLogValidator.createWaterLog), waterLogController.createWaterLog);
 
 /**
  * @route   GET /api/v1/technician/seasons/:seasonId/water-logs
  * @desc    List water quality logs for an assigned season with filters and pagination
  * @access  Technician
  */
-router.get(
-    '/',
-    validate(waterLogValidator.listWaterLogs),
-    waterLogController.listWaterLogs,
-);
-// Đặt /statistics TRƯỚC /:logId để không bị route param nuốt.
+router.get('/', validate(waterLogValidator.listWaterLogs), waterLogController.listWaterLogs);
+// Register /statistics before /:logId so the ID route cannot consume it.
 
 /**
  * @route   GET /api/v1/technician/seasons/:seasonId/water-logs/statistics

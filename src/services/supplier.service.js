@@ -25,10 +25,16 @@ const SUPPLIER_SELECT = {
     },
 };
 
+/**
+ * Match persisted timestamps within the millisecond precision returned to clients.
+ */
 const versionRange = (date) => ({
     gte: date,
     lt: new Date(date.getTime() + 1),
 });
+/**
+ * Normalize whitespace and Vietnamese casing for owner-scoped supplier uniqueness.
+ */
 const nameKey = (name) => name.trim().replace(/\s+/gu, ' ').toLocaleLowerCase('vi');
 
 /**
@@ -66,6 +72,9 @@ const deletionHints = async (client, ownerId) => {
     return hints;
 };
 
+/**
+ * Expose supplier usage and management flags, including records that still need a supplier type.
+ */
 const normalizeSupplier = ({ _count, ...supplier }, hints) => ({
     ...supplier,
     schemaVersion: 2,
@@ -79,6 +88,9 @@ const normalizeSupplier = ({ _count, ...supplier }, hints) => ({
     canDelete: hints.get(supplier.id) === true,
     metadataLocked: hints.identityLocked?.has(supplier.id) === true,
 });
+/**
+ * Limit supplier detail and mutations to the owning account.
+ */
 const findSupplier = async (client, ownerId, supplierId) => {
     const supplier = await client.supplier.findFirst({
         where: {
@@ -128,6 +140,10 @@ const writeSupplier = async (work) => {
     }
 };
 
+/**
+ * Reject equivalent names within the owner's catalog while allowing the edited supplier to retain its
+ * name.
+ */
 const requireUniqueName = async (client, ownerId, name, excludedId) => {
     const candidates = await client.supplier.findMany({
         where: {
@@ -141,6 +157,9 @@ const requireUniqueName = async (client, ownerId, name, excludedId) => {
     }
 };
 
+/**
+ * Normalize the requested status for storage and accept the legacy isActive field as a fallback.
+ */
 const writeData = ({ status, isActive, ...data }) => ({
     ...data,
     ...(status !== undefined
@@ -355,8 +374,10 @@ const deleteSupplier = (farmId, supplierId, ownerId) =>
 module.exports = {
     getSuppliers: async (...args) =>
         ((await legacyRead.isV2()) ? getSuppliers : legacyRead.getSuppliers)(...args),
+
     getSupplier: async (...args) =>
         ((await legacyRead.isV2()) ? getSupplier : legacyRead.getSupplier)(...args),
+
     createSupplier: legacyRead.guardWrite(createSupplier),
     updateSupplier: legacyRead.guardWrite(updateSupplier),
     deleteSupplier: legacyRead.guardWrite(deleteSupplier),

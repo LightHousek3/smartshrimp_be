@@ -320,21 +320,30 @@ const summary = (row) => ({
     ...(row.runStatus === AI_RUN_STATUS.SUCCESS && recognitionResult(row)),
 });
 
-/** Return an owned result with temporary image access and compatibility for legacy snapshots. */
-const detail = (row) => {
-    const recognition = row.runStatus === AI_RUN_STATUS.SUCCESS ? recognitionResult(row) : null;
+/** Issue temporary access only for assets that belong to this inference. */
+const diagnosisImages = (row) => {
     const expiresAt = Math.floor(Date.now() / 1000) + AI_LIMITS.IMAGE_URL_TTL_SECONDS;
     const assets = row.inputSnapshot?.images;
     const hasStoredAssets = Array.isArray(assets) && assets.length === row.imageUrls.length &&
         assets.every((image, index) => image && AI_IMAGE_TYPES[image.mimeType] &&
             image.storageKey === imageKey(row.id, index, { mimetype: image.mimeType }));
+    return hasStoredAssets
+        ? {
+            imageUrls: assets.map((image) => imageDownloadUrl(image.storageKey, expiresAt)),
+            imageUrlsExpireAt: new Date(expiresAt * 1000),
+        }
+        : { imageUrls: row.imageUrls };
+};
+
+/** Return an owned result with temporary image access and compatibility for legacy snapshots. */
+const detail = (row) => {
+    const recognition = row.runStatus === AI_RUN_STATUS.SUCCESS ? recognitionResult(row) : null;
     return {
         id: row.id,
         seasonId: row.seasonId,
         createdAt: row.createdAt,
         runStatus: row.runStatus,
-        imageUrls: hasStoredAssets ? assets.map((image) => imageDownloadUrl(image.storageKey, expiresAt)) : row.imageUrls,
-        ...(hasStoredAssets && { imageUrlsExpireAt: new Date(expiresAt * 1000) }),
+        ...diagnosisImages(row),
         modelVersion: row.modelVersion,
         processingTimeMs: row.processingTimeMs,
         ...(recognition ? {
@@ -345,6 +354,43 @@ const detail = (row) => {
             recommendation: recognition.recognitionStatus === AI_RECOGNITION_STATUS.RECOGNIZED
                 ? recommendationText(row.recommendation) : text.LOW_CONFIDENCE,
         } : { error: { code: row.errorCode, message: row.errorMessage } }),
+    };
+};
+
+/** Read the successful result attached by the reporter after the caller verifies case ownership. */
+const readCaseAssessment = async (client, { aiDiagnosisId, seasonId, reportedBy }) => {
+    if (!aiDiagnosisId) return null;
+    const row = await client.aiDiagnosisLog.findFirst({
+        where: {
+            id: aiDiagnosisId, seasonId, requestedBy: reportedBy, runStatus: AI_RUN_STATUS.SUCCESS,
+        },
+        select: {
+            id: true, predictedLabel: true, predictions: true, confidence: true,
+            recommendation: true, createdAt: true, processingTimeMs: true,
+            imageUrls: true, inputSnapshot: true,
+        },
+    });
+    if (!row) return null;
+
+    const storedConfidence = row.predictions?.[0]?.probability ?? row.confidence;
+    const confidence = storedConfidence == null ? null : Number(storedConfidence);
+    const recognition = confidence !== null && confidence >= 0 && confidence <= 1
+        ? recognitionResult(row, confidence)
+        : {};
+    let images = {};
+    try {
+        images = diagnosisImages(row);
+    } catch (error) {
+        if (!(error instanceof ApiError) || error.statusCode !== 503) throw error;
+        // Temporary storage configuration issues should only hide the original images.
+    }
+    return {
+        ...recognition,
+        recommendation: recognition.recognitionStatus === AI_RECOGNITION_STATUS.RECOGNIZED &&
+            row.recommendation ? recommendationText(row.recommendation) : null,
+        createdAt: row.createdAt,
+        processingTimeMs: row.processingTimeMs,
+        ...images,
     };
 };
 
@@ -488,4 +534,6 @@ const getDiagnosis = async (accountId, seasonId, id) => {
     return detail(row);
 };
 
-module.exports = { assertCanCreateDiagnosis, createDiagnosis, listDiagnoses, getDiagnosis };
+module.exports = {
+    assertCanCreateDiagnosis, createDiagnosis, listDiagnoses, getDiagnosis, readCaseAssessment,
+};

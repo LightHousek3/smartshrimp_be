@@ -8,6 +8,9 @@ const {
     OPEN_SEASON_STATUSES,
 } = require('../constants');
 
+/**
+ * Ignore casing and whitespace when checking for duplicate pond names.
+ */
 const normalizePondNameKey = (name) => name.replace(/\s+/gu, '').toLocaleLowerCase('vi');
 
 /** Round capacity to the database's two decimal places before comparing volumes. */
@@ -67,6 +70,9 @@ const normalizePond = (pond) => ({
     volumeM3: pond.volumeM3 == null ? null : Number(pond.volumeM3),
 });
 
+/**
+ * Include the selected current season in pond detail, with null when the pond has none.
+ */
 const normalizePondDetail = ({ seasons = [], ...pond }) => ({
     ...normalizePond(pond),
     currentSeason: seasons[0] || null,

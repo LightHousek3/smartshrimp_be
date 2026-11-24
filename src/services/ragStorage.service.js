@@ -13,18 +13,33 @@ const settings = () => {
     }
     return value;
 };
+/**
+ * Use the configured Cloudinary raw asset endpoint for document storage operations.
+ */
 const endpoint = (action) => `https://api.cloudinary.com/v1_1/${settings().cloudName}/raw/${action}`;
+/**
+ * Attach upload account credentials and sign only the operation parameters.
+ */
 const signed = (params) => ({ ...params, api_key: settings().apiKey, signature: sign(params, settings().apiSecret) });
+/**
+ * Authorize a direct upload to the assigned authenticated storage key with overwrites disabled.
+ */
 const createUploadIntent = (storageKey) => {
     const params = signed({ public_id: storageKey, asset_folder: RAG_DOCUMENT_ASSET_FOLDER,
         timestamp: Math.floor(Date.now() / 1000), type: 'authenticated', overwrite: 'false' });
     return { url: endpoint('upload'), fields: params };
 };
+/**
+ * Verify that the upload receipt matches the expected storage key and signed asset version.
+ */
 const verifyUpload = (storageKey, { publicId, version, signature }) => {
     if (publicId !== storageKey || !Number.isSafeInteger(version) || version < 1 || !/^[a-f0-9]{40}$/.test(signature || '')) return false;
     const expected = sign({ public_id: storageKey, version }, settings().apiSecret);
     return timingSafeEqual(Buffer.from(expected, 'hex'), Buffer.from(signature, 'hex'));
 };
+/**
+ * Fetch the authenticated raw file using a short-lived signature and enforce the document size limit.
+ */
 const download = async (storageKey) => {
     // Raw public IDs already contain the extension: do not append a second format.
     const timestamp = Math.floor(Date.now() / 1000);
@@ -56,6 +71,9 @@ const download = async (storageKey) => {
         throw createDocumentError('RAG_STORAGE_UNAVAILABLE');
     }
 };
+/**
+ * Invalidate the stored asset and treat an already absent file as a successful deletion.
+ */
 const destroy = async (storageKey) => {
     const params = signed({ public_id: storageKey, timestamp: Math.floor(Date.now() / 1000), type: 'authenticated', invalidate: 'true' });
     try {

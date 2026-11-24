@@ -17,6 +17,9 @@ const unregisterDevice = asyncHandler(async (req, res) => {
     res.status(204).send();
 });
 
+/**
+ * GET /notifications
+ */
 const getListNotification = asyncHandler(async (req, res) => {
     const { notifications, meta } = await notificationService.getListNotification(
         req.account.id,
@@ -30,6 +33,9 @@ const getListNotification = asyncHandler(async (req, res) => {
     });
 });
 
+/**
+ * GET /notifications/:notificationId
+ */
 const getNotification = asyncHandler(async (req, res) => {
     const notification = await notificationService.getNotificationById(
         req.account.id,
@@ -43,6 +49,9 @@ const getNotification = asyncHandler(async (req, res) => {
     });
 });
 
+/**
+ * PATCH /notifications/read-all
+ */
 const markAllAsRead = asyncHandler(async (req, res) => {
     const result = await notificationService.markAllAsRead(req.account.id);
 
@@ -52,6 +61,9 @@ const markAllAsRead = asyncHandler(async (req, res) => {
     });
 });
 
+/**
+ * GET /notifications/:notificationId/reference-context
+ */
 const getReferenceContext = asyncHandler(async (req, res) => {
     const context = await notificationNavigationService.getNotificationReferenceContext(
         req.account.id,

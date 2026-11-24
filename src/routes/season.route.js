@@ -38,12 +38,12 @@ router.patch(
 );
 router.patch('/:seasonId', validate(seasonValidator.updateSeason), seasonController.updateSeason);
 
-// Nhật ký đo nước — chủ trại chỉ đọc (D5).
+// Farm owners have read-only access to water quality logs (D5).
 router.get('/:seasonId/water-logs/metadata', validate(waterLogValidator.getMetadata), waterLogController.getMetadataAsOwner);
 router.get('/:seasonId/water-logs', validate(waterLogValidator.listWaterLogs), waterLogController.listWaterLogsAsOwner);
 router.get('/:seasonId/water-logs/statistics', validate(waterLogValidator.getStatistics), waterLogController.getStatisticsAsOwner);
 
-// Nhật ký sức khỏe tôm — chủ trại chỉ đọc
+// Farm owners have read-only access to shrimp health logs.
 router.get('/:seasonId/shrimp-health-logs', validate(shrimpHealthValidator.listShrimpHealthLogs), shrimpHealthController.listShrimpHealthLogsAsOwner);
 router.get('/:seasonId/shrimp-health-logs/statistics', validate(shrimpHealthValidator.getStatistics), shrimpHealthController.getStatisticsAsOwner);
 router.get('/:seasonId/shrimp-health-logs/:logId', validate(shrimpHealthValidator.getShrimpHealthLogDetail), shrimpHealthController.getShrimpHealthLogDetailAsOwner);

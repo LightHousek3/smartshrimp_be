@@ -22,7 +22,7 @@ const { emitNotification } = require('../realtime/notification.socket');
  */
 
 const RECORDED_AT_FUTURE_TOLERANCE_MS = WATER_RECORDED_AT_FUTURE_TOLERANCE_SECONDS * 1000;
-const FARM_TZ_OFFSET_MS = 7 * 60 * 60 * 1000; // Asia/Saigon, không DST
+const FARM_TZ_OFFSET_MS = 7 * 60 * 60 * 1000; // Vietnam uses UTC+7 year-round.
 
 const METRIC_FIELDS = [
     'temperatureC',
@@ -80,12 +80,18 @@ const SEASON_WITH_FARM_SELECT = {
 
 // Scope resolution -----------------------------------------------------------
 
+/**
+ * Load season and farm context through the caller's database client.
+ */
 const findSeason = (seasonId, client = prisma) =>
     client.aquacultureSeason.findUnique({
         where: { id: seasonId },
         select: SEASON_WITH_FARM_SELECT,
     });
 
+/**
+ * Check the current season assignment through the same client used by the enclosing operation.
+ */
 const hasActiveAssignment = (accountId, seasonId, role, client = prisma) =>
     client.seasonPersonnelAssignment.findFirst({
         where: { seasonId, accountId, role, unassignedAt: null },
@@ -139,6 +145,9 @@ const SCOPE_RESOLVERS = {
     owner: resolveOwnerScope,
 };
 
+/**
+ * Return versioned measurement rules and species-specific thresholds for an authorized season.
+ */
 const getMetadata = async (accountId, seasonId, scope = 'ktv') => {
     const resolver = SCOPE_RESOLVERS[scope];
     if (!resolver) throw ApiError.forbidden(messages.AUTH.FORBIDDEN);
@@ -163,12 +172,21 @@ const getMetadata = async (accountId, seasonId, scope = 'ktv') => {
 
 // Output normalization -------------------------------------------------------
 
+/**
+ * Expose water measurements as JSON numbers while preserving missing values.
+ */
 const toNumberOrNull = (value) =>
     value === null || value === undefined ? null : Number(value);
 
+/**
+ * Preserve a missing void timestamp in the water log response.
+ */
 const toIsoOrNull = (value) =>
     value === null || value === undefined ? null : value.toISOString();
 
+/**
+ * Serialize the observation and derive threshold exceedances for the season's shrimp type.
+ */
 const normalizeLog = (log, shrimpType) => {
     const values = {};
     for (const field of METRIC_FIELDS) {
@@ -194,11 +212,17 @@ const normalizeLog = (log, shrimpType) => {
 
 // Cursor pagination ----------------------------------------------------------
 
+/**
+ * Encode the observation timestamp and ID that determine stable pagination order.
+ */
 const encodeCursor = ({ recordedAt, id }) =>
     Buffer.from(
         JSON.stringify({ recordedAt: recordedAt.toISOString(), logId: id }),
     ).toString('base64url');
 
+/**
+ * Validate both cursor fields before constructing the next-page query.
+ */
 const decodeCursor = (cursor) => {
     try {
         const value = JSON.parse(Buffer.from(cursor, 'base64url').toString('utf8'));
@@ -218,6 +242,9 @@ const decodeCursor = (cursor) => {
 const IDEMPOTENCY_TTL_MS = 10 * 60 * 1000;
 const idempotencyStore = new Map();
 
+/**
+ * Return retry state only while the process-local entry is still valid.
+ */
 const idempotencyGet = (key) => {
     if (!key) return null;
     const entry = idempotencyStore.get(key);
@@ -229,6 +256,9 @@ const idempotencyGet = (key) => {
     return entry;
 };
 
+/**
+ * Keep retry state for the configured window and prune expired entries when the cache grows.
+ */
 const idempotencySet = (key, entry) => {
     if (!key) return;
     if (idempotencyStore.size > 10000) {
@@ -242,6 +272,10 @@ const idempotencySet = (key, entry) => {
 
 
 
+/**
+ * Include the pond, season and exceeded readings with units so recipients can identify the
+ * observation.
+ */
 const buildThresholdAlertContent = (season, exceeded) => {
     const parts = exceeded.map((e) => {
         const unit = PARAM_UNITS[e.field];
@@ -390,6 +424,9 @@ const warningWhereFor = (shrimpType) => {
     return { AND: [{ isVoided: false }, { OR: conditions }] };
 };
 
+/**
+ * Apply season access and log filters before returning a cursor page with optional status totals.
+ */
 const listWaterLogs = async (accountId, seasonId, query = {}, scope = 'ktv') => {
     const resolver = SCOPE_RESOLVERS[scope];
     if (!resolver) {
@@ -426,6 +463,10 @@ const listWaterLogs = async (accountId, seasonId, query = {}, scope = 'ktv') => 
         });
     }
 
+    /**
+     * Read the page and its totals through one client so optional status counts can share a consistent
+     * snapshot.
+     */
     const readPage = async (client) => {
         const rowsPromise = client.waterQualityLog.findMany({
             where, orderBy: [{ recordedAt: 'desc' }, { id: 'desc' }], take: limit + 1,
@@ -516,14 +557,16 @@ const voidWaterLog = async (accountId, seasonId, logId, voidReason) => {
         throw error;
     }
 
-    // Dữ liệu phụ thuộc: không có FK trỏ vào water_quality_logs.
-    // - Thống kê (F4) tự loại bản void (WHERE is_voided = FALSE).
-    // - Notification water_threshold_exceeded đã gửi giữ nguyên như fact lịch sử (BR-DATA-01).
+    // No foreign keys reference water_quality_logs.
+    // Statistics (F4) exclude voided observations. Sent threshold alerts remain in history (BR-DATA-01).
     return normalizeLog(updated, season.shrimpType);
 };
 
 
 
+/**
+ * Use the farm's local calendar for daily buckets and Mondays for weekly buckets.
+ */
 const bucketKeyOf = (date, granularity) => {
     // Calendar date bucketing follows farm local time (Asia/Ho_Chi_Minh, UTC+7).
     const shifted = new Date(date.getTime() + FARM_TZ_OFFSET_MS);

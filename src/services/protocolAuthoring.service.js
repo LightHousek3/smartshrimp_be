@@ -68,6 +68,9 @@ const createWorkflow = ({ protocolType = 'PRODUCTION', diseaseCaseId = null } = 
         },
         compliance: true,
     };
+    /**
+     * Load protocol items in authoring order with the catalog fields needed by the editor.
+     */
     const protocolInclude = () => ({
         items: {
             orderBy: { sequenceOrder: 'asc' },
@@ -278,8 +281,15 @@ const createWorkflow = ({ protocolType = 'PRODUCTION', diseaseCaseId = null } = 
             : new Date(`1970-01-01T${value.length === 5 ? `${value}:00` : value}Z`);
     // Hash persisted content only; catalog labels/status can change independently.
     const revisionOf = (row) => {
+        /**
+         * Make missing fields explicit in the persisted-content revision input.
+         */
         const project = (value, names) =>
             Object.fromEntries(names.map((name) => [name, value[name] ?? null]));
+        /**
+         * Normalize serialized values and object key order so equivalent content yields the same
+         * revision.
+         */
         const canonical = (value) => {
             if (value?.toJSON) return canonical(value.toJSON());
             if (Array.isArray(value)) return value.map(canonical);
@@ -431,14 +441,14 @@ const createWorkflow = ({ protocolType = 'PRODUCTION', diseaseCaseId = null } = 
         availableActions: {
             submit: Boolean(
                 isWritable(season) &&
-                    PRODUCTION_PROTOCOL_EDITABLE_STATUSES.includes(row.status) &&
-                    !blocked &&
-                    row.items.length,
+                PRODUCTION_PROTOCOL_EDITABLE_STATUSES.includes(row.status) &&
+                !blocked &&
+                row.items.length,
             ),
             update: Boolean(
                 isWritable(season) &&
-                    PRODUCTION_PROTOCOL_EDITABLE_STATUSES.includes(row.status) &&
-                    !blocked,
+                PRODUCTION_PROTOCOL_EDITABLE_STATUSES.includes(row.status) &&
+                !blocked,
             ),
             delete: Boolean(isWritable(season) && isUnsubmittedDraft(row) && !blocked),
             stop: Boolean(
@@ -536,15 +546,15 @@ const createWorkflow = ({ protocolType = 'PRODUCTION', diseaseCaseId = null } = 
                         availableActions: {
                             submit: Boolean(
                                 isWritable(season) &&
-                                    PRODUCTION_PROTOCOL_EDITABLE_STATUSES.includes(row.status) &&
-                                    !blocked &&
-                                    row.items.length,
+                                PRODUCTION_PROTOCOL_EDITABLE_STATUSES.includes(row.status) &&
+                                !blocked &&
+                                row.items.length,
                             ),
                             view: true,
                             update: Boolean(
                                 isWritable(season) &&
-                                    PRODUCTION_PROTOCOL_EDITABLE_STATUSES.includes(row.status) &&
-                                    !blocked,
+                                PRODUCTION_PROTOCOL_EDITABLE_STATUSES.includes(row.status) &&
+                                !blocked,
                             ),
                             delete: Boolean(
                                 isWritable(season) && isUnsubmittedDraft(row) && !blocked,
@@ -644,6 +654,9 @@ const createWorkflow = ({ protocolType = 'PRODUCTION', diseaseCaseId = null } = 
             };
         });
 
+    /**
+     * Group measurement units by dimension when checking whether a dose can use a selected product.
+     */
     const unitFamily = (unit) =>
         ({
             KG: 'mass',
@@ -771,16 +784,17 @@ const createWorkflow = ({ protocolType = 'PRODUCTION', diseaseCaseId = null } = 
                         // Accepted proposals keep their canonical, server-owned declaration and
                         // Owner overrides. The editor's DTO uppercases product enums and strips
                         // those stamps, so it must not replace the saved proposal on a graph edit.
-                        const retained = previous?.productId === entry.productId
-                            ? previous.recommendedProductDetails
-                            : null;
+                        const retained =
+                            previous?.productId === entry.productId
+                                ? previous.recommendedProductDetails
+                                : null;
                         entry.recommendedProductDetails = retained
                             ? JSON.parse(JSON.stringify(retained))
                             : null;
                         // A different catalogue selection is a new reference. Its prior proposal
                         // remains in submission history, not attached to the replacement product.
                         entry.recommendedManufacturerId = retained
-                            ? previous.recommendedManufacturerId ?? null
+                            ? (previous.recommendedManufacturerId ?? null)
                             : null;
                     }
                     if (!entry.productId && !entry.recommendedProductDetails?.proposed)
@@ -960,6 +974,9 @@ const createWorkflow = ({ protocolType = 'PRODUCTION', diseaseCaseId = null } = 
             }
         }
     };
+    /**
+     * Limit new selections to active templates for the season's farm and compatible shrimp type.
+     */
     const templateWhere = (season) => ({
         farmId: season.pond.farm.id,
         // Only active templates are eligible for new selections; existing snapshots remain independent.

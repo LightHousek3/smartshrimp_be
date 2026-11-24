@@ -57,9 +57,18 @@ const eligibleProfileWhere = (accountId, roles = PROFILE_ROLES) => ({
     role: { in: roles },
 });
 
+/**
+ * Use zero for missing KPI counts and convert database totals to JSON numbers.
+ */
 const numberOrZero = (value) => Number(value ?? 0);
+/**
+ * Preserve missing KPI rates and averages as null in the profile response.
+ */
 const nullableNumber = (value) => (value == null ? null : Number(value));
 
+/**
+ * Expose technician participation and task metrics in the profile format.
+ */
 const normalizeTechnicianKpi = (kpi) => ({
     seasonsParticipated: numberOrZero(kpi?.seasonsParticipated),
     completedTasks: numberOrZero(kpi?.completedTasks),
@@ -67,6 +76,9 @@ const normalizeTechnicianKpi = (kpi) => ({
     onTimeCompletionRatePct: nullableNumber(kpi?.onTimeCompletionRatePct),
 });
 
+/**
+ * Expose expert participation and case resolution metrics in the profile format.
+ */
 const normalizeExpertKpi = (kpi) => ({
     seasonsParticipated: numberOrZero(kpi?.seasonsParticipated),
     diseaseCasesHandled: numberOrZero(kpi?.diseaseCasesHandled),

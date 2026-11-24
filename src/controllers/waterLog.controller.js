@@ -2,20 +2,32 @@ const { waterLogService } = require('../services');
 const { asyncHandler, ResponseHandler } = require('../utils');
 const { messages } = require('../constants');
 
+/**
+ * Bind the route's access scope while sharing the metadata response across roles.
+ */
 const metadataHandler = (scope) => asyncHandler(async (req, res) => {
     const data = await waterLogService.getMetadata(req.account.id, req.params.seasonId, scope);
     ResponseHandler.success(res, { message: messages.WATER_LOG.METADATA_FETCHED, data });
 });
+
+/** GET /technician/seasons/:seasonId/water-logs/metadata */
 const getMetadata = metadataHandler('ktv');
+
+/** GET /expert/seasons/:seasonId/water-logs/metadata */
 const getMetadataAsExpert = metadataHandler('expert');
+
+/** GET /owner/seasons/:seasonId/water-logs/metadata */
 const getMetadataAsOwner = metadataHandler('owner');
 
+/**
+ * Normalize the optional client retry key to the length accepted by the water log service.
+ */
 const getIdempotencyKey = (req) => {
     const value = req.headers['idempotency-key'];
     return typeof value === 'string' ? value.trim().slice(0, 128) : '';
 };
 
-// ---- KTV (ghi + đọc) -------------------------------------------------------
+// Technician read and write handlers
 
 /**
  * POST /technician/seasons/:seasonId/water-logs
@@ -76,7 +88,7 @@ const getStatistics = asyncHandler(async (req, res) => {
     });
 });
 
-// ---- Chuyên gia / Chủ trại (chỉ đọc — D5) -----------------------------------
+// Expert and farm owner read-only handlers (D5)
 
 /**
  * GET /expert/seasons/:seasonId/water-logs

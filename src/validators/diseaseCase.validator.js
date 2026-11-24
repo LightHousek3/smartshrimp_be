@@ -2,6 +2,9 @@ const Joi = require('joi');
 const { DISEASE_CASE_STATUS, CASE_SEVERITIES, TECHNICIAN_RESPONSE_TYPES, CASE_LIMITS } = require('../constants');
 const uuid = Joi.string().uuid({ version: 'uuidv4' });
 const params = Joi.object({ seasonId: uuid.required(), caseId: uuid.required() });
+/**
+ * Limit case text by Unicode code points after trimming.
+ */
 const text = (limit) => Joi.string().trim().min(1).custom((value, helpers) =>
     Array.from(value).length <= limit ? value : helpers.error('string.max', { limit }));
 const attachments = Joi.array().items(Joi.string().uri({ scheme: ['https'] }).max(CASE_LIMITS.URL))

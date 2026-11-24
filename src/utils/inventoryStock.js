@@ -1,14 +1,29 @@
 const { Prisma } = require('@prisma/client');
 const { vietnamDate } = require('./inventoryQuantity');
 
+/**
+ * Keep stock calculations exact and use zero for absent totals.
+ */
 const decimal = (value) => new Prisma.Decimal(value ?? 0);
+/**
+ * Convert packs and bottles only when a positive amount per package is configured.
+ */
 const packaged = (product) =>
     ['PACK', 'BOTTLE'].includes(product.unit) &&
     product.conversionUnit &&
     decimal(product.conversionQuantity).gt(0);
+/**
+ * Express quantity in the alert threshold unit for products with package conversions.
+ */
 const stockInAlertUnit = (product, quantity) =>
     packaged(product) ? decimal(quantity).mul(product.conversionQuantity) : decimal(quantity);
+/**
+ * Use the conversion unit for alerts when a package has a usable conversion.
+ */
 const alertUnit = (product) => (packaged(product) ? product.conversionUnit : product.unit);
+/**
+ * Count positive lots already received that remain valid on the Vietnam calendar date.
+ */
 const usableWhere = (productId, at) => ({
     productId,
     quantity: { gt: 0 },
@@ -29,6 +44,10 @@ const usableStock = (product, balances, at = new Date()) =>
                   (sum, row) => sum.add(Prisma.Decimal.max(0, decimal(row.quantity))),
                   decimal(0),
               );
+/**
+ * Aggregate operationally usable lots through the caller's database client and return zero for
+ * archived products.
+ */
 const readUsableStock = async (client, product, at = new Date()) =>
     product.status !== 'ACTIVE'
         ? decimal(0)

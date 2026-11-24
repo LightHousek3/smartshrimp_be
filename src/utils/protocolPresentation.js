@@ -71,6 +71,9 @@ const wireItem = (entry) => ({
     },
 });
 
+/**
+ * Present persisted stages with one-based day labels that distinguish production and treatment.
+ */
 const protocolStages = (row) =>
     structure.protocolGroups(row).map((stage) => ({
         ...stage,

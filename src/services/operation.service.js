@@ -35,6 +35,9 @@ const {
     PROTOCOL_STATUS,
 } = require('../constants');
 
+/**
+ * Convert an optional operation measurement to a JSON number while preserving missing values.
+ */
 const toNumber = (val) => (val == null ? null : Number(val));
 const ITEM_STORAGE_SELECT = {
     productionMealId: true,

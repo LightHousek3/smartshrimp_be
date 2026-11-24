@@ -50,6 +50,9 @@ const remindSeason = async (seasonId, now = new Date()) => {
     return Boolean(saved);
 };
 
+/**
+ * Sweep active seasons with expected end dates in bounded batches and isolate failures by season.
+ */
 const remind = async ({ now = new Date(), isRunning = () => true } = {}) => {
     let cursor,
         rows,

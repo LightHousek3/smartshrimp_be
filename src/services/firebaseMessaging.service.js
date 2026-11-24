@@ -13,7 +13,13 @@ const client = () => {
     return getMessaging(app);
 };
 
+/**
+ * Check whether a Firebase project is configured before starting push delivery.
+ */
 const configured = () => Boolean(config.firebase?.projectId);
+/**
+ * Send a multicast batch and return Firebase's per-device results for delivery tracking.
+ */
 const send = (message) => client().sendEachForMulticast(message);
 
 module.exports = { configured, send };

@@ -49,6 +49,9 @@ const OWNER_LIST_SELECT = {
     fullName: true,
 };
 
+/**
+ * Build the shared account filter so the page and total count use the same criteria.
+ */
 const buildAccountFilter = ({ role, status, managedByOwnerId, search, createdFrom, createdTo }) => {
     const where = {
         ...(role && { role }),
@@ -73,6 +76,9 @@ const buildAccountFilter = ({ role, status, managedByOwnerId, search, createdFro
     return where;
 };
 
+/**
+ * Keep unnamed accounts last when sorting by identity and break ties by ID for cursor pagination.
+ */
 const buildAccountOrderBy = (sortBy, sortOrder) => {
     const direction = sortOrder === 'desc' ? 'desc' : 'asc';
 
@@ -91,6 +97,9 @@ const buildAccountOrderBy = (sortBy, sortOrder) => {
     return [{ createdAt: 'desc' }, { id: 'desc' }];
 };
 
+/**
+ * Resolve managing owners in one batch and expose an owner summary in place of the foreign key.
+ */
 const attachManagingOwners = async (accounts) => {
     const ownerIds = [
         ...new Set(accounts.map((account) => account.managedByOwnerId).filter(Boolean)),
@@ -115,6 +124,9 @@ const attachManagingOwners = async (accounts) => {
     }));
 };
 
+/**
+ * Return a cursor page of admin account summaries with managing owner context and a filtered total.
+ */
 const getListAccount = async ({
     cursor,
     limit,
@@ -161,6 +173,9 @@ const getListAccount = async ({
     };
 };
 
+/**
+ * Return the admin account detail with its managing owner and managed staff count.
+ */
 const getAccountById = async (accountId) => {
     const account = await prisma.account.findUnique({
         where: { id: accountId },
@@ -184,6 +199,9 @@ const getAccountById = async (accountId) => {
     return { ...account, managedByOwner, managedStaffCount };
 };
 
+/**
+ * Staff accounts require an active farm owner. Use the caller's database client during account writes.
+ */
 const validateManagingOwner = async (database, role, managedByOwnerId) => {
     const isStaff = role === ACCOUNT_ROLE.TECHNICIAN || role === ACCOUNT_ROLE.EXPERT;
 
@@ -238,6 +256,10 @@ const inviteSavedAccount = async (account) => {
     }
 };
 
+/**
+ * Create a pending account under a valid managing owner and send the activation invitation after
+ * commit.
+ */
 const createAccount = async ({ email, role, managedByOwnerId }, adminId) => {
     let account;
 
@@ -275,6 +297,9 @@ const createAccount = async ({ email, role, managedByOwnerId }, adminId) => {
     return inviteSavedAccount(account);
 };
 
+/**
+ * Distinguish an unknown account from one that can no longer receive a pending activation invitation.
+ */
 const findPendingActivationAccount = async (accountId) => {
     const account = await prisma.account.findUnique({
         where: { id: accountId },
@@ -354,6 +379,9 @@ const updatePendingAccount = async (accountId, { email }) => {
     return inviteSavedAccount(updatedAccount);
 };
 
+/**
+ * Count planning and active seasons across the owner's ponds for the deactivation check.
+ */
 const countOpenOwnerSeasons = async (database, ownerId) => {
     const farms = await database.farm.findMany({
         where: { ownerId },
@@ -375,6 +403,9 @@ const countOpenOwnerSeasons = async (database, ownerId) => {
     });
 };
 
+/**
+ * Count open seasons where the staff member still holds an assignment.
+ */
 const countOpenStaffAssignments = async (database, accountId) => {
     const assignments = await database.seasonPersonnelAssignment.findMany({
         where: { accountId, unassignedAt: null },
@@ -390,6 +421,9 @@ const countOpenStaffAssignments = async (database, accountId) => {
     });
 };
 
+/**
+ * Require active staff and open operational responsibilities to be cleared before deactivation.
+ */
 const validateDeactivationEligibility = async (database, account) => {
     if (account.role === ACCOUNT_ROLE.FARM_OWNER) {
         const [activeStaffCount, openSeasonCount] = await Promise.all([

@@ -3,6 +3,9 @@ const { ApiError } = require('../utils');
 const { HARVEST_POLICY, HARVEST_ERROR_CODE, messages } = require('../constants');
 const M = messages.HARVEST;
 
+/**
+ * Attach the withdrawal reason code used by clients to distinguish invalid requests.
+ */
 const withdrawalError = (message, errorCode) => {
     const error = ApiError.badRequest(message);
     error.errorCode = errorCode;

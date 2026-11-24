@@ -26,6 +26,9 @@ const ACCOUNT_STATUS_ERRORS = {
     [ACCOUNT_STATUS.INACTIVE]: 'ACCOUNT_INACTIVE',
 };
 
+/**
+ * Remove the password hash before the authenticated account leaves the service.
+ */
 const withoutPassword = ({ passwordHash, ...account }) => account;
 
 /**
@@ -84,6 +87,9 @@ const logout = async (refreshToken) => {
     }
 };
 
+/**
+ * Use the token service's rotation flow for both cookie and request-body credentials.
+ */
 const refreshTokens = async (refreshToken) => tokenService.refreshAuthTokens(refreshToken);
 
 module.exports = {

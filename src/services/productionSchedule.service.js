@@ -20,7 +20,14 @@ const include = {
     season: { include: { pond: { include: { farm: true } } } },
     items: { include: { product: { select: materialSelect } }, orderBy: { sequenceOrder: 'asc' } },
 };
+/**
+ * Identify a schedule slot by its protocol item and exact scheduled instant.
+ */
 const slotKey = (row) => `${row.protocolItemId ?? row.item.id}:${row.scheduledAt.toISOString()}`;
+/**
+ * Compare persisted dose inputs and quantities before deciding whether a planned schedule needs
+ * replacement.
+ */
 const sameCalculation = (row, calculated) =>
     ['unit', 'doseBasisSnapshot', 'basisUnit', 'sourceHealthLogId', 'calculationVersion'].every(
         (field) => (row[field] ?? null) === (calculated[field] ?? null),
@@ -43,6 +50,9 @@ const readInputs = async (tx, protocol, now) => {
     return healthLogs;
 };
 
+/**
+ * Record a schedule blocker notice for the owner and eligible current assignees.
+ */
 const notifyBlocked = async (tx, protocol, blocked, now, notifications) => {
     if (!blocked.size) return;
     const assignments = await tx.seasonPersonnelAssignment.findMany({
@@ -284,7 +294,13 @@ const materialize = async (target, requestedAt) => {
     return result;
 };
 
+/**
+ * Materialize the rolling schedule window for one protocol at the supplied time.
+ */
 const generate = (protocolId, at) => materialize({ protocolId }, at);
+/**
+ * Refresh a season's schedule after changes to the calculation inputs.
+ */
 const reconcileSeason = (seasonId, at) => materialize({ seasonId }, at);
 
 /** Read full-course deadlines, never just dates already materialized in the rolling window. */

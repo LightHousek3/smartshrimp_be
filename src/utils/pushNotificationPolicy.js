@@ -127,14 +127,23 @@ const expiresAt = async (db, notification, now) => {
     return now < expiry ? expiry : null;
 };
 
+/**
+ * Use exponential retry delays capped at one hour for push delivery.
+ */
 const retryAt = (now, attempt) =>
     new Date(now.getTime() + Math.min(3600000, 60000 * 2 ** (attempt - 1)));
+/**
+ * Identify Firebase errors that make the device registration unsuitable for future deliveries.
+ */
 const invalidToken = (code) =>
     [
         'messaging/installation-id-not-registered',
         'messaging/registration-token-not-registered',
         'messaging/invalid-registration-token',
     ].includes(code);
+/**
+ * Identify Firebase and network conditions that may succeed on a later delivery attempt.
+ */
 const transient = (code) =>
     [
         'messaging/server-unavailable',
