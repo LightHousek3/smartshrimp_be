@@ -7,6 +7,7 @@ const {
     checkWaterThresholds, messages,
 } = require('../constants');
 const { ApiError } = require('../utils');
+const { lifecycleReason } = require('../utils/protocolPresentation');
 
 const { RESOLVED } = DISEASE_CASE_STATUS;
 const NAME_SELECT = { select: { fullName: true } };
@@ -137,7 +138,7 @@ const list = (ownerId, { seasonId, resolved, page, limit }) => prisma.$transacti
 /** Merge status changes and replies oldest-first, with changes first on equal timestamps. */
 const caseTimeline = (row) => [
     ...row.statusHistory.map(({ fromStatus, toStatus, changedAt, reason, changer }) => ({
-        kind: 'status', fromStatus, toStatus, at: changedAt, message: reason, authorName: changer?.fullName ?? 'Hệ thống',
+        kind: 'status', fromStatus, toStatus, at: changedAt, message: lifecycleReason(reason), authorName: changer?.fullName ?? 'Hệ thống',
     })),
     ...row.responses.map(({ responseType, createdAt, message, author, careAction }) => ({
         kind: 'response', responseType, at: createdAt, message, authorName: author.fullName, authorRole: author.role, careAction,
@@ -198,7 +199,7 @@ const detail = (ownerId, caseId) => prisma.$transaction(async (client) => {
         farmName: season.pond.farm.name,
         createdAt: row.createdAt,
         updatedAt: row.updatedAt,
-        resolutionSummary: row.resolutionSummary,
+        resolutionSummary: lifecycleReason(row.resolutionSummary),
         reporterName: row.reporter.fullName,
         snapshot: openingSnapshot(row.caseSnapshot, season.shrimpType),
         attachments: row.attachments.map(({ uploader, ...attachment }) => ({

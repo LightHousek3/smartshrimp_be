@@ -11,6 +11,7 @@ const EDITABLE_FIELDS = [
     'name',
     'shrimpType',
     'stockingDate',
+    'plannedStockingDate',
     'expectedEndDate',
     'initialQuantity',
 ];
@@ -33,16 +34,14 @@ const seasonFields = {
     name,
     shrimpType: Joi.string().valid(...SHRIMP_TYPES),
     stockingDate: dateOnly.allow(null),
+    plannedStockingDate: dateOnly.allow(null),
     expectedEndDate: dateOnly.allow(null),
     initialQuantity: Joi.number().integer().positive().max(Number.MAX_SAFE_INTEGER).strict().allow(null),
 };
 
 const validateDateRange = (value, helpers) => {
-    if (
-        value.stockingDate
-        && value.expectedEndDate
-        && value.expectedEndDate < value.stockingDate
-    ) {
+    const plannedDate = value.plannedStockingDate ?? value.stockingDate;
+    if (plannedDate && value.expectedEndDate && value.expectedEndDate < plannedDate) {
         return helpers.message({ custom: 'Ngày dự kiến kết thúc phải cùng hoặc sau ngày thả giống' });
     }
     return value;
@@ -90,7 +89,7 @@ const createSeason = {
         ...seasonFields,
         name: name.required(),
         shrimpType: Joi.string().valid(...SHRIMP_TYPES).required(),
-    }).custom(validateDateRange),
+    }).oxor('stockingDate', 'plannedStockingDate').custom(validateDateRange),
 };
 
 const updateSeason = {
@@ -100,6 +99,7 @@ const updateSeason = {
         expectedUpdatedAt: Joi.date().iso().required(),
     })
         .or(...EDITABLE_FIELDS)
+        .oxor('stockingDate', 'plannedStockingDate')
         .custom(validateDateRange),
 };
 
@@ -107,6 +107,10 @@ const activateSeason = {
     params: seasonParams,
     body: Joi.object({
         expectedUpdatedAt: Joi.date().iso().required(),
+        actualStockingDate: dateOnly.required().messages({
+            'any.required': 'Vui lòng xác nhận ngày thả giống thực tế',
+        }),
+        activationDelayReason: Joi.string().trim().min(1).max(500),
     }),
 };
 

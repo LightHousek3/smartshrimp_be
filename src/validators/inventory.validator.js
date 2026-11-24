@@ -282,10 +282,12 @@ const getInventoryHistory = {
         referenceType: Joi.string().trim().min(1)
             .max(50),
         referenceId: uuid,
+        scheduleId: uuid,
         createdFrom: Joi.date().iso(),
         createdTo: Joi.date().iso(),
     })
         .and('referenceType', 'referenceId')
+        .oxor('scheduleId', 'referenceId')
         .custom((value, helpers) => {
             if (value.createdFrom && value.createdTo && value.createdFrom > value.createdTo) {
                 return helpers.error('date.range');

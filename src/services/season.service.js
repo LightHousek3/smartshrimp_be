@@ -3,6 +3,8 @@ const { Prisma } = require('@prisma/client');
 const lifecycle = require('./protocolLifecycle.service');
 const { emitNotification } = require('../realtime/notification.socket');
 const { ApiError } = require('../utils');
+const { dateInVietnam } = require('../utils/productionSchedule');
+const { cultureDay } = require('../utils/protocolTimeline');
 const {
     httpStatus,
     messages,
@@ -31,6 +33,9 @@ const SEASON_BASE_SELECT = {
     name: true,
     shrimpType: true,
     stockingDate: true,
+    plannedStockingDate: true,
+    activatedAt: true,
+    activationDelayReason: true,
     expectedEndDate: true,
     actualEndDate: true,
     initialQuantity: true,
@@ -54,6 +59,7 @@ const POND_SUMMARY_SELECT = {
             id: true,
             name: true,
             status: true,
+            ownerId: true,
         },
     },
 };
@@ -79,6 +85,8 @@ const SEASON_DETAIL_SELECT = {
                     fullName: true,
                     phone: true,
                     status: true,
+                    role: true,
+                    managedByOwnerId: true,
                 },
             },
         },
@@ -101,13 +109,6 @@ const ASSIGNMENT_SELECT = {
     },
 };
 
-const vietnamDateFormatter = new Intl.DateTimeFormat('en-US', {
-    timeZone: 'Asia/Ho_Chi_Minh',
-    year: 'numeric',
-    month: '2-digit',
-    day: '2-digit',
-});
-
 const toDateOnly = (value) => (value ? value.toISOString().slice(0, 10) : null);
 const parseDateOnly = (value) => (value == null ? null : new Date(`${value}T00:00:00.000Z`));
 
@@ -123,32 +124,20 @@ const updatedAtApiWindow = (value) => {
 };
 
 const dayOfCulture = (stockingDate) => {
-    if (!stockingDate) return null;
-    const todayParts = Object.fromEntries(
-        vietnamDateFormatter
-            .formatToParts(new Date())
-            .filter(({ type }) => type !== 'literal')
-            .map(({ type, value }) => [type, Number(value)]),
-    );
-    const utcToday = Date.UTC(todayParts.year, todayParts.month - 1, todayParts.day);
-    const utcStockingDate = Date.UTC(
-        stockingDate.getUTCFullYear(),
-        stockingDate.getUTCMonth(),
-        stockingDate.getUTCDate(),
-    );
-    const days = Math.floor((utcToday - utcStockingDate) / 86400000) + 1;
+    const days = cultureDay(stockingDate, new Date());
     return days > 0 ? days : null;
 };
 
-const normalizePondSummary = (pond) => ({
+const normalizePondSummary = ({ farm: { ownerId, ...farm }, ...pond }) => ({
     ...pond,
     areaM2: pond.areaM2 == null ? null : Number(pond.areaM2),
-    farm: { ...pond.farm, status: pond.farm.status?.toLowerCase() ?? null },
+    farm: { ...farm, status: farm.status?.toLowerCase() ?? null },
 });
 
 const normalizeSeasonBase = (season) => ({
     ...season,
     stockingDate: toDateOnly(season.stockingDate),
+    plannedStockingDate: toDateOnly(season.plannedStockingDate),
     expectedEndDate: toDateOnly(season.expectedEndDate),
     actualEndDate: toDateOnly(season.actualEndDate),
     initialQuantity: season.initialQuantity == null ? null : season.initialQuantity.toString(),
@@ -173,31 +162,27 @@ const getActiveAssignment = (assignments, role) =>
 const getLatestAssignment = (assignments, role) =>
     assignments.find((assignment) => assignment.role === role) || null;
 
-const buildActivationEligibility = (season) => {
+const buildActivationEligibility = (season, ownerId) => {
     const missingConditions = [];
-    const activeTechnicians = season.personnelAssignments.filter(
-        (assignment) =>
-            assignment.role === PERSONNEL_ROLE.TECHNICIAN &&
-            assignment.unassignedAt == null &&
-            assignment.account.status === ACCOUNT_STATUS.ACTIVE,
-    );
-    const activeExperts = season.personnelAssignments.filter(
-        (assignment) =>
-            assignment.role === PERSONNEL_ROLE.EXPERT &&
-            assignment.unassignedAt == null &&
-            assignment.account.status === ACCOUNT_STATUS.ACTIVE,
+    const countEligible = (role) => season.personnelAssignments.filter(
+        ({ role: assignedRole, unassignedAt, account }) =>
+            assignedRole === role && unassignedAt == null && account.role === role &&
+            account.status === ACCOUNT_STATUS.ACTIVE && account.managedByOwnerId === ownerId,
     );
 
     if (season.status !== SEASON_STATUS.PLANNING) missingConditions.push('SEASON_NOT_PLANNING');
     if (season.pond.farm.status !== FARM_STATUS.ACTIVE) missingConditions.push('FARM_NOT_ACTIVE');
     if (season.pond.status !== POND_STATUS.AVAILABLE) missingConditions.push('POND_NOT_AVAILABLE');
     if (season.pond.type !== 'AQUACULTURE') missingConditions.push('POND_NOT_AQUACULTURE');
-    if (!season.stockingDate) missingConditions.push('STOCKING_DATE_REQUIRED');
-    if (season.initialQuantity == null) missingConditions.push('INITIAL_QUANTITY_REQUIRED');
-    if (season.initialDensityPerM2 == null) missingConditions.push('INITIAL_DENSITY_REQUIRED');
-    if (activeTechnicians.length !== 1) missingConditions.push('ACTIVE_TECHNICIAN_REQUIRED');
-    if (activeExperts.length !== 1) missingConditions.push('ACTIVE_EXPERT_REQUIRED');
-    if (season.protocols.length !== 1) {
+    if (season.initialQuantity == null || season.initialQuantity <= 0n)
+        missingConditions.push('INITIAL_QUANTITY_REQUIRED');
+    if (season.initialDensityPerM2 == null || Number(season.initialDensityPerM2) <= 0)
+        missingConditions.push('INITIAL_DENSITY_REQUIRED');
+    if (countEligible(PERSONNEL_ROLE.TECHNICIAN).length !== 1)
+        missingConditions.push('ACTIVE_TECHNICIAN_REQUIRED');
+    if (countEligible(PERSONNEL_ROLE.EXPERT).length !== 1)
+        missingConditions.push('ACTIVE_EXPERT_REQUIRED');
+    if (season.protocols.length !== 1 || season.protocols[0].status !== 'APPROVED') {
         missingConditions.push('APPROVED_PRODUCTION_PROTOCOL_REQUIRED');
     }
 
@@ -220,7 +205,7 @@ const normalizeSeasonDetail = ({
         pond,
         personnelAssignments,
         protocols,
-    });
+    }, pond.farm.ownerId);
     const technician = getActiveAssignment(personnelAssignments, PERSONNEL_ROLE.TECHNICIAN);
     const expert = getActiveAssignment(personnelAssignments, PERSONNEL_ROLE.EXPERT);
 
@@ -500,14 +485,14 @@ const assertDateRange = (stockingDate, expectedEndDate) => {
 };
 
 const buildCreateData = (seasonData, ownerId, areaM2) => {
-    const stockingDate = parseDateOnly(seasonData.stockingDate);
+    const plannedStockingDate = parseDateOnly(seasonData.plannedStockingDate ?? seasonData.stockingDate);
     const expectedEndDate = parseDateOnly(seasonData.expectedEndDate);
-    assertDateRange(stockingDate, expectedEndDate);
+    assertDateRange(plannedStockingDate, expectedEndDate);
     return {
         pondId: seasonData.pondId,
         name: seasonData.name,
         shrimpType: seasonData.shrimpType,
-        stockingDate,
+        plannedStockingDate,
         expectedEndDate,
         initialQuantity:
             seasonData.initialQuantity == null ? null : BigInt(seasonData.initialQuantity),
@@ -886,8 +871,8 @@ const buildUpdateData = (seasonData, current) => {
     for (const key of ['name', 'shrimpType']) {
         if (Object.hasOwn(seasonData, key)) data[key] = seasonData[key];
     }
-    if (Object.hasOwn(seasonData, 'stockingDate')) {
-        data.stockingDate = parseDateOnly(seasonData.stockingDate);
+    if (Object.hasOwn(seasonData, 'plannedStockingDate') || Object.hasOwn(seasonData, 'stockingDate')) {
+        data.plannedStockingDate = parseDateOnly(seasonData.plannedStockingDate ?? seasonData.stockingDate);
     }
     if (Object.hasOwn(seasonData, 'expectedEndDate')) {
         data.expectedEndDate = parseDateOnly(seasonData.expectedEndDate);
@@ -896,9 +881,9 @@ const buildUpdateData = (seasonData, current) => {
         data.initialQuantity =
             seasonData.initialQuantity == null ? null : BigInt(seasonData.initialQuantity);
     }
-    const nextStockingDate = Object.hasOwn(data, 'stockingDate')
-        ? data.stockingDate
-        : current.stockingDate;
+    const nextStockingDate = Object.hasOwn(data, 'plannedStockingDate')
+        ? data.plannedStockingDate
+        : current.plannedStockingDate;
     const nextExpectedEndDate = Object.hasOwn(data, 'expectedEndDate')
         ? data.expectedEndDate
         : current.expectedEndDate;
@@ -1013,7 +998,7 @@ const unassignCurrentSeasonPersonnel = async (client, seasonId, ownerId, unassig
         },
     });
 
-const activateSeason = async (seasonId, { expectedUpdatedAt }, ownerId) => {
+const activateSeason = async (seasonId, { expectedUpdatedAt, actualStockingDate, activationDelayReason }, ownerId) => {
     try {
         const result = await prisma.$transaction(
             async (transaction) => {
@@ -1024,13 +1009,24 @@ const activateSeason = async (seasonId, { expectedUpdatedAt }, ownerId) => {
                         messages.SEASON.ACTIVATION_REQUIRES_PLANNING,
                     );
                 }
-                const eligibility = buildActivationEligibility(current);
+                const eligibility = buildActivationEligibility(current, ownerId);
                 if (!eligibility.canActivate) {
                     throw new ApiError(
                         httpStatus.CONFLICT,
                         messages.SEASON.ACTIVATION_CONDITIONS_NOT_MET,
                     );
                 }
+                const activatedAt = new Date();
+                const today = dateInVietnam(activatedAt);
+                if (actualStockingDate > today)
+                    throw ApiError.badRequest(messages.SEASON.ACTIVATION_STOCKING_DATE_FUTURE);
+                const delayed = actualStockingDate < today;
+                const reason = activationDelayReason?.trim();
+                if (delayed && !reason)
+                    throw ApiError.badRequest(messages.SEASON.ACTIVATION_DELAY_REASON_REQUIRED);
+                const stockingDate = parseDateOnly(actualStockingDate);
+                assertDateRange(stockingDate, current.expectedEndDate);
+                const approved = current.protocols.find(({ status }) => status === 'APPROVED');
 
                 const update = await transaction.aquacultureSeason.updateMany({
                     where: {
@@ -1038,10 +1034,23 @@ const activateSeason = async (seasonId, { expectedUpdatedAt }, ownerId) => {
                         status: SEASON_STATUS.PLANNING,
                         updatedAt: updatedAtApiWindow(expectedUpdatedAt),
                     },
-                    data: { status: SEASON_STATUS.ACTIVE },
+                    data: {
+                        status: SEASON_STATUS.ACTIVE,
+                        stockingDate,
+                        activatedAt,
+                        activationDelayReason: delayed ? reason : null,
+                    },
                 });
                 if (update.count !== 1) {
                     throw new ApiError(httpStatus.CONFLICT, messages.SEASON.CHANGE_CONFLICT);
+                }
+                const readiness = await lifecycle.resumeProduction(transaction, seasonId, activatedAt);
+                if (!readiness?.canResume || readiness.protocolId !== approved.id) {
+                    throw ApiError.conflict(
+                        readiness?.code === 'NO_FUTURE_OCCURRENCE'
+                            ? messages.SEASON.ACTIVATION_PROTOCOL_NO_FUTURE_OCCURRENCE
+                            : messages.SEASON.ACTIVATION_PROTOCOL_NOT_READY,
+                    );
                 }
 
                 const notifications = buildStatusNotifications(

@@ -6,7 +6,7 @@ const caseCare = require('./caseCare.service');
 const { ApiError } = require('../utils');
 const { messages, NOTIFICATION_TYPE, WATER_THRESHOLDS } = require('../constants');
 const { emitNotification } = require('../realtime/notification.socket');
-const { protocolStages } = require('../utils/protocolPresentation');
+const { protocolStages, presentProtocolHistory, lifecycleReason } = require('../utils/protocolPresentation');
 
 const SEVERITY_WEIGHT = {
     CRITICAL: 4,
@@ -340,6 +340,7 @@ const detail = async (expertId, caseId) => {
                     changedBy: true,
                     changedAt: true,
                     reason: true,
+                    eventType: true,
                 },
             },
         },
@@ -396,7 +397,7 @@ const detail = async (expertId, caseId) => {
             const stages = protocolStages(proto);
 
             const statusHistoryWithChanger = (proto.statusHistory || []).map((h) => ({
-                ...h,
+                ...presentProtocolHistory(h),
                 changer: protoChangerMap.get(h.changedBy) || null,
             }));
 
@@ -445,6 +446,11 @@ const detail = async (expertId, caseId) => {
 
     return {
         ...diseaseCase,
+        resolutionSummary: lifecycleReason(diseaseCase.resolutionSummary),
+        statusHistory: (diseaseCase.statusHistory ?? []).map((entry) => ({
+            ...entry,
+            reason: lifecycleReason(entry.reason),
+        })),
         waterThresholds: WATER_THRESHOLDS[diseaseCase.season.shrimpType] ?? null,
         protocols: protocolsWithMetrics,
         ...(await caseCare.context(prisma, diseaseCase)),
@@ -737,7 +743,7 @@ const resolve = async (expertId, caseId, data) => {
                 'CANCELLED',
                 'PLAN_CANCELLED',
                 expertId,
-                ('Ca bệnh đã được Expert khép: ' + summary).slice(0, 500),
+                ('Ca bệnh đã được Chuyên gia khép: ' + summary).slice(0, 500),
                 { diseaseCaseId: caseId },
                 now,
             );

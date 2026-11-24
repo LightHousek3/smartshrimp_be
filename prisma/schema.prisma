@@ -456,6 +456,9 @@ model AquacultureSeason {
   name                  String                      @db.VarChar(255)
   shrimpType            ShrimpType                  @map("shrimp_type")
   stockingDate          DateTime?                   @map("stocking_date") @db.Date
+  plannedStockingDate   DateTime?                   @map("planned_stocking_date") @db.Date
+  activatedAt           DateTime?                   @map("activated_at") @db.Timestamptz(6)
+  activationDelayReason String?                    @map("activation_delay_reason") @db.VarChar(500)
   expectedEndDate       DateTime?                   @map("expected_end_date") @db.Date
   actualEndDate         DateTime?                   @map("actual_end_date") @db.Date
   initialQuantity       BigInt?                     @map("initial_quantity") @db.BigInt

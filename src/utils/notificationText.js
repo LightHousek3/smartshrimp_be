@@ -65,6 +65,9 @@ const localizeNotification = (notification, references = {}) => {
             content = content.replace(
                 /: chưa thể kích hoạt\. Kiểm tra phân công Expert, trạng thái ca, vật tư và cấu hình liệu trình\.$/,
                 ': chưa thể kích hoạt. Kiểm tra phân công chuyên gia, trạng thái ca, vật tư và cấu hình liệu trình.',
+            ).replace(
+                /(Một phần lịch chưa thể tạo: |; )cữ cần nguồn sinh khối mới hoặc còn đại diện trong 7 ngày \(168 giờ\); KTV cần cân mẫu và cập nhật nhật ký sức khỏe(?=;|\. Vui lòng)/,
+                `$1${messages.PRODUCTION_PROTOCOL.SCHEDULE_BLOCKERS.BIOMASS_MISSING_OR_STALE}`,
             );
         }
         if (type === 'SYSTEM' && referenceType === 'product') {

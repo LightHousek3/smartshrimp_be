@@ -17,6 +17,12 @@ const {
 const jobNotices = require('../utils/jobNotification');
 
 const OPEN_CASES = ['OPEN', 'MONITORING', 'IN_TREATMENT'];
+const isActivationProduction = async (tx, protocolId, activatedAt) =>
+    Boolean(activatedAt && await tx.protocolStatusHistory.count({
+        where: { protocolId, eventType: 'ACTIVATED', fromStatus: 'APPROVED',
+            toStatus: 'ACTIVE', changedAt: activatedAt },
+    }));
+
 const event = (tx, protocol, status, eventType, changedBy, reason, eventData, at = new Date()) =>
     tx.protocolStatusHistory.create({
         data: {
@@ -387,7 +393,7 @@ const resumeProduction = async (tx, seasonId, at) => {
     if (await productionBlocked(tx, seasonId, at)) return;
     if (await tx.protocol.count({ where: { seasonId, status: 'ACTIVE' } })) return;
     const readiness = await productionReadiness(tx, seasonId, at);
-    if (!readiness.canResume) return;
+    if (!readiness.canResume) return readiness;
     const { protocol } = readiness;
     const previous = await tx.protocol.findMany({
         where: { seasonId, protocolType: 'PRODUCTION', id: { not: protocol.id }, status: 'PAUSED' },
@@ -411,10 +417,11 @@ const resumeProduction = async (tx, seasonId, at) => {
         'ACTIVE',
         'ACTIVATED',
         null,
-        'Phác đồ nuôi tiếp tục theo DOC hiện tại.',
+        'Phác đồ nuôi có hiệu lực theo DOC hiện tại.',
         {},
         at,
     );
+    return readiness;
 };
 
 /** Suspend material schedules while retaining every recorded execution and cancellation. */
@@ -546,14 +553,14 @@ const finishCourse = async (tx, protocol, season, at, end, notices) => {
                 protocol.diseaseCase,
                 'MONITORING',
                 null,
-                'Kế hoạch điều trị đã kết thúc; chờ Expert quyết định chăm sóc tiếp.',
+                'Kế hoạch điều trị đã kết thúc. Chờ Chuyên gia quyết định chăm sóc tiếp.',
                 at,
             );
         await hold(
             tx,
             { ...protocol, status: 'COMPLETED' },
             null,
-            'Chờ Expert quyết định sau điều trị.',
+            'Chờ Chuyên gia quyết định sau điều trị.',
             at,
             { kind: 'AFTER_TREATMENT', diseaseCaseId: protocol.diseaseCaseId },
         );
@@ -671,7 +678,7 @@ const reconcile = async (tx, seasonId, now = new Date()) => {
             tx,
             { ...due, status: 'CANCELLED' },
             null,
-            'Kế hoạch không bắt đầu đúng thời gian; cần Expert xử lý.',
+            'Kế hoạch không bắt đầu đúng thời gian. Cần Chuyên gia xử lý.',
             now,
             { kind: 'AFTER_TREATMENT', diseaseCaseId: due.diseaseCaseId },
         );
@@ -713,7 +720,7 @@ const reconcile = async (tx, seasonId, now = new Date()) => {
             'ACTIVE',
             'ACTIVATED',
             null,
-            'Tới mốc Expert chỉ định và đủ điều kiện.',
+            'Tới mốc Chuyên gia chỉ định và đủ điều kiện.',
             { effectiveAt: due.treatmentStartAt.toISOString() },
             now,
         );
@@ -842,8 +849,8 @@ const stop = async (
 const closeSeason = async (tx, seasonId, ownerId, cancelled, at = new Date()) => {
     const reasonCode = cancelled ? 'SEASON_CANCELLED' : 'SEASON_ENDED';
     const reason = cancelled
-        ? 'Khép do Owner hủy vụ, không phải kết luận khỏi bệnh.'
-        : 'Khép do Owner kết thúc vụ, không phải kết luận khỏi bệnh.';
+        ? 'Khép ca theo lý do hành chính vì Chủ trại hủy vụ.'
+        : 'Khép ca theo lý do hành chính vì Chủ trại kết thúc vụ.';
     const protocols = await tx.protocol.findMany({
         where: {
             seasonId,
@@ -903,6 +910,7 @@ const closeSeason = async (tx, seasonId, ownerId, cancelled, at = new Date()) =>
 };
 
 module.exports = {
+    isActivationProduction,
     reconcile,
     stop,
     closeSeason,

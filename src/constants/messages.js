@@ -43,14 +43,14 @@ const messages = {
         DAILY_LIMIT:
             'Đã hết hạn mức OCR trong ngày của ứng dụng. Bạn có thể nhập tay hoặc thử lại ngày mai.',
         PROVIDER_QUOTA:
-            'Gemini đã hết quota hoặc đang giới hạn lượt gọi. Hãy nhập tay và thử lại sau; không cần bấm quét liên tục.',
+            'Dịch vụ đọc nhãn đang giới hạn lượt sử dụng. Bạn có thể nhập tay hoặc thử lại sau.',
         INVALID_CONFIG:
-            'OCR chưa sử dụng được API key hoặc model đã cấu hình. Vui lòng kiểm tra cấu hình Gemini ở backend.',
+            'Dịch vụ đọc nhãn hiện chưa sẵn sàng. Bạn có thể nhập thông tin nhãn bằng tay.',
         TIMEOUT: 'Đọc nhãn quá thời gian chờ. Bạn có thể thử lại hoặc nhập tay.',
         PROVIDER_UNAVAILABLE:
             'Dịch vụ đọc nhãn đang gián đoạn. Vui lòng thử lại sau hoặc nhập tay.',
         MISSING_KEY:
-            'Chưa cấu hình OCR_GEMINI_API_KEY ở backend. Bạn vẫn có thể nhập thông tin nhãn bằng tay.',
+            'Dịch vụ đọc nhãn hiện chưa sẵn sàng. Bạn có thể nhập thông tin nhãn bằng tay.',
         COOLDOWN: 'Gemini đang giới hạn lượt gọi. Vui lòng chờ một phút hoặc nhập tay.',
         BUSY: 'OCR đang bận. Vui lòng thử lại sau hoặc nhập tay.',
         RATE_LIMIT: 'Bạn đã quét nhãn quá nhiều lần. Vui lòng chờ một phút hoặc nhập tay.',
@@ -76,7 +76,7 @@ const messages = {
         REFERENCED_FARM_LOCKED: 'Không thể đổi trang trại của mẫu đã được tham chiếu.',
         MATERIAL_UNAVAILABLE_OR_FOREIGN: 'Vật tư không khả dụng hoặc không thuộc trang trại.',
         MANUFACTURER_UNAVAILABLE_OR_FOREIGN:
-            'Nhà sản xuất không khả dụng hoặc ngoài phạm vi Owner.',
+            'Nhà sản xuất không khả dụng hoặc nằm ngoài phạm vi quản lý của Chủ trại.',
         STALE_DELETE: 'Mẫu đã thay đổi. Hãy tải lại trước khi xóa.',
         REFERENCED_DELETE_BLOCKED: 'Mẫu đã được tham chiếu. Hãy chuyển trạng thái ngừng sử dụng.',
         DELETE_CONFLICT: 'Mẫu vừa thay đổi hoặc đã được tham chiếu.',
@@ -150,7 +150,7 @@ const messages = {
         STATUS_UPDATED: 'Cập nhật trạng thái tài khoản thành công',
         STATUS_UNCHANGED: 'Trạng thái mới phải khác trạng thái hiện tại',
         STATUS_PENDING_PROTECTED: 'Tài khoản chờ kích hoạt phải được xác minh qua email',
-        ADMIN_STATUS_PROTECTED: 'Không thể thay đổi trạng thái tài khoản Admin tại đây',
+        ADMIN_STATUS_PROTECTED: 'Không thể thay đổi trạng thái tài khoản quản trị viên tại đây.',
         STAFF_HAS_ACTIVE_ASSIGNMENT:
             'Cần thay thế nhân sự đang được phân công trước khi vô hiệu hóa',
         OWNER_HAS_ACTIVE_STAFF: 'Cần vô hiệu hóa hoặc chuyển nhân sự của chủ trại trước',
@@ -372,6 +372,10 @@ const messages = {
         DERIVED_VALUE_OUT_OF_RANGE: 'Mật độ ban đầu vượt quá giới hạn cho phép',
         ACTIVATION_REQUIRES_PLANNING: 'Chỉ có thể kích hoạt vụ nuôi đang lập kế hoạch',
         ACTIVATION_CONDITIONS_NOT_MET: 'Vụ nuôi chưa đáp ứng đủ điều kiện kích hoạt',
+        ACTIVATION_STOCKING_DATE_FUTURE: 'Ngày thả giống thực tế không được sau hôm nay.',
+        ACTIVATION_DELAY_REASON_REQUIRED: 'Vui lòng nhập lý do kích hoạt muộn.',
+        ACTIVATION_PROTOCOL_NOT_READY: 'Phác đồ nuôi đã duyệt chưa thể áp dụng. Vui lòng kiểm tra lại phác đồ.',
+        ACTIVATION_PROTOCOL_NO_FUTURE_OCCURRENCE: 'Phác đồ nuôi đã duyệt không còn cữ để áp dụng. Vui lòng đề nghị chuyên gia cập nhật phác đồ.',
         CANCELLATION_NOT_ALLOWED: 'Chỉ có thể hủy vụ nuôi đang lập kế hoạch hoặc đang hoạt động',
         ASSIGNMENT_NOT_ALLOWED:
             'Chỉ có thể phân công nhân sự cho vụ nuôi đang lập kế hoạch hoặc đang hoạt động',
@@ -573,6 +577,7 @@ const messages = {
             'Chỉ được xóa bản nháp chưa từng gửi duyệt; các bản đã gửi hoặc đã hủy được giữ trong lịch sử.',
         DUE_WINDOW_TOO_LARGE: 'Khoảng thực hiện quá lớn. Vui lòng nhập khoảng thời gian ngắn hơn.',
         DUE_WINDOW_INTEGER: 'Khoảng thực hiện phải là số phút nguyên.',
+        MEAL_DEADLINE_MISMATCH: 'Các vật tư trong cùng một cữ phải dùng chung hạn thực hiện.',
         DUE_WINDOW_INVALID: 'Khoảng thực hiện cần ít nhất 10 phút kể từ giờ dự kiến.',
         HARVEST_COVERAGE: (minimumDoc) =>
             `DOC kết thúc phác đồ nuôi phải lớn hơn hoặc bằng DOC ${minimumDoc} (ngày dự kiến thu hoạch của vụ nuôi).`,
@@ -583,7 +588,7 @@ const messages = {
         DAILY_INCREMENT:
             'Tăng liều chỉ dùng cho thức ăn liều cố định, mỗi ngày, trong DOC 1–29; liều cuối không được vượt giới hạn.',
         MATERIAL_UNRESOLVED:
-            'Cần chọn vật tư catalog đủ điều kiện cho tất cả đề xuất trước khi phê duyệt.',
+            'Cần chọn vật tư đủ điều kiện trong danh mục cho tất cả đề xuất trước khi phê duyệt.',
         MATERIAL_CHANGED:
             'Vật tư đã thay đổi nhà sản xuất, quy cách hoặc hồ sơ sau duyệt. Cần phác đồ được duyệt lại trước khi tạo hoặc thực thi lịch mới.',
         MATERIAL_LOCKED:
@@ -598,7 +603,7 @@ const messages = {
             VOLUME_MISSING: 'thiếu thể tích ao hợp lệ',
             BASIS_OUT_OF_RANGE: 'sinh khối hoặc thể tích vượt giới hạn dữ liệu lịch',
             BIOMASS_MISSING_OR_STALE:
-                'cữ cần nguồn sinh khối mới hoặc còn đại diện trong 7 ngày (168 giờ); KTV cần cân mẫu và cập nhật nhật ký sức khỏe',
+                'cữ cần nguồn sinh khối mới hoặc còn đại diện trong 7 ngày (168 giờ). Kỹ thuật viên cần cân mẫu và cập nhật nhật ký sức khỏe',
             DOSE_INVALID: 'quy tắc liều không hợp lệ',
             QUANTITY_OUT_OF_RANGE: 'lượng vật tư vượt giới hạn hoặc quá nhỏ',
             MATERIAL_UNRESOLVED: 'vật tư chưa được xác nhận',
@@ -741,7 +746,14 @@ const messages = {
         INSUFFICIENT_INVENTORY_TITLE: 'Tồn kho hợp lệ không đủ để thực hiện vận hành',
         INSUFFICIENT_INVENTORY_CONTENT:
             'Kiểm tra số lượng, hạn sử dụng và hồ sơ của vật tư trước khi thực hiện lại.',
-        VARIANCE_REASON_REQUIRED: 'Cần cung cấp lý do khi số lượng thực tế khác với kế hoạch',
+        VARIANCE_REASON_REQUIRED: 'Vui lòng nhập lý do khi lượng thực tế lệch ngoài ngưỡng cho phép.',
+        EXECUTION_BEFORE_ACTIVATION: 'Chỉ được ghi nhận cữ được lên lịch và thực hiện từ lúc vụ nuôi được kích hoạt.',
+        INVALID_EXECUTION_TIME: 'Giờ thực hiện phải hợp lệ và không được sau thời điểm hiện tại.',
+        EXECUTION_TIME_REASON_REQUIRED: 'Vui lòng nhập lý do khi thực hiện quá hạn hoặc ghi bổ sung do vụ kích hoạt muộn.',
+        HISTORICAL_FEED_UNAVAILABLE: 'Cữ ăn trước kích hoạt không còn đủ điều kiện ghi bổ sung.',
+        HISTORICAL_FEED_BASIS: 'Cữ ăn trước kích hoạt thiếu căn cứ tính lượng theo phác đồ.',
+        HISTORICAL_FEED_TIME: 'Vui lòng chọn giờ cho ăn thực tế trong cùng ngày với cữ.',
+        HISTORICAL_FEED_PAUSED: 'Giờ cho ăn đã chọn nằm ngoài thời gian phác đồ nuôi có hiệu lực.',
         EARLY_EXECUTION_NOT_ALLOWED: 'Chưa đến thời gian dự kiến thực hiện lịch vận hành',
         INVALID_ACTUAL_QUANTITY: 'Số lượng thực tế phải lớn hơn 0',
         INVALID_IDEMPOTENCY_KEY: 'Mã idempotency_key không hợp lệ',
@@ -782,7 +794,7 @@ const messages = {
         RESOLUTION_SUMMARY_REQUIRED: 'Bắt buộc nhập nội dung tóm tắt giải quyết',
         CASE_OR_ROLE_CONFLICT: 'Ca bệnh hoặc phân công đã thay đổi. Vui lòng tải lại.',
         PROTOCOL_RUNNING_BLOCK:
-            'Ca đang điều trị. Expert cần dừng hoặc chờ phác đồ kết thúc trước khi khép ca.',
+            'Ca đang điều trị. Chuyên gia cần dừng hoặc chờ phác đồ kết thúc trước khi khép ca.',
         PROTOCOL_ABORTED: 'Dừng phác đồ điều trị thành công',
     },
 
@@ -792,11 +804,11 @@ const messages = {
 
     TREATMENT_PROTOCOL: {
         PRODUCTION_TEMPLATE_FORBIDDEN:
-            'Phác đồ điều trị phải được Expert lập riêng cho ca bệnh, không được áp dụng mẫu phác đồ nuôi.',
+            'Mẫu chỉ áp dụng cho phác đồ nuôi. Chuyên gia cần lập phác đồ điều trị riêng cho từng ca bệnh.',
         REQUEST_REPLY_INVALID: 'Tin nhắn được trả lời phải tồn tại và thuộc đúng ca bệnh.',
         START_REQUIRED:
             'Cần mốc bắt đầu điều trị hợp lệ trong tương lai, vụ đang hoạt động và đầy đủ khoảng giờ thực hiện trước khi gửi/duyệt.',
-        FIRST_OCCURRENCE: 'Cữ ngày điều trị đầu tiên không được trước giờ bắt đầu Expert chỉ định.',
+        FIRST_OCCURRENCE: 'Cữ ngày điều trị đầu tiên phải từ giờ bắt đầu do Chuyên gia chỉ định.',
         FIRST_STAGE_DAY: 'Giai đoạn điều trị đầu tiên phải bắt đầu từ ngày điều trị 1.',
         DAY_ONE_REQUIRED:
             'Ngày điều trị 1 cần ít nhất một lần thực hiện từ mốc bắt đầu; hãy sửa lịch hoặc mốc bắt đầu trước khi gửi duyệt.',
@@ -807,7 +819,7 @@ const messages = {
         START_TIMEZONE_REQUIRED: 'Mốc điều trị phải có cả ngày, giờ và múi giờ (Z hoặc ±HH:mm).',
         STATE: 'Trạng thái ca hoặc phác đồ không cho phép thao tác này.',
         REASON_REQUIRED: 'Cần ghi lý do và quyết định cho phác đồ nuôi tiếp tục hoặc tạm giữ.',
-        COMPLETED: 'Đã kết thúc thời gian áp dụng phác đồ; Expert cần quyết định chăm sóc tiếp.',
+        COMPLETED: 'Đã kết thúc thời gian áp dụng phác đồ. Chuyên gia cần quyết định chăm sóc tiếp.',
         RECORDING_CLOSED: 'Phác đồ đã kết thúc thời gian áp dụng; lịch đã khóa ghi nhận.',
         REPLACEMENT_DUE:
             'Đã tới mốc thay phác đồ; lịch cũ đã khóa. Vui lòng tải lại và kiểm tra bản điều trị mới.',
@@ -824,19 +836,19 @@ const messages = {
         CARE_INDEPENDENT_HOLD:
             'Còn quyết định tạm hoãn khác chưa được xử lý. Không thể tự gỡ khi xử lý đợt này.',
         CARE_NO_PRODUCTION:
-            'Chưa có phác đồ nuôi đã duyệt để tiếp tục. Hãy lập phác đồ nuôi cho vụ này và gửi Owner duyệt.',
+            'Chưa có phác đồ nuôi đã duyệt để tiếp tục. Hãy lập phác đồ nuôi cho vụ này và gửi Chủ trại duyệt.',
         CARE_PRODUCTION_ENDED:
             'Phác đồ nuôi không còn cữ tương lai để tiếp tục. Hãy lập phác đồ nuôi mới cho vụ này.',
         CARE_PRODUCTION_EXPIRED: (at) =>
             `Phác đồ nuôi đã hết lịch lúc ${at.toLocaleString('vi-VN', { timeZone: 'Asia/Ho_Chi_Minh' })}. Hãy lập phác đồ nuôi mới cho vụ này.`,
         CARE_PRODUCTION_UNAPPROVED:
-            'Phác đồ nuôi mới chưa được duyệt. Hãy kiểm tra bản đang soạn hoặc chờ Owner duyệt trước khi cho chạy tiếp.',
+            'Phác đồ nuôi mới chưa được duyệt. Hãy kiểm tra bản đang soạn hoặc chờ Chủ trại duyệt trước khi cho chạy tiếp.',
         CARE_TREATMENT_DUE:
             'Phác đồ điều trị đã tới mốc bắt đầu nhưng chưa thể kích hoạt. Hãy xử lý kế hoạch điều trị trước khi cho nuôi tiếp.',
         CARE_PRODUCTION_INVALID:
             'Phác đồ nuôi còn lịch nhưng vật tư hoặc cấu hình áp dụng chưa hợp lệ. Hãy kiểm tra phác đồ trước khi tiếp tục.',
         CARE_BIOMASS_REQUIRED:
-            'Chưa đủ dữ liệu sinh khối hợp lệ để sinh lịch nuôi. Cần KTV bổ sung nhật ký sức khỏe trước khi tiếp tục.',
+            'Chưa đủ dữ liệu sinh khối hợp lệ để sinh lịch nuôi. Kỹ thuật viên cần bổ sung nhật ký sức khỏe trước khi tiếp tục.',
         CARE_CALCULATION_INVALID:
             'Chưa thể tính lượng cho lịch nuôi tiếp theo. Hãy kiểm tra căn cứ tính liều của phác đồ.',
         HOLD_CHANGED: 'Quyết định tạm hoãn đã thay đổi. Vui lòng tải lại ca bệnh.',

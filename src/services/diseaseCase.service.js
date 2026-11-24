@@ -5,6 +5,7 @@ const lifecycle = require('./protocolLifecycle.service');
 const { ApiError, recognitionResult } = require('../utils');
 const { messages, DISEASE_CASE_STATUS: STATUS, NOTIFICATION_TYPE, ACCOUNT_ROLE, ACCOUNT_STATUS, SEASON_STATUS, AI_RECOGNITION_STATUS } = require('../constants');
 const { emitNotification } = require('../realtime/notification.socket');
+const { lifecycleReason } = require('../utils/protocolPresentation');
 const msg = messages.DISEASE_CASE;
 const identity = { id: true, fullName: true, role: true };
 const seasonSelect = {
@@ -60,7 +61,12 @@ const findCase = async (tx, seasonId, caseId) => {
     if (!item) throw ApiError.notFound(msg.NOT_FOUND);
     return item;
 };
-const present = (item, season) => ({ ...item, canRespond: season.status === 'ACTIVE' && item.status !== STATUS.RESOLVED });
+const present = (item, season) => ({
+    ...item,
+    resolutionSummary: lifecycleReason(item.resolutionSummary),
+    statusHistory: item.statusHistory?.map((entry) => ({ ...entry, reason: lifecycleReason(entry.reason) })),
+    canRespond: season.status === 'ACTIVE' && item.status !== STATUS.RESOLVED,
+});
 /** Read conversation, care markers and production suspension state from one database snapshot. */
 const getCase = (accountId, seasonId, caseId) => prisma.$transaction(async (tx) => {
     const season = await scope(tx, accountId, seasonId);
