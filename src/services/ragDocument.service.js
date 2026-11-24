@@ -182,11 +182,12 @@ const listDocuments = async ({ q, status, category, page = 1, limit = 10 }) => {
 
 /**
  * Update document metadata or change retrieval availability for ready documents.
- * Uploading or deleting documents cannot be edited, and conditional writes
+ * Uploading, processing or deleting documents cannot be edited, and conditional writes
  * reject changes made against an outdated document version.
  */
 const updateDocument = async (id, input) => {
     const row = await getDocument(id);
+    if (row.status === RAG_DOCUMENT_STATUS.PROCESSING) throw ApiError.conflict(messages.RAG_DOCUMENT.EDIT_PROCESSING);
     if ([RAG_DOCUMENT_STATUS.UPLOADING, RAG_DOCUMENT_STATUS.DELETING, RAG_DOCUMENT_STATUS.DELETE_FAILED].includes(row.status)) throw ApiError.conflict('Tài liệu đang tải lên hoặc chờ xóa.');
     if (input.isActive !== undefined && row.status !== RAG_DOCUMENT_STATUS.READY) throw ApiError.conflict('Chỉ bật/tắt tài liệu đã sẵn sàng.');
     const data = { ...input };

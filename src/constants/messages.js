@@ -476,7 +476,8 @@ const messages = {
         PARTIAL_COUNT_REQUIRED: 'Vui lòng nhập số con thu hoạch khi thu tỉa.',
         FINAL_COUNT_REQUIRED: 'Vui lòng nhập số con thu hoạch khi thu hoạch cuối.',
         FINAL_REASON_REQUIRED:
-            'Vui lòng nhập lý do thu hoạch cuối khi còn ca bệnh đang mở hoặc đang điều trị.',
+            'Vui lòng nhập lý do thu hoạch cuối khi còn ca bệnh chưa đóng hoặc phác đồ điều trị chưa kết thúc.',
+        DISEASE_ACTIVE: 'Không thể thu tỉa khi còn ca bệnh chưa đóng hoặc phác đồ điều trị chưa kết thúc.',
         POPULATION_UNKNOWN:
             'Chưa xác định được số tôm hiện có. Vui lòng cập nhật số lượng trước khi thu tỉa.',
         PARTIAL_MISMATCH: (available, quantity, expected) =>
@@ -661,6 +662,7 @@ const messages = {
     },
 
     RAG_DOCUMENT: {
+        EDIT_PROCESSING: 'Không thể chỉnh sửa tài liệu đang xử lý. Vui lòng đợi xử lý hoàn tất.',
         CATEGORY_REQUIRED: 'Vui lòng chọn danh mục.',
         CREATED: 'Đã thêm tài liệu vào kho kiến thức chatbot.',
         NOT_FOUND: 'Không tìm thấy tài liệu.',
