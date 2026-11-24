@@ -42,26 +42,50 @@ const recalculateHealthPopulations = async (tx, season) => {
     })} AS available
         FROM shrimp_health_logs health WHERE health.season_id = ${season.id}::uuid AND health.is_voided = false`);
     const byId = new Map(populations.map(row => [row.id, row.available]));
+    let runningWeight = null;
+    let runningLength = null;
+
     for (const log of logs) {
         const available = byId.get(log.id);
         // Unknown stocking/harvest data cannot justify overwriting a manually supplied estimate.
         if (available == null) continue;
         const population = BigInt(available);
-        const weight = log.avgWeightG == null ? null : new Prisma.Decimal(log.avgWeightG);
+
+        if (log.avgWeightG != null && Number(log.avgWeightG) > 0) {
+            runningWeight = new Prisma.Decimal(log.avgWeightG);
+        }
+        if (log.avgLengthCm != null && Number(log.avgLengthCm) > 0) {
+            runningLength = new Prisma.Decimal(log.avgLengthCm);
+        }
+
+        const effectiveWeight = log.avgWeightG != null ? new Prisma.Decimal(log.avgWeightG) : runningWeight;
+        const effectiveLength = log.avgLengthCm != null ? new Prisma.Decimal(log.avgLengthCm) : runningLength;
+
         const populationChanged = log.estimatedPopulation == null || BigInt(log.estimatedPopulation) !== population;
         // A direct biomass estimate has no reusable weight when its population basis changes.
         let biomass = populationChanged ? null : log.estimatedBiomassKg;
         if (population === 0n) {
             biomass = new Prisma.Decimal(0);
-        } else if (weight?.gt(0)) {
-            biomass = new Prisma.Decimal(population.toString()).mul(weight).div(1000).toDecimalPlaces(3);
+        } else if (effectiveWeight?.gt(0)) {
+            biomass = new Prisma.Decimal(population.toString()).mul(effectiveWeight).div(1000).toDecimalPlaces(3);
         }
         const biomassChanged = biomass == null || log.estimatedBiomassKg == null
             ? (biomass ?? null) !== (log.estimatedBiomassKg ?? null)
             : !new Prisma.Decimal(biomass).eq(log.estimatedBiomassKg);
-        if (populationChanged || biomassChanged) {
-            await tx.shrimpHealthLog.update({ where: { id: log.id },
-                data: { estimatedPopulation: population, estimatedBiomassKg: biomass } });
+
+        const weightChanged = effectiveWeight != null && (log.avgWeightG == null || !new Prisma.Decimal(effectiveWeight).eq(log.avgWeightG));
+        const lengthChanged = effectiveLength != null && (log.avgLengthCm == null || !new Prisma.Decimal(effectiveLength).eq(log.avgLengthCm));
+
+        if (populationChanged || biomassChanged || weightChanged || lengthChanged) {
+            await tx.shrimpHealthLog.update({
+                where: { id: log.id },
+                data: {
+                    estimatedPopulation: population,
+                    estimatedBiomassKg: biomass,
+                    avgWeightG: effectiveWeight,
+                    avgLengthCm: effectiveLength,
+                },
+            });
         }
     }
 };

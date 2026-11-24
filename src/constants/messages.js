@@ -531,6 +531,10 @@ const messages = {
         AT_LEAST_ONE_METRIC: 'Phải nhập ít nhất một chỉ số sức khỏe hoặc thể trạng tôm',
         ESTIMATED_POPULATION_EXCEEDS_INITIAL:
             'Số lượng tôm ước tính không được vượt quá số lượng giống thả ban đầu',
+        MORTALITY_EXCEEDS_AVAILABLE: 'Số lượng hao hụt vượt quá số lượng tôm hiện có trong ao',
+        MORTALITY_INVALID: 'Số lượng hao hụt không hợp lệ',
+        RECORDED_AT_PAST_DAY: 'Chỉ được ghi nhận sức khỏe tôm trong ngày hôm nay',
+        INVALID_RECORDED_AT: 'Thời điểm ghi nhận không hợp lệ',
         DUPLICATE_LOG: 'Bản ghi sức khỏe tôm cho thời điểm này đã tồn tại',
         IDEMPOTENCY_KEY_REUSED: 'Khóa lưu bản ghi đã được dùng cho nội dung khác',
         RECORDED_AT_TOO_FAR_FUTURE: 'Thời điểm ghi nhận không được vượt quá hiện tại 5 phút',
