@@ -1,5 +1,9 @@
+const axios = require('axios');
+const config = require('../config');
 const prisma = require('../config/prisma');
 const { ACCOUNT_STATUS } = require('../constants');
+
+const HEALTH_CHECK_TIMEOUT_MS = 2000;
 
 /**
  * Format a Date object to YYYY-MM-DD in Vietnam timezone
@@ -178,6 +182,76 @@ const getSystemOverview = async () => {
     };
 };
 
+/**
+ * Probe an internal AI service health endpoint with a short timeout so admin checks never stall.
+ */
+const probeServiceHealth = async ({ key, name, baseUrl, versionField }) => {
+    const normalizedUrl = (baseUrl || '').replace(/\/+$/, '');
+    if (!normalizedUrl) {
+        return {
+            key,
+            name,
+            status: 'NOT_CONFIGURED',
+            configured: false,
+            latencyMs: null,
+            version: null,
+        };
+    }
+
+    const startedAt = Date.now();
+    try {
+        const { data } = await axios.get(`${normalizedUrl}/v1/health`, {
+            timeout: HEALTH_CHECK_TIMEOUT_MS,
+            maxRedirects: 0,
+        });
+        const latencyMs = Math.max(0, Date.now() - startedAt);
+        const healthy = data?.status === 'ok';
+        return {
+            key,
+            name,
+            status: healthy ? 'UP' : 'DOWN',
+            configured: true,
+            latencyMs,
+            version: healthy && typeof data?.[versionField] === 'string' ? data[versionField] : null,
+        };
+    } catch {
+        return {
+            key,
+            name,
+            status: 'DOWN',
+            configured: true,
+            latencyMs: Math.max(0, Date.now() - startedAt),
+            version: null,
+        };
+    }
+};
+
+/**
+ * Check live health status for AI disease classification and RAG services in parallel.
+ */
+const getServicesHealth = async () => {
+    const services = await Promise.all([
+        probeServiceHealth({
+            key: 'ai_diagnosis',
+            name: 'AI Chẩn đoán bệnh trên tôm',
+            baseUrl: config.ai?.serviceUrl,
+            versionField: 'model_version',
+        }),
+        probeServiceHealth({
+            key: 'rag',
+            name: 'Trợ lý AquaBot',
+            baseUrl: config.rag?.serviceUrl,
+            versionField: 'version',
+        }),
+    ]);
+
+    return {
+        checkedAt: new Date().toISOString(),
+        services,
+    };
+};
+
 module.exports = {
     getSystemOverview,
+    getServicesHealth,
 };
