@@ -475,7 +475,11 @@ const getSeasons = async (ownerId, query = {}) => {
     };
 };
 
-/** Return the existing owned-season detail plus retained stock-out costs. */
+/**
+ * Retrieves complete season details for an owned aquaculture season,
+ * including aggregated material costs from historical stock-out transactions
+ * and the derived estimated FCR from operational metrics.
+ */
 const getSeason = async (seasonId, ownerId) => {
     const season = await findOwnedSeasonDetail(prisma, seasonId, ownerId);
     // Sum stored stock-out amounts, retaining the price of each consumed lot.
@@ -495,6 +499,15 @@ const getSeason = async (seasonId, ownerId) => {
             _sum: { totalAmount: true },
         });
     };
+    const readOperationalMetrics = () => {
+        if (!prisma.seasonOperationalMetrics || typeof prisma.seasonOperationalMetrics.findUnique !== 'function') {
+            return Promise.resolve(null);
+        }
+        return prisma.seasonOperationalMetrics.findUnique({
+            where: { seasonId },
+            select: { estimatedFcr: true },
+        });
+    };
     // All categories must describe the same snapshot during concurrent stock-outs.
     const amountsPromises = [
         sumCategory([PRODUCT_CATEGORY.FEED]),
@@ -509,11 +522,16 @@ const getSeason = async (seasonId, ownerId) => {
     } catch {
         amounts = await Promise.all(amountsPromises);
     }
+    const operationalMetrics = await readOperationalMetrics();
     const [feed, medicine, environment] = amounts.map(
         (result) => new MaterialCostDecimal(result._sum.totalAmount ?? 0),
     );
     return {
         ...normalizeSeasonDetail(season),
+        estimatedFcr:
+            operationalMetrics?.estimatedFcr == null
+                ? null
+                : Number(operationalMetrics.estimatedFcr),
         materialCosts: {
             currency: 'VND',
             feed: feed.toFixed(2),
