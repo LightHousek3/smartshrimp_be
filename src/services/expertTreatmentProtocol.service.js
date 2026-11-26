@@ -21,8 +21,8 @@ const getContext = async (expertId, caseId) =>
     forTreatment(caseId).getSeason(expertId, await context(caseId));
 
 /** Read treatment content, execution evidence and audit history from one authorized transaction. */
-const detail = async (expertId, caseId, protocolId) =>
-    forTreatment(caseId).detail(expertId, await context(caseId), protocolId);
+const detail = async (expertId, caseId, protocolId, selectedDay) =>
+    forTreatment(caseId).detail(expertId, await context(caseId), protocolId, selectedDay);
 
 /**
  * Create the next case-bound version only when no editable or pending version is in progress.

@@ -2,9 +2,11 @@ const { Prisma, ProductionProtocolTemplateStatus: TemplateStatus } = require('@p
 const { createHash, randomUUID } = require('crypto');
 const prisma = require('../config/prisma');
 const { wireItem, protocolStages, presentProtocolHistory } = require('../utils/protocolPresentation');
-const { cultureDay, courseCoverage } = require('../utils/protocolTimeline');
+const { cultureDay, courseCoverage, unrecordedOccurrences } = require('../utils/protocolTimeline');
 const lifecycle = require('./protocolLifecycle.service');
 const drafts = require('./protocolDraft.service');
+const { readDay } = require('./protocolDay.service');
+const { validateProposedManufacturers } = require('./supplier.service');
 const { executionRows } = require('../utils/protocolExecution');
 const logger = require('../config/logger');
 const config = require('../config');
@@ -183,6 +185,8 @@ const createWorkflow = ({ protocolType = 'PRODUCTION', diseaseCaseId = null } = 
                 shrimpType: true,
                 initialQuantity: true,
                 stockingDate: true,
+                activatedAt: true,
+                activationDelayReason: true,
                 expectedEndDate: true,
                 actualEndDate: true,
                 pond: {
@@ -574,42 +578,62 @@ const createWorkflow = ({ protocolType = 'PRODUCTION', diseaseCaseId = null } = 
         });
     /**
      * Read content, action eligibility and history in one authorized transaction.
-     * Treatment details include execution rows and adherence counts for local client filtering.
+     * Both protocol types expose execution history for the authorized version.
      */
-    const detail = (accountId, seasonId, protocolId) =>
+    const detail = (accountId, seasonId, protocolId, selectedDay) =>
         transaction(async (tx) => {
             const season = await scope(tx, accountId, seasonId);
             const row = await findProtocol(tx, seasonId, protocolId);
+            if (selectedDay != null) return readDay(tx, { ...row, season }, selectedDay);
             const data = wireDetail(
                 row,
                 season,
                 await blockers(tx, row),
                 await history(tx, row.id),
             );
-            if (treatment) {
-                const schedules = await tx.operationSchedule.findMany({
-                    where: { protocolItem: { protocolId: row.id } },
-                    orderBy: [{ scheduledAt: 'asc' }, { id: 'asc' }],
-                    include: {
-                        execution: {
-                            include: {
-                                executor: { select: { id: true, fullName: true } },
-                                actualProduct: { select: { id: true, name: true } },
-                            },
-                        },
-                        sourceHealthLog: {
-                            select: {
-                                id: true,
-                                recordedAt: true,
-                                estimatedBiomassKg: true,
-                                isVoided: true,
-                            },
+            const schedules = await tx.operationSchedule.findMany({
+                where: { protocolItem: { protocolId: row.id } },
+                orderBy: [{ scheduledAt: 'asc' }, { id: 'asc' }],
+                include: {
+                    execution: {
+                        include: {
+                            executor: { select: { id: true, fullName: true } },
+                            actualProduct: { select: { id: true, name: true } },
                         },
                     },
-                });
-                data.executionRows = executionRows(row, schedules);
-                data.coverage = courseCoverage({ ...row, season }, schedules);
-                data.asOf = new Date();
+                    sourceHealthLog: {
+                        select: {
+                            id: true,
+                            recordedAt: true,
+                            estimatedBiomassKg: true,
+                            isVoided: true,
+                        },
+                    },
+                    cancelledByAccount: { select: { fullName: true } },
+                },
+            });
+            const now = new Date();
+            const protocol = { ...row, season };
+            const activationAt = season.activatedAt;
+            const previews = !treatment && activationAt && season.activationDelayReason &&
+                await lifecycle.isActivationProduction(tx, row.id, activationAt)
+                ? [...unrecordedOccurrences(protocol, row.items, activationAt, schedules)].map(({ item, day, at }) => ({
+                    id: `unrecorded:${item.id}:${day}`,
+                    protocolItemId: item.id,
+                    scheduledAt: at,
+                    status: 'NOT_RECORDED',
+                    operationType: item.operationType,
+                    doseBasisSnapshot: item.doseBasis,
+                    doseValueSnapshot: structure.doseAtDay(item, day),
+                    unit: item.doseUnit,
+                }))
+                : [];
+            data.executionRows = executionRows(row, [...schedules, ...previews], now);
+            data.executionAnchor = treatment ? row.treatmentStartAt : season.stockingDate;
+            data.executionDurationDays = row.items.reduce((last, item) => Math.max(last, item.endDayOffset), 0);
+            data.asOf = now;
+            if (treatment) {
+                data.coverage = courseCoverage(protocol, schedules, now);
             }
             return data;
         });
@@ -745,6 +769,7 @@ const createWorkflow = ({ protocolType = 'PRODUCTION', diseaseCaseId = null } = 
         );
         const oldItems = new Map(current?.items.map((entry) => [entry.id, entry]));
         const allIds = new Set();
+        const proposedManufacturers = [];
         /** Reject duplicate stage, meal or item IDs and identities outside this saved graph. */
         const checkId = (id, existing) => {
             if (id && (!existing.has(id) || allIds.has(id))) {
@@ -840,6 +865,8 @@ const createWorkflow = ({ protocolType = 'PRODUCTION', diseaseCaseId = null } = 
                                 throw ApiError.badRequest(
                                     messages.PRODUCTION_PROTOCOL.MATERIAL_RESOLUTION,
                                 );
+                        } else {
+                            proposedManufacturers.push(proposal.manufacturer);
                         }
                     }
                     if (!entry.productId) continue;
@@ -879,6 +906,7 @@ const createWorkflow = ({ protocolType = 'PRODUCTION', diseaseCaseId = null } = 
                 }
             }
         }
+        await validateProposedManufacturers(tx, season.pond.farm.ownerId, proposedManufacturers);
     };
     /**
      * Replace the validated graph while retaining item identities and unique sequence keys.

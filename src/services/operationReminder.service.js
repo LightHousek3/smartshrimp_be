@@ -3,9 +3,30 @@ const jobTransaction = require('../utils/jobTransaction');
 const logger = require('../config/logger');
 const lifecycle = require('./protocolLifecycle.service');
 const notices = require('../utils/jobNotification');
-const { timingComparison, TIMING } = require('../utils/protocolExecution');
+const {
+    operationOccurrenceKey, operationOccurrenceWhere, timingComparison, TIMING,
+} = require('../utils/protocolExecution');
 const { errorDetail } = require('../utils/productionSchedule');
 const { PRODUCTION_PROTOCOL_LIMITS } = require('../constants');
+
+const occurrenceItemSelect = {
+    dueAtMinutes: true, materialSnapshot: true, protocolId: true, productionMealId: true,
+    mealNumber: true, protocol: { select: { protocolType: true } },
+};
+
+/** A pending sibling still belongs to the notification already sent for its meal. */
+const collectOccurrences = (schedules, now) => {
+    const groups = new Map();
+    for (const schedule of schedules) {
+        const timing = timingComparison(schedule, schedule.protocolItem.dueAtMinutes, now);
+        if (![TIMING.PENDING, TIMING.OVERDUE].includes(timing.status)) continue;
+        const key = operationOccurrenceKey(schedule);
+        const group = groups.get(key) ?? [];
+        group.push({ schedule, timing });
+        groups.set(key, group);
+    }
+    return groups;
+};
 
 /** Serialize reminders with approval, closure, execution and assignment changes for this season. */
 const remindSeason = async (seasonId, bootAt) => {
@@ -44,10 +65,24 @@ const remindSeason = async (seasonId, bootAt) => {
                     protocolItem: { protocol: { seasonId, status: 'ACTIVE' } },
                 },
                 include: {
-                    protocolItem: { select: { dueAtMinutes: true, materialSnapshot: true } },
+                    protocolItem: { select: occurrenceItemSelect },
                 },
                 orderBy: { id: 'asc' },
             });
+            const groups = collectOccurrences(schedules, now);
+            if (!groups.size) return;
+            const references = new Map(schedules.map((row) => [row.id, operationOccurrenceKey(row)]));
+            const occurrenceFilters = [...groups.values()].map(([{ schedule }]) =>
+                operationOccurrenceWhere(schedule));
+            // Match the references of older notifications even when their first material is already done.
+            for (let offset = 0; offset < occurrenceFilters.length; offset += 200) {
+                const siblings = await tx.operationSchedule.findMany({
+                    where: { seasonId, status: { not: 'PLANNED' }, OR: occurrenceFilters.slice(offset, offset + 200) },
+                    select: { id: true, protocolItemId: true, scheduledAt: true,
+                        protocolItem: { select: { protocolId: true, productionMealId: true, mealNumber: true } } },
+                });
+                for (const row of siblings) references.set(row.id, operationOccurrenceKey(row));
+            }
             for (const { accountId } of personnel) {
                 const previous = await tx.notification.findMany({
                     where: {
@@ -57,7 +92,7 @@ const remindSeason = async (seasonId, bootAt) => {
                             { referenceType: 'aquaculture_season', referenceId: seasonId },
                             {
                                 referenceType: 'operation_schedule',
-                                referenceId: { in: schedules.map((row) => row.id) },
+                                referenceId: { in: [...references.keys()] },
                             },
                         ],
                     },
@@ -66,7 +101,7 @@ const remindSeason = async (seasonId, bootAt) => {
                 const reported = new Set(
                     previous
                         .filter((row) => row.referenceType === 'operation_schedule')
-                        .map((row) => `${row.type}:${row.referenceId}`),
+                        .map((row) => `${row.type}:${references.get(row.referenceId)}`),
                 );
                 const watermark = previous
                     .filter(
@@ -76,42 +111,42 @@ const remindSeason = async (seasonId, bootAt) => {
                     )
                     .reduce((last, row) => Math.max(last, row.createdAt.getTime()), 0);
                 const backlog = [];
-                for (const schedule of schedules) {
-                    const timing = timingComparison(
-                        schedule,
-                        schedule.protocolItem.dueAtMinutes,
-                        now,
-                    );
-                    if (![TIMING.PENDING, TIMING.OVERDUE].includes(timing.status)) continue;
-                    const type =
-                        timing.status === TIMING.OVERDUE ? 'OPERATION_OVERDUE' : 'OPERATION_DUE';
-                    if (reported.has(`${type}:${schedule.id}`)) continue;
-                    if (
-                        type === 'OPERATION_OVERDUE' &&
-                        timing.dueAt.getTime() <= watermark &&
-                        schedule.createdAt.getTime() <= watermark
-                    )
-                        continue;
-                    // Persisted summary time covers only rows which already existed when it was sent.
-                    if (type === 'OPERATION_OVERDUE' && timing.dueAt <= bootAt) {
-                        backlog.push(schedule);
+                for (const [key, group] of groups) {
+                    const overdue = group.filter(({ timing }) => timing.status === TIMING.OVERDUE);
+                    const isOverdue = overdue.length > 0;
+                    const type = isOverdue ? 'OPERATION_OVERDUE' : 'OPERATION_DUE';
+                    if (reported.has(`${type}:${key}`)) continue;
+                    // A backlog summary covers only rows which existed at that time.
+                    const candidates = isOverdue
+                        ? overdue.filter(({ schedule, timing }) =>
+                            timing.dueAt.getTime() > watermark || schedule.createdAt.getTime() > watermark)
+                        : group;
+                    if (!candidates.length) continue;
+                    if (isOverdue && candidates.every(({ timing }) => timing.dueAt <= bootAt)) {
+                        backlog.push(key);
                         continue;
                     }
+                    const [{ schedule }] = candidates;
+                    const { protocolItem } = schedule;
+                    const treatment = protocolItem.protocol.protocolType === 'TREATMENT';
+                    const label = protocolItem.mealNumber != null
+                        ? `Cữ ${protocolItem.mealNumber}`
+                        : treatment ? 'Lượt điều trị' : 'Lượt vận hành';
+                    const material = group.length > 1
+                        ? `${group.length} vật tư chưa ghi nhận`
+                        : protocolItem.materialSnapshot?.name ?? 'Vật tư theo phác đồ';
                     const saved = await notices.save(
                         tx,
-                        [schedule.protocolItemId, schedule.scheduledAt.toISOString()],
+                        ['occurrence', key],
                         {
                             accountId,
                             type,
                             referenceType: 'operation_schedule',
                             referenceId: schedule.id,
                             createdAt: now,
-                            title:
-                                type === 'OPERATION_DUE'
-                                    ? 'Đến giờ thực hiện cữ'
-                                    : 'Cữ vận hành đã quá hạn',
-                            content: `${season.name}: ${schedule.protocolItem.materialSnapshot?.name ?? 'Vật tư theo phác đồ'}. ${
-                                type === 'OPERATION_OVERDUE'
+                            title: isOverdue ? `${label} đã quá hạn` : `Đến giờ thực hiện ${label.toLowerCase()}`,
+                            content: `${season.name}: ${material}. ${
+                                isOverdue
                                     ? 'Có thể ghi nhận khi phác đồ vẫn còn hiệu lực.'
                                     : 'Thực hiện theo lượng và khoảng thời gian đã lên lịch.'
                             }`,
@@ -125,20 +160,15 @@ const remindSeason = async (seasonId, bootAt) => {
                         [
                             'backlog',
                             seasonId,
-                            backlog
-                                .map(
-                                    (row) =>
-                                        `${row.protocolItemId}:${row.scheduledAt.toISOString()}`,
-                                )
-                                .sort(),
+                            backlog.sort(),
                         ],
                         {
                             accountId,
                             type: 'OPERATION_OVERDUE',
                             referenceType: 'aquaculture_season',
                             referenceId: seasonId,
-                            title: 'Các cữ vận hành còn quá hạn',
-                            content: `${season.name}: còn ${backlog.length} cữ quá hạn chưa ghi nhận. Kiểm tra lịch trước khi thực hiện.`,
+                            title: 'Các lượt vận hành còn quá hạn',
+                            content: `${season.name}: còn ${backlog.length} lượt quá hạn chưa ghi nhận. Kiểm tra lịch trước khi thực hiện.`,
                             createdAt: now,
                         },
                     );

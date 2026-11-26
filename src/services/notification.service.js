@@ -1,11 +1,11 @@
 const prisma = require('../config/prisma');
 const { ApiError, localizeNotification } = require('../utils');
-const { httpStatus, messages, NOTIFICATION_TYPE, ACCOUNT_ROLE } = require('../constants');
+const { httpStatus, messages, NOTIFICATION_TYPE, ACCOUNT_ROLE, PROTOCOL_TYPE } = require('../constants');
 const { emitNotification } = require('../realtime/notification.socket');
 const { legacyTaskReferences } = require('../utils/notificationText');
 
 /** Resolve legacy reference labels in batches, restricted to the recipient's owner scope. */
-const presentNotifications = async (rows, accountId, client = prisma) => {
+const presentLegacyNotifications = async (rows, accountId, client) => {
     const references = rows.flatMap(legacyTaskReferences);
     if (!references.length) return rows.map((row) => localizeNotification(row));
     const account = await client.account.findUnique({
@@ -38,6 +38,35 @@ const presentNotifications = async (rows, accountId, client = prisma) => {
         assignedTo: new Map(technicians.map((row) => [row.id, row.fullName || row.email])),
     };
     return rows.map((row) => localizeNotification(row, names));
+};
+
+/** Resolve the protocol of retained operation reminders without changing their stored references. */
+const presentNotifications = async (rows, accountId, client = prisma) => {
+    const operationTypes = [
+        NOTIFICATION_TYPE.OPERATION_DUE,
+        NOTIFICATION_TYPE.OPERATION_OVERDUE,
+        NOTIFICATION_TYPE.OPERATION_CANCELLED,
+    ];
+    const scheduleIds = [...new Set(rows
+        .filter((row) => row.referenceType === 'operation_schedule' &&
+            row.referenceId && operationTypes.includes(row.type))
+        .map((row) => row.referenceId))];
+    const [localized, schedules] = await Promise.all([
+        presentLegacyNotifications(rows, accountId, client),
+        scheduleIds.length ? client.operationSchedule.findMany({
+            where: { id: { in: scheduleIds } },
+            select: { id: true, protocolItem: { select: { protocol: { select: { protocolType: true } } } } },
+        }) : [],
+    ]);
+    const treatments = new Set(schedules
+        .filter((row) => row.protocolItem.protocol.protocolType === PROTOCOL_TYPE.TREATMENT)
+        .map((row) => row.id));
+    return localized.map((row) =>
+        row.referenceType === 'operation_schedule' && operationTypes.includes(row.type) &&
+            treatments.has(row.referenceId)
+            ? { ...row, isTreatmentOperation: true }
+            : row,
+    );
 };
 
 const NOTIFICATION_LIST_SELECT = {

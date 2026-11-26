@@ -6,11 +6,95 @@ const TIMING = Object.freeze({
     EARLY: 'EARLY',
     LATE: 'LATE',
     PENDING: 'PENDING',
+    NOT_RECORDED: 'NOT_RECORDED',
     OVERDUE: 'OVERDUE',
     CANCELLED: 'CANCELLED',
     UNKNOWN: 'UNKNOWN',
 });
 const MINUTE_MS = 60000;
+
+/** A meal recurs at a specific instant within one protocol version. */
+const operationOccurrenceKey = ({ protocolItem, protocolItemId, scheduledAt }) => {
+    const { protocolId, productionMealId, mealNumber } = protocolItem;
+    const identity = productionMealId ?? (mealNumber == null ? protocolItemId : `meal:${mealNumber}`);
+    return `${protocolId}:${identity}:${scheduledAt.getTime()}`;
+};
+
+/** Match all rows belonging to an occurrence, including earlier schedule revisions. */
+const operationOccurrenceWhere = ({ protocolItem, protocolItemId, scheduledAt }) => {
+    const { protocolId, productionMealId, mealNumber } = protocolItem;
+    if (productionMealId == null && mealNumber == null) return { scheduledAt, protocolItemId };
+    return {
+        scheduledAt,
+        protocolItem: {
+            protocolId,
+            productionMealId: productionMealId ?? null,
+            ...(productionMealId == null && { mealNumber }),
+        },
+    };
+};
+
+/** Derive both reports from the same set of eligible material rows. */
+const summarizeOperationProgress = (schedules, now) => {
+    const current = new Map();
+    for (const row of schedules) {
+        const key = `${row.protocolItemId}:${row.scheduledAt.getTime()}`;
+        const previous = current.get(key);
+        if (!previous || (previous.status === 'CANCELLED' &&
+            (row.status !== 'CANCELLED' || (row.cancelledAt ?? 0) > (previous.cancelledAt ?? 0)))) {
+            current.set(key, row);
+        }
+    }
+
+    const groups = new Map();
+    const materials = {};
+    for (const row of current.values()) {
+        const timing = timingComparison(row, row.protocolItem.dueAtMinutes, now);
+        const key = operationOccurrenceKey(row);
+        const group = groups.get(key) ?? { started: row.scheduledAt <= now };
+        let bucket;
+        if (row.status === 'COMPLETED' && group.started) {
+            bucket = 'completed';
+        } else if (!timing.dueAt) {
+            continue;
+        } else if (row.status === 'CANCELLED') {
+            const closedCourse = row.cancellationType === 'PROTOCOL_COMPLETED';
+            const cutoff = row.effectiveEndAt && row.effectiveEndAt < row.cancelledAt ? row.effectiveEndAt : row.cancelledAt;
+            if (row.cancellationType !== 'CALCULATION_CHANGED' && cutoff &&
+                (closedCourse ? timing.dueAt <= cutoff : timing.dueAt < cutoff)) {
+                bucket = 'lockedUnrecorded';
+            }
+        } else if (row.status === 'PLANNED') {
+            if (row.effectiveEndAt && row.scheduledAt > row.effectiveEndAt) continue;
+            if (row.effectiveEndAt && now > row.effectiveEndAt) {
+                if (timing.dueAt <= row.effectiveEndAt) bucket = 'lockedUnrecorded';
+            } else {
+                bucket = timing.status === TIMING.OVERDUE ? 'overdue' : 'waiting';
+            }
+        }
+        if (!bucket) continue;
+        group[bucket] = true;
+        groups.set(key, group);
+        if (row.operationType && group.started) {
+            const type = row.operationType.toLowerCase();
+            const material = materials[type] ?? { started: 0, completed: 0 };
+            material.started++;
+            if (bucket === 'completed') material.completed++;
+            materials[type] = material;
+        }
+    }
+
+    const progress = { started: 0, completed: 0, waiting: 0, overdue: 0, lockedUnrecorded: 0 };
+    for (const group of groups.values()) {
+        if (group.overdue) progress.overdue++;
+        else if (group.waiting) progress.waiting++;
+        else if (group.lockedUnrecorded) progress.lockedUnrecorded++;
+        else if (group.completed) progress.completed++;
+        else continue;
+        if (group.started) progress.started++;
+    }
+    return { progress, materialProgress: materials };
+};
 
 /** Compare persisted schedule units; never turn a reporting threshold into a prescription change. */
 const quantityComparison = (plannedQuantity, actualQuantity, allowedVariancePct) => {
@@ -39,11 +123,21 @@ const quantityComparison = (plannedQuantity, actualQuantity, allowedVariancePct)
     };
 };
 
+/** Material substitutions cannot be compared against the prescribed quantity. */
+const quantityAudit = (protocol, schedule) => {
+    const execution = schedule.execution;
+    if (!execution || (execution.actualProductId != null && execution.actualProductId !== schedule.productId)) {
+        return null;
+    }
+    return quantityComparison(schedule.plannedQuantity, execution.actualQuantity, protocol.allowedVariancePct ?? 10);
+};
+
 /**
  * Classify execution against planned time and its grace period, or report the current state of an
  * unexecuted schedule.
  */
 const timingComparison = (schedule, dueAtMinutes, now = new Date()) => {
+    if (schedule.scheduledAt == null) return { status: TIMING.UNKNOWN, dueAt: null };
     const scheduledAt = new Date(schedule.scheduledAt);
     if (
         !Number.isInteger(dueAtMinutes) ||
@@ -67,20 +161,13 @@ const timingComparison = (schedule, dueAtMinutes, now = new Date()) => {
             differenceMinutes: (executedAt.getTime() - scheduledAt.getTime()) / MINUTE_MS,
         };
     }
-    return {
-        dueAt,
-        status:
-            schedule.status === 'CANCELLED'
-                ? TIMING.CANCELLED
-                : schedule.status === 'COMPLETED'
-                  ? TIMING.UNKNOWN
-                  : now > dueAt
-                    ? TIMING.OVERDUE
-                    : TIMING.PENDING,
-    };
+    if (schedule.status === 'CANCELLED') return { dueAt, status: TIMING.CANCELLED };
+    if (schedule.status === 'NOT_RECORDED') return { dueAt, status: TIMING.NOT_RECORDED };
+    if (schedule.status === 'COMPLETED') return { dueAt, status: TIMING.UNKNOWN };
+    return { dueAt, status: now > dueAt ? TIMING.OVERDUE : TIMING.PENDING };
 };
 
-/** This projection is returned with protocol detail, not fetched by a separate execution endpoint. */
+/** Keep execution facts and any replaced cancellation rows for the selected version. */
 const executionRows = (protocol, schedules, now = new Date()) => {
     const items = new Map(protocol.items.map((item) => [item.id, item]));
     return schedules.map((schedule) => {
@@ -93,7 +180,7 @@ const executionRows = (protocol, schedules, now = new Date()) => {
             operationType: schedule.operationType,
             scheduledAt: schedule.scheduledAt,
             status: schedule.status,
-            plannedQuantity: String(schedule.plannedQuantity),
+            plannedQuantity: schedule.plannedQuantity == null ? null : String(schedule.plannedQuantity),
             unit: schedule.unit,
             plannedProduct: item.materialSnapshot
                 ? { id: item.productId, name: item.materialSnapshot.name }
@@ -117,9 +204,13 @@ const executionRows = (protocol, schedules, now = new Date()) => {
                   }
                 : null,
             mealNumber: item.mealNumber,
+            productionMealId: item.productionMealId,
+            productImageUrls: item.materialSnapshot?.imageUrls ?? item.product?.imageUrls ??
+                item.recommendedProductDetails?.proposed?.imageUrls ?? [],
             cancellationReason: lifecycleReason(schedule.cancellationReason),
             cancellationType: schedule.cancellationType,
             cancelledAt: schedule.cancelledAt,
+            cancelledByName: schedule.cancelledByAccount?.fullName ?? null,
             instructions: item.instructions,
             actualQuantity: execution ? String(execution.actualQuantity) : null,
             actualProduct: execution?.actualProduct
@@ -132,14 +223,13 @@ const executionRows = (protocol, schedules, now = new Date()) => {
             recordedAt: execution?.createdAt ?? null,
             varianceReason: execution?.varianceReason ?? null,
             note: execution?.note ?? null,
-            quantityComparison: quantityComparison(
-                schedule.plannedQuantity,
-                execution?.actualQuantity,
-                protocol.allowedVariancePct,
-            ),
+            quantityComparison: quantityAudit(protocol, schedule),
             timing: timingComparison(schedule, item.dueAtMinutes, now),
         };
     });
 };
 
-module.exports = { TIMING, quantityComparison, timingComparison, executionRows };
+module.exports = {
+    TIMING, quantityComparison, quantityAudit, timingComparison, executionRows,
+    operationOccurrenceKey, operationOccurrenceWhere, summarizeOperationProgress,
+};

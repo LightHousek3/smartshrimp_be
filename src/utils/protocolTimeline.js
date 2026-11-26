@@ -43,6 +43,31 @@ const occurrenceRange = (item) => {
     return { first, last: count ? first + (count - 1) * interval : null, count };
 };
 
+/** The initial production version can show feed that predates a delayed activation. */
+const historicalScheduleTime = (protocol, item, day, activatedAt) => {
+    if (!activatedAt || item.operationType !== 'FEEDING') return null;
+    const at = scheduledAtDay(protocol, item, day);
+    return at && at < activatedAt ? at : null;
+};
+
+/** Yield eligible previews without duplicating persisted or cancelled occurrences. */
+function* unrecordedOccurrences(protocol, items, activatedAt, schedules) {
+    if (!activatedAt || !protocol.season.stockingDate) return;
+    const activationDay = cultureDay(protocol.season.stockingDate, activatedAt);
+    const persisted = new Set(schedules.map((row) => `${row.protocolItemId}:${row.scheduledAt.getTime()}`));
+    for (const item of items) {
+        if (item.operationType !== 'FEEDING' || !item.plannedTime) continue;
+        const range = occurrenceRange(item);
+        if (!range.count) continue;
+        const end = Math.min(range.last, activationDay);
+        for (let day = range.first; day <= end; day += item.repeatIntervalDays) {
+            const at = historicalScheduleTime(protocol, item, day, activatedAt);
+            if (!at) break;
+            if (!persisted.has(`${item.id}:${at.getTime()}`)) yield { item, day, at };
+        }
+    }
+}
+
 /** The full prescription, including unmaterialized occurrences, defines its last deadline. */
 const courseEndsAt = (protocol) => {
     if (!anchorOf(protocol) || !protocol.items?.length) return null;
@@ -148,17 +173,15 @@ const courseCoverage = (protocol, schedules, now = new Date()) => {
         const quantity = quantityComparison(
             schedule.plannedQuantity,
             schedule.execution.actualQuantity,
-            protocol.allowedVariancePct,
+            protocol.allowedVariancePct ?? 10,
         );
         const timing = timingComparison(schedule, item.dueAtMinutes, now);
         const actualTime = new Date(schedule.execution.executedAt);
-        const hasReason = !quantity?.deviated || Boolean(schedule.execution.varianceReason?.trim());
         if (
             quantity &&
             !quantity.exceedsThreshold &&
             timing.status === TIMING.ON_TIME &&
             actualTime <= now &&
-            hasReason &&
             (!protocol.treatmentStartAt || at >= protocol.treatmentStartAt) &&
             schedule.execution.actualProductId === schedule.productId
         )
@@ -173,6 +196,8 @@ const courseCoverage = (protocol, schedules, now = new Date()) => {
 };
 
 module.exports = {
+    historicalScheduleTime,
+    unrecordedOccurrences,
     cultureDay,
     anchorOf,
     scheduledAtDay,

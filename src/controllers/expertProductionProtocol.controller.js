@@ -16,7 +16,7 @@ const getSeason = asyncHandler(async (req, res) =>
  */
 const detail = asyncHandler(async (req, res) =>
     ResponseHandler.success(res, {
-        data: await service.detail(req.account.id, req.params.seasonId, req.params.protocolId),
+        data: await service.detail(req.account.id, req.params.seasonId, req.params.protocolId, req.query.day),
     }),
 );
 

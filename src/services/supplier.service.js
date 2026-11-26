@@ -3,6 +3,7 @@ const prisma = require('../config/prisma');
 const { ApiError } = require('../utils');
 const { httpStatus, messages } = require('../constants');
 const legacyRead = require('./inventoryLegacyRead.service');
+const { manufacturer: manufacturerSchema } = require('../validators/supplier.validator');
 
 const SUPPLIER_SELECT = {
     id: true,
@@ -144,7 +145,7 @@ const writeSupplier = async (work) => {
  * Reject equivalent names within the owner's catalog while allowing the edited supplier to retain its
  * name.
  */
-const requireUniqueName = async (client, ownerId, name, excludedId) => {
+const getSupplierNameKeys = async (client, ownerId, excludedId) => {
     const candidates = await client.supplier.findMany({
         where: {
             ownerId,
@@ -152,8 +153,32 @@ const requireUniqueName = async (client, ownerId, name, excludedId) => {
         },
         select: { name: true },
     });
-    if (candidates.some((supplier) => nameKey(supplier.name) === nameKey(name))) {
+    return new Set(candidates.map(({ name }) => nameKey(name)));
+};
+
+const requireUniqueName = async (client, ownerId, name, excludedId) => {
+    const names = await getSupplierNameKeys(client, ownerId, excludedId);
+    if (names.has(nameKey(name))) {
         throw new ApiError(httpStatus.CONFLICT, messages.SUPPLIER.NAME_EXISTS);
+    }
+};
+
+/** Check saved inline identities as well as new submissions against the owner's current directory. */
+const validateProposedManufacturers = async (client, ownerId, proposals) => {
+    if (!proposals.length) return;
+    const names = await getSupplierNameKeys(client, ownerId);
+    const addresses = new Map();
+    for (const proposal of proposals) {
+        const { value, error } = manufacturerSchema.unknown(true).required().validate(proposal);
+        if (error)
+            throw ApiError.badRequest(messages.SUPPLIER.PROPOSED_MANUFACTURER_INVALID(proposal?.name || 'chưa có tên'));
+        const name = nameKey(value.name);
+        if (names.has(name))
+            throw ApiError.conflict(messages.SUPPLIER.PROPOSED_MANUFACTURER_NAME_EXISTS(value.name));
+        const address = nameKey(value.address);
+        if (addresses.has(name) && addresses.get(name) !== address)
+            throw ApiError.badRequest(messages.SUPPLIER.PROPOSED_MANUFACTURER_ADDRESS_CONFLICT(value.name));
+        addresses.set(name, address);
     }
 };
 
@@ -382,4 +407,6 @@ module.exports = {
     updateSupplier: legacyRead.guardWrite(updateSupplier),
     deleteSupplier: legacyRead.guardWrite(deleteSupplier),
     requireSelectableSupplier: legacyRead.guardWrite(requireSelectableSupplier),
+    getSupplierNameKeys,
+    validateProposedManufacturers,
 };
