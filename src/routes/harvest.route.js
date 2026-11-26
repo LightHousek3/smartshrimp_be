@@ -32,4 +32,11 @@ router.get('/:harvestId', validate(validator.detail), controller.detail);
  * @access  Private (FARM_OWNER)
  */
 router.post('/', requireIdempotencyKey, validate(validator.create), controller.create);
+
+/**
+ * @route   PATCH /api/v1/owner/seasons/:seasonId/harvests/:harvestId/price
+ * @desc    Confirm the price of an existing harvest recorded without a price
+ * @access  Private (FARM_OWNER)
+ */
+router.patch('/:harvestId/price', validate(validator.confirmPrice), controller.confirmPrice);
 module.exports = router;

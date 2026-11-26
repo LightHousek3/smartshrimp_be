@@ -13,6 +13,7 @@ const {
     HARVEST_ERROR_CODE,
     HARVEST_POLICY,
     HARVEST_LIMITS,
+    HARVEST_SPECIES_THRESHOLDS,
     messages,
     NOTIFICATION_TYPE,
     ACCOUNT_STATUS,
@@ -28,15 +29,41 @@ const { emitNotification } = require('../realtime');
 const withdrawal = require('./harvestWithdrawal.service');
 const { readSources, populationMatches } = require('./seasonBiomass.service');
 
-/**
- * Flag shrimp size outside the reference range while allowing the harvest to be recorded.
- */
-const harvestSizeWarning = (value) => {
+// Existing middleware exposes operational error codes without changing the envelope.
+const validationError = (message, errorCode) => Object.assign(ApiError.badRequest(message), { errorCode });
+
+const speciesThresholds = (season) =>
+    HARVEST_POLICY.speciesThresholdsEnabled ? HARVEST_SPECIES_THRESHOLDS[season.shrimpType] : null;
+
+/** Warn about an unusual size without blocking an otherwise eligible harvest. */
+const harvestSizeWarning = (value, season) => {
     if (value == null) return null;
     const size = new Prisma.Decimal(value);
+    const thresholds = speciesThresholds(season);
+    if (thresholds) {
+        const { usualMin, usualMax } = thresholds.size;
+        return size.lt(usualMin) || size.gt(usualMax) ? M.SIZE_SPECIES_WARNING(usualMin, usualMax) : null;
+    }
     return size.lt(HARVEST_LIMITS.usualSizeMinPerKg) || size.gt(HARVEST_LIMITS.usualSizeMaxPerKg)
         ? M.SIZE_WARNING(size.toString())
         : null;
+};
+
+/** A declared zero is distinct from a price that still needs to be confirmed. */
+const harvestPriceWarning = (price, season) => {
+    if (!HARVEST_POLICY.speciesThresholdsEnabled || price == null || price.isZero()) return null;
+    const thresholds = speciesThresholds(season);
+    if (!thresholds) return null;
+    const { usualMin, usualMax } = thresholds.price;
+    return price.lt(usualMin) || price.gt(usualMax) ? M.PRICE_WARNING : null;
+};
+
+/** Apply the same price limits to a new harvest and to a later price confirmation. */
+const validatePrice = (price) => {
+    if (!HARVEST_POLICY.speciesThresholdsEnabled || price == null || price.isZero()) return;
+    if (price.lt(HARVEST_LIMITS.priceMinPerKg) || price.gt(HARVEST_LIMITS.priceMaxPerKg)) {
+        throw validationError(M.PRICE_OUT_OF_RANGE, HARVEST_ERROR_CODE.PRICE_OUT_OF_RANGE);
+    }
 };
 
 /**
@@ -119,7 +146,9 @@ const normalize = (row, season) => ({
     recordedBy: row.recorded_by,
     recorderName: row.recorder_name || null,
     createdAt: row.created_at.toISOString(),
-    season: { id: season.id, name: season.name, status: season.status, pond: season.pond },
+    canConfirmPrice: HARVEST_POLICY.priceConfirmationEnabled && row.price_per_kg == null,
+    speciesThresholdsEnabled: HARVEST_POLICY.speciesThresholdsEnabled,
+    season: { id: season.id, name: season.name, status: season.status, pond: season.pond, shrimpType: season.shrimpType },
 });
 
 // harvest_events exists in SQL but has no Prisma delegate. All fragments below are
@@ -135,6 +164,10 @@ const earlyHarvestWarning = (season, harvestedAt) => {
     if (!season.stockingDate || typicalDays == null) return null;
     const day = new Date(new Date(harvestedAt).getTime() + 7 * 3600000).toISOString().slice(0, 10);
     const days = Math.floor((new Date(`${day}T00:00:00Z`) - season.stockingDate) / 86400000);
+    const thresholds = speciesThresholds(season);
+    if (thresholds) {
+        return days >= 0 && days <= thresholds.docWarningThrough ? M.DOC_WARNING(days) : null;
+    }
     return days < typicalDays ? messages.HARVEST.EARLY_WARNING(days, typicalDays) : null;
 };
 
@@ -193,6 +226,7 @@ const list = (ownerId, seasonId, query = {}) =>
             const [totals] = await tx.$queryRaw(Prisma.sql`SELECT count(*)::int AS count,
         coalesce(sum(h.total_weight_kg), 0) AS weight,
         coalesce(sum(h.total_revenue), 0) AS revenue,
+        count(*) FILTER (WHERE h.total_revenue IS NULL)::int AS unpriced_harvests,
         ${populationAvailable(season, populationAt)} AS available
         FROM harvest_events h WHERE ${where}`);
             const items = rows.slice(0, limit).map((row) => normalize(row, season));
@@ -208,6 +242,9 @@ const list = (ownerId, seasonId, query = {}) =>
                     nextCursor: hasNextPage ? items[items.length - 1].id : null,
                     totalWeightKg: Number(totals.weight),
                     totalRevenue: Number(totals.revenue),
+                    unpricedHarvests: Number(totals.unpriced_harvests ?? 0),
+                    speciesThresholdsEnabled: HARVEST_POLICY.speciesThresholdsEnabled,
+                    deferredPriceEnabled: HARVEST_POLICY.deferredPriceEnabled,
                     availableQuantityCount:
                         totals.available == null ? null : String(totals.available),
                     finalReasonRequired: Boolean(finalReasonRequired),
@@ -238,12 +275,6 @@ const detail = async (ownerId, seasonId, harvestId) => {
 
 // Treat omitted, blank, and whitespace-only optional text as the same persisted value.
 const nullableText = (value) => value?.trim() || null;
-// Existing middleware exposes operational error codes without changing the envelope.
-const validationError = (message, errorCode) => {
-    const error = ApiError.badRequest(message);
-    error.errorCode = errorCode;
-    return error;
-};
 // Canonicalize request and stored values so retries compare content rather than representation.
 const comparable = (body) => ({
     harvestType: body.harvestType,
@@ -288,7 +319,8 @@ const create = async (ownerId, seasonId, body, key) => {
                         event: {
                             ...saved,
                             warnings: [
-                                harvestSizeWarning(saved.avgSizePerKg),
+                                harvestSizeWarning(saved.avgSizePerKg, season),
+                                harvestPriceWarning(saved.pricePerKg == null ? null : new Prisma.Decimal(saved.pricePerKg), season),
                                 await biomassDeviationWarning(tx, seasonId, savedInput, true),
                                 earlyHarvestWarning(season, existing.harvested_at),
                                 !HARVEST_POLICY.withdrawalEnabled
@@ -301,6 +333,9 @@ const create = async (ownerId, seasonId, body, key) => {
                     };
                 }
                 if (season.status !== 'ACTIVE') throw ApiError.conflict(M.INACTIVE);
+                if (input.pricePerKg == null && !HARVEST_POLICY.deferredPriceEnabled) {
+                    throw ApiError.badRequest(M.PRICE_REQUIRED);
+                }
                 const harvestedAt = new Date(input.harvestedAt);
                 // Check cumulative removals and estimates within the locked transaction.
                 // Compare MAX time in PostgreSQL to preserve TIMESTAMPTZ microseconds.
@@ -377,11 +412,22 @@ const create = async (ownerId, seasonId, body, key) => {
                 const weight = new Prisma.Decimal(input.totalWeightKg);
                 const price =
                     input.pricePerKg == null ? null : new Prisma.Decimal(input.pricePerKg);
+                if (price?.isZero() && !HARVEST_POLICY.deferredPriceEnabled && !HARVEST_POLICY.speciesThresholdsEnabled) {
+                    throw ApiError.badRequest(M.INVALID_QUANTITY);
+                }
+                validatePrice(price);
                 const revenue = price == null ? null : weight.mul(price).toDecimalPlaces(2);
                 const size =
                     quantity === 0n
                         ? null
                         : new Prisma.Decimal(quantity.toString()).div(weight).toDecimalPlaces(2);
+                const thresholds = speciesThresholds(season);
+                if (thresholds && size) {
+                    const { min, max } = thresholds.size;
+                    if (size.lt(min) || size.gt(max)) {
+                        throw validationError(M.SIZE_OUT_OF_RANGE(min, max), HARVEST_ERROR_CODE.SIZE_OUT_OF_RANGE);
+                    }
+                }
                 // Preserve monetary storage limits while rejecting implausible harvest sizes.
                 if (
                     revenue?.gte('10000000000000000') ||
@@ -460,7 +506,13 @@ const create = async (ownerId, seasonId, body, key) => {
                 return {
                     event: {
                         ...normalize(row, season),
-                        warnings: [warning, withdrawalWarning, biomassWarning, harvestSizeWarning(size)].filter(Boolean),
+                        warnings: [
+                            warning,
+                            withdrawalWarning,
+                            biomassWarning,
+                            harvestSizeWarning(size, season),
+                            harvestPriceWarning(price, season),
+                        ].filter(Boolean),
                     },
                     replayed: false,
                     notificationAccountIds,
@@ -504,4 +556,34 @@ const latestHarvestAt = async (tx, seasonId, at) => {
     return row?.at ?? null;
 };
 
-module.exports = { list, detail, create, readProfessionalHistory, latestHarvestAt };
+/** Fill the original missing price once without changing harvest dates or season state. */
+const confirmPrice = (ownerId, seasonId, harvestId, pricePerKg) => {
+    if (!HARVEST_POLICY.priceConfirmationEnabled) {
+        throw ApiError.conflict(M.PRICE_CONFIRMATION_UNAVAILABLE);
+    }
+    return prisma.$transaction(async (tx) => {
+        const season = await scope(tx, ownerId, seasonId, true);
+        const [row] = await readRows(tx, Prisma.sql`h.id = ${harvestId}::uuid AND h.season_id = ${seasonId}::uuid`);
+        if (!row) throw ApiError.notFound(M.NOT_FOUND);
+        const price = new Prisma.Decimal(pricePerKg);
+        if (row.price_per_kg != null) {
+            // Retrying the same price is safe because it leaves the saved harvest untouched.
+            if (price.eq(row.price_per_kg)) return normalize(row, season);
+            throw ApiError.conflict(M.PRICE_ALREADY_CONFIRMED);
+        }
+        validatePrice(price);
+        const revenue = price.mul(row.total_weight_kg).toDecimalPlaces(2);
+        if (revenue.gte('10000000000000000')) throw ApiError.badRequest(M.INVALID_QUANTITY);
+        const [updated] = await tx.$queryRaw`UPDATE harvest_events
+            SET price_per_kg = ${price}::numeric, total_revenue = ${revenue}::numeric
+            WHERE id = ${harvestId}::uuid AND season_id = ${seasonId}::uuid AND price_per_kg IS NULL
+            RETURNING *`;
+        if (!updated) throw ApiError.conflict(M.PRICE_ALREADY_CONFIRMED);
+        return {
+            ...normalize({ ...updated, recorder_name: row.recorder_name }, season),
+            warnings: [harvestPriceWarning(price, season)].filter(Boolean),
+        };
+    });
+};
+
+module.exports = { list, detail, create, confirmPrice, readProfessionalHistory, latestHarvestAt };

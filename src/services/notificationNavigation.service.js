@@ -57,6 +57,15 @@ const getNotificationReferenceContext = async (accountId, notificationId, role) 
     const type = notification.referenceType?.trim().toLowerCase();
     const scope = seasonScope(accountId, role);
     switch (type) {
+        case 'harvest_event': {
+            if (role !== ACCOUNT_ROLE.FARM_OWNER) return {};
+            const [harvest] = await prisma.$queryRaw`SELECT h.season_id AS "seasonId",
+                s.pond_id AS "pondId", p.farm_id AS "farmId"
+                FROM harvest_events h JOIN aquaculture_seasons s ON s.id = h.season_id
+                JOIN ponds p ON p.id = s.pond_id JOIN farms f ON f.id = p.farm_id
+                WHERE h.id = ${id}::uuid AND f.owner_id = ${accountId}::uuid`;
+            return harvest ?? {};
+        }
         case 'inventory_product':
         case 'product': {
             if (role === ACCOUNT_ROLE.EXPERT) {
