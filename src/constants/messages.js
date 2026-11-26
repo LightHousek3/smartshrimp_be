@@ -762,6 +762,7 @@ const messages = {
     // Admin dashboard
     ADMIN_DASHBOARD: {
         FETCHED: 'Lấy tổng quan hệ thống thành công',
+        SERVICES_HEALTH_FETCHED: 'Kiểm tra trạng thái các dịch vụ AI thành công',
     },
 
     // Owner dashboard
