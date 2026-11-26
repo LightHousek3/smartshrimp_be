@@ -376,7 +376,10 @@ const messages = {
         ACTIVATION_DELAY_REASON_REQUIRED: 'Vui lòng nhập lý do kích hoạt muộn.',
         ACTIVATION_PROTOCOL_NOT_READY: 'Phác đồ nuôi đã duyệt chưa thể áp dụng. Vui lòng kiểm tra lại phác đồ.',
         ACTIVATION_PROTOCOL_NO_FUTURE_OCCURRENCE: 'Phác đồ nuôi đã duyệt không còn cữ để áp dụng. Vui lòng đề nghị chuyên gia cập nhật phác đồ.',
+        ACTIVATED_NOTIFICATION_TITLE: 'Vụ nuôi đã được kích hoạt',
+        STATUS_CHANGED_NOTIFICATION_TITLE: 'Trạng thái vụ nuôi đã thay đổi',
         CANCELLATION_NOT_ALLOWED: 'Chỉ có thể hủy vụ nuôi đang lập kế hoạch hoặc đang hoạt động',
+        EXPERT_ASSIGNMENT_NOTIFICATION_HINT: 'Bây giờ bạn có thể tạo phác đồ nuôi cho vụ này.',
         ASSIGNMENT_NOT_ALLOWED:
             'Chỉ có thể phân công nhân sự cho vụ nuôi đang lập kế hoạch hoặc đang hoạt động',
         ASSIGNMENT_PERSONNEL_NOT_ELIGIBLE:

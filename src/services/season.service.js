@@ -674,6 +674,13 @@ const createSeason = async (seasonData, ownerId) => {
 const assignmentRoleLabel = (role) =>
     role === PERSONNEL_ROLE.TECHNICIAN ? 'Kỹ thuật viên' : 'Chuyên gia thủy sản';
 
+const buildAssignmentNotificationContent = (role, seasonName) => {
+    const content = `Bạn đã được phân công làm ${assignmentRoleLabel(role)} cho vụ nuôi ${seasonName}.`;
+    return role === PERSONNEL_ROLE.EXPERT
+        ? `${content} ${messages.SEASON.EXPERT_ASSIGNMENT_NOTIFICATION_HINT}`
+        : content;
+};
+
 /**
  * Require an active account with the requested role managed by the same owner.
  */
@@ -763,9 +770,7 @@ const assignPersonnel = async (seasonId, { accountId, role }, ownerId) => {
                     data: {
                         accountId,
                         title: 'Bạn được phân công vào vụ nuôi',
-                        content:
-                            `Bạn đã được phân công làm ${assignmentRoleLabel(role)} ` +
-                            `cho vụ nuôi ${season.name}.`,
+                        content: buildAssignmentNotificationContent(role, season.name),
                         type: NOTIFICATION_TYPE.SEASON_ASSIGNMENT_CREATED,
                         referenceType: 'aquaculture_season',
                         referenceId: seasonId,
@@ -938,9 +943,7 @@ const replacePersonnel = async (
                         {
                             accountId,
                             title: 'Bạn được phân công thay thế nhân sự',
-                            content:
-                                `Bạn đã được phân công làm ${assignmentRoleLabel(role)} ` +
-                                `cho vụ nuôi ${season.name}.`,
+                            content: buildAssignmentNotificationContent(role, season.name),
                             type: NOTIFICATION_TYPE.SEASON_ASSIGNMENT_REPLACED,
                             referenceType: 'aquaculture_season',
                             referenceId: seasonId,
@@ -1061,7 +1064,7 @@ const updateSeason = async (seasonId, seasonData, ownerId) => {
 /**
  * Prepare one status notification per active current assignee for persistence with the season change.
  */
-const buildStatusNotifications = (season, content) => {
+const buildStatusNotifications = (season, { title, content }) => {
     const accountIds = [
         ...new Set(
             season.personnelAssignments
@@ -1077,7 +1080,7 @@ const buildStatusNotifications = (season, content) => {
         accountIds,
         data: accountIds.map((accountId) => ({
             accountId,
-            title: 'Trạng thái vụ nuôi đã thay đổi',
+            title,
             content,
             type: NOTIFICATION_TYPE.SEASON_STATUS_CHANGED,
             referenceType: 'aquaculture_season',
@@ -1191,10 +1194,10 @@ const activateSeason = async (seasonId, { expectedUpdatedAt, actualStockingDate,
                     );
                 }
 
-                const notifications = buildStatusNotifications(
-                    current,
-                    `Vụ nuôi ${current.name} đã được kích hoạt.`,
-                );
+                const notifications = buildStatusNotifications(current, {
+                    title: messages.SEASON.ACTIVATED_NOTIFICATION_TITLE,
+                    content: `Vụ nuôi ${current.name} đã được kích hoạt.`,
+                });
                 if (notifications.data.length > 0) {
                     await transaction.notification.createMany({ data: notifications.data });
                 }
@@ -1253,10 +1256,10 @@ const cancelSeason = async (seasonId, { reason, expectedUpdatedAt }, ownerId) =>
                     ownerId,
                     cancelledAt,
                 );
-                const notifications = buildStatusNotifications(
-                    current,
-                    `Vụ nuôi ${current.name} đã bị hủy. Lý do: ${reason}`,
-                );
+                const notifications = buildStatusNotifications(current, {
+                    title: messages.SEASON.STATUS_CHANGED_NOTIFICATION_TITLE,
+                    content: `Vụ nuôi ${current.name} đã bị hủy. Lý do: ${reason}`,
+                });
                 if (notifications.data.length > 0) {
                     await transaction.notification.createMany({ data: notifications.data });
                 }
