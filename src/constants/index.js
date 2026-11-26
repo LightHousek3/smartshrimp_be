@@ -41,9 +41,18 @@ const HARVEST_ERROR_CODE = Object.freeze({
     WITHDRAWAL_UNKNOWN: 'HARVEST_WITHDRAWAL_UNKNOWN',
     WITHDRAWAL_ACTIVE: 'HARVEST_WITHDRAWAL_ACTIVE',
     VARIANCE_REASON_REQUIRED: 'HARVEST_VARIANCE_REASON_REQUIRED',
+    SIZE_OUT_OF_RANGE: 'HARVEST_SIZE_OUT_OF_RANGE',
+    PRICE_OUT_OF_RANGE: 'HARVEST_PRICE_OUT_OF_RANGE',
 });
 // Withdrawal checks depend on material declarations and recorded execution snapshots.
-const HARVEST_POLICY = Object.freeze({ withdrawalEnabled: true });
+const deferredPriceEnabled = (process.env.HARVEST_DEFERRED_PRICE_ENABLED ?? 'true') === 'true';
+const HARVEST_POLICY = Object.freeze({
+    withdrawalEnabled: true,
+    speciesThresholdsEnabled: (process.env.HARVEST_SPECIES_THRESHOLDS_ENABLED ?? 'true') === 'true',
+    deferredPriceEnabled,
+    priceConfirmationEnabled: deferredPriceEnabled || process.env.HARVEST_PRICE_CONFIRMATION_ENABLED === 'true',
+    priceReminderEnabled: (process.env.HARVEST_PRICE_REMINDER_ENABLED ?? 'true') === 'true',
+});
 const HARVEST_LIMITS = Object.freeze({
     noteMaxLength: 500,
     legacyNoteMaxLength: 5000,
@@ -52,6 +61,21 @@ const HARVEST_LIMITS = Object.freeze({
     sizeMaxPerKg: 10000,
     usualSizeMinPerKg: 10,
     usualSizeMaxPerKg: 500,
+    priceMinPerKg: 10000,
+    priceMaxPerKg: 1000000,
+});
+
+const HARVEST_SPECIES_THRESHOLDS = Object.freeze({
+    WHITELEG: {
+        size: { min: 10, usualMin: 20, usualMax: 150, max: 500 },
+        price: { usualMin: 70000, usualMax: 250000 },
+        docWarningThrough: 35,
+    },
+    BLACK_TIGER: {
+        size: { min: 4, usualMin: 10, usualMax: 65, max: 200 },
+        price: { usualMin: 120000, usualMax: 450000 },
+        docWarningThrough: 55,
+    },
 });
 
 // Advisory defaults, not harvest eligibility rules. Approximate months as 30 days.
@@ -429,6 +453,7 @@ module.exports = {
     TECHNICIAN_RESPONSE_TYPES,
     CASE_LIMITS,
     HARVEST_POLICY,
+    HARVEST_SPECIES_THRESHOLDS,
     HARVEST_LIMITS,
     HARVEST_ERROR_CODE,
     SHRIMP_CULTIVATION,

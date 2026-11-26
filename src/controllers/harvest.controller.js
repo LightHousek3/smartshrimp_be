@@ -31,4 +31,10 @@ const create = asyncHandler(async (req, res) => {
     return ResponseHandler.success(res, { statusCode: result.replayed ? 200 : 201,
         message: M.CREATED, data: result.event });
 });
-module.exports = { list, detail, create };
+/** PATCH /owner/seasons/:seasonId/harvests/:harvestId/price */
+const confirmPrice = asyncHandler(async (req, res) => ResponseHandler.success(res, {
+    message: M.PRICE_CONFIRMED,
+    data: await service.confirmPrice(req.account.id, req.params.seasonId, req.params.harvestId, req.body.pricePerKg),
+}));
+
+module.exports = { list, detail, create, confirmPrice };

@@ -11,6 +11,7 @@ const params = { seasonId: uuid.required() };
 const count = Joi.number().integer().min(1).max(Number.MAX_SAFE_INTEGER).strict();
 // Reject excess precision instead of silently rounding the Owner's input.
 const decimal = (max, places) => Joi.number().positive().max(max).precision(places).strict();
+const price = Joi.number().min(0).max(999999999999.99).precision(2).strict();
 // Date endpoints are optional independently; reject a reversed range when both are supplied.
 const list = {
     params: Joi.object(params),
@@ -39,7 +40,7 @@ const create = {
         quantityCount: Joi.when('harvestType', {
             is: 'FINAL', then: count.required(), otherwise: count.allow(null),
         }),
-        pricePerKg: decimal(999999999999.99, 2).required(),
+        pricePerKg: price.allow(null),
         // Legacy clients may send the exact server-derived remainder; new clients omit it.
         estimatedRemainingCount: Joi.when('harvestType', {
             is: 'PARTIAL', then: count.optional(), otherwise: Joi.valid(0, null),
@@ -52,4 +53,6 @@ const create = {
     }),
 };
 
-module.exports = { list, detail, create };
+const confirmPrice = { ...detail, body: Joi.object({ pricePerKg: price.required() }) };
+
+module.exports = { list, detail, create, confirmPrice };

@@ -449,6 +449,19 @@ const messages = {
     HARVEST: {
         SIZE_WARNING: (size) =>
             `Cỡ tôm ${size} con/kg nằm ngoài khoảng thường gặp 10–500 con/kg. Kiểm tra lại khối lượng hoặc số con.`,
+        SIZE_SPECIES_WARNING: (min, max) =>
+            `Cỡ tôm nằm ngoài khoảng thường gặp ${min}–${max} con/kg. Kiểm tra lại khối lượng hoặc số con.`,
+        SIZE_OUT_OF_RANGE: (min, max) => `Cỡ tôm phải từ ${min} đến ${max} con/kg. Kiểm tra lại khối lượng hoặc số con.`,
+        PRICE_OUT_OF_RANGE: 'Đơn giá phải từ 10.000 đến 1.000.000 đ/kg, hoặc bằng 0 khi khai rõ không có doanh thu.',
+        PRICE_WARNING: 'Đơn giá nằm ngoài khoảng thường gặp của loài tôm này. Vui lòng kiểm tra lại.',
+        PRICE_REQUIRED: 'Vui lòng nhập đơn giá thu hoạch.',
+        PRICE_CONFIRMATION_UNAVAILABLE: 'Hiện chưa thể bổ sung đơn giá thu hoạch.',
+        PRICE_ALREADY_CONFIRMED: 'Phiếu thu hoạch đã có đơn giá.',
+        PRICE_CONFIRMED: 'Đã bổ sung đơn giá thu hoạch.',
+        PRICE_REMINDER_TITLE: 'Phiếu thu hoạch chưa chốt giá',
+        PRICE_REMINDER_CONTENT: (season) => `Phiếu thu hoạch vụ ${season} chưa có đơn giá. Mở phiếu để bổ sung.`,
+        DOC_WARNING: (days) =>
+            `Vụ nuôi mới ${days} ngày. Kiểm tra tình trạng thực tế trước khi ghi nhận thu hoạch.`,
         BIOMASS_DEVIATION: (percent, date) =>
             `Số thu và số còn lại lệch ${percent}% so với quần thể ước tính từ lần chài mẫu ngày ${date}. Kiểm tra lại số con hoặc lý do hiệu chỉnh.`,
         NOTE_TOO_LONG: (limit) => `Ghi chú thu hoạch tối đa ${limit} ký tự.`,

@@ -7,11 +7,15 @@ const documents = require('./ragDocument.job');
 const tasks = require('./taskReminder.job');
 const inventory = require('./inventoryReminder.job');
 const harvest = require('./harvestReminder.job');
+const harvestPrices = require('./harvestPriceReminder.job');
 const stocking = require('./stockingReminder.job');
 const cleanup = require('./technicalCleanup.job');
 const push = require('./pushDelivery.job');
 const firebase = require('../services/firebaseMessaging.service');
-const scheduledJobs = [schedules, reminders, documents, tasks, inventory, harvest, stocking, cleanup];
+const { HARVEST_POLICY } = require('../constants');
+const scheduledJobs = [schedules, reminders, documents, tasks, inventory, harvest, stocking, cleanup,
+    ...(HARVEST_POLICY.priceReminderEnabled && HARVEST_POLICY.priceConfirmationEnabled ? [harvestPrices] : []),
+];
 
 let started = false,
     starting,
