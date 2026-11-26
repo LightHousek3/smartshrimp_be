@@ -484,6 +484,8 @@ const messages = {
         NOTE_TOO_LONG: (limit) => `Ghi chú thu hoạch tối đa ${limit} ký tự.`,
         VARIANCE_REASON_REQUIRED:
             'Số thu thực tế và số còn lại vượt ước tính hiện có. Vui lòng nhập lý do hiệu chỉnh ước tính.',
+        CORRECTED_REMAINDER_REQUIRED:
+            'Vui lòng nhập số tôm sống còn lại lớn hơn 0 sau thu tỉa. Nếu đã thu hết, chọn thu hoạch cuối.',
         SCHEDULE_COMPLETED_REASON: 'Vụ nuôi đã hoàn tất thu hoạch cuối.',
         WITHDRAWAL_UNVERIFIED_WARNING:
             'Chưa đủ dữ liệu xác nhận thời gian ngừng thuốc. Vui lòng kiểm tra lịch sử dùng vật tư trước khi thu hoạch.',

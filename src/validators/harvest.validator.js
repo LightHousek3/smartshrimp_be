@@ -41,7 +41,7 @@ const create = {
             is: 'FINAL', then: count.required(), otherwise: count.allow(null),
         }),
         pricePerKg: price.allow(null),
-        // Legacy clients may send the exact server-derived remainder; new clients omit it.
+        // A corrected partial harvest supplies a positive remainder when the old estimate is exhausted.
         estimatedRemainingCount: Joi.when('harvestType', {
             is: 'PARTIAL', then: count.optional(), otherwise: Joi.valid(0, null),
         }),

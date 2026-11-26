@@ -232,7 +232,9 @@ const list = (ownerId, seasonId, query = {}) =>
             const items = rows.slice(0, limit).map((row) => normalize(row, season));
             const hasNextPage = rows.length > limit;
             const withdrawalState = await withdrawal.readWithdrawal(tx, seasonId, populationAt);
-            const finalReasonRequired = season.status === 'ACTIVE' && await hasDiseaseBlocker(tx, seasonId);
+            const populationCorrectionEnabled = HARVEST_POLICY.populationCorrectionEnabled;
+            const finalReasonRequired = !populationCorrectionEnabled && season.status === 'ACTIVE'
+                && await hasDiseaseBlocker(tx, seasonId);
             return {
                 items,
                 meta: {
@@ -248,6 +250,7 @@ const list = (ownerId, seasonId, query = {}) =>
                     availableQuantityCount:
                         totals.available == null ? null : String(totals.available),
                     finalReasonRequired: Boolean(finalReasonRequired),
+                    populationCorrectionEnabled,
                     withdrawal: {
                         ...withdrawalState,
                         ...(withdrawalState.latestEndAt != null
@@ -363,9 +366,9 @@ const create = async (ownerId, seasonId, body, key) => {
                 if (input.note?.length > HARVEST_LIMITS.noteMaxLength) {
                     throw ApiError.badRequest(M.NOTE_TOO_LONG(HARVEST_LIMITS.noteMaxLength));
                 }
-                // Withdrawal is unconditional; a reason applies only to disease-related final harvests.
                 const withdrawalWarning = await withdrawal.checkHarvest(tx, seasonId, harvestedAt);
-                if (await hasDiseaseBlocker(tx, seasonId)) {
+                const correctionEnabled = HARVEST_POLICY.populationCorrectionEnabled;
+                if (!correctionEnabled && await hasDiseaseBlocker(tx, seasonId)) {
                     if (input.harvestType === 'PARTIAL') {
                         throw validationError(M.DISEASE_ACTIVE, HARVEST_ERROR_CODE.DISEASE_ACTIVE);
                     }
@@ -379,6 +382,10 @@ const create = async (ownerId, seasonId, body, key) => {
                 if (input.harvestType === 'FINAL') {
                     if (input.quantityCount == null || quantity <= 0n) {
                         throw validationError(M.FINAL_COUNT_REQUIRED, HARVEST_ERROR_CODE.FINAL_COUNT_REQUIRED);
+                    }
+                    if (correctionEnabled && available != null && quantity > BigInt(available)
+                        && !input.varianceReason) {
+                        throw validationError(M.VARIANCE_REASON_REQUIRED, HARVEST_ERROR_CODE.VARIANCE_REASON_REQUIRED);
                     }
                 }
                 if (input.harvestType === 'PARTIAL') {
@@ -394,12 +401,21 @@ const create = async (ownerId, seasonId, body, key) => {
                     }
                     remaining = BigInt(available) - quantity;
                     if (remaining <= 0n) {
-                        throw validationError(
-                            messages.HARVEST.PARTIAL_EXHAUSTED,
-                            HARVEST_ERROR_CODE.POPULATION_MISMATCH,
-                        );
-                    }
-                    if (input.estimatedRemainingCount != null && BigInt(input.estimatedRemainingCount) !== remaining) {
+                        if (!correctionEnabled) {
+                            throw validationError(M.PARTIAL_EXHAUSTED, HARVEST_ERROR_CODE.POPULATION_MISMATCH);
+                        }
+                        if (!input.varianceReason) {
+                            throw validationError(M.VARIANCE_REASON_REQUIRED, HARVEST_ERROR_CODE.VARIANCE_REASON_REQUIRED);
+                        }
+                        if (input.estimatedRemainingCount == null) {
+                            throw validationError(
+                                M.CORRECTED_REMAINDER_REQUIRED,
+                                HARVEST_ERROR_CODE.CORRECTED_REMAINDER_REQUIRED,
+                            );
+                        }
+                        remaining = BigInt(input.estimatedRemainingCount);
+                    } else if (input.estimatedRemainingCount != null
+                        && BigInt(input.estimatedRemainingCount) !== remaining) {
                         throw validationError(
                             M.PARTIAL_MISMATCH(String(available), quantity.toString(), remaining.toString()),
                             HARVEST_ERROR_CODE.POPULATION_MISMATCH,
@@ -498,7 +514,7 @@ const create = async (ownerId, seasonId, body, key) => {
                             .join(' '),
                         type: isFinal
                             ? NOTIFICATION_TYPE.SEASON_COMPLETED
-                            : NOTIFICATION_TYPE.SYSTEM,
+                            : NOTIFICATION_TYPE.HARVEST_RECORDED,
                         referenceType: 'aquaculture_season',
                         referenceId: seasonId,
                     })),
