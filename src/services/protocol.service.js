@@ -1,13 +1,13 @@
 const prisma = require('../config/prisma');
 const logger = require('../config/logger');
 const config = require('../config');
-const { ApiError, protocolStructure: structure } = require('../utils');
+const { ApiError } = require('../utils');
 const productionReview = require('./productionProtocolReview.service');
 const lifecycle = require('./protocolLifecycle.service');
 const { assertTreatmentCourse } = require('../utils/treatmentProtocolPolicy');
-const { cultureDay, occurrenceRange, scheduledAtDay } = require('../utils/protocolTimeline');
-const { timingComparison, quantityComparison, TIMING } = require('../utils/protocolExecution');
-const { lifecycleReason, presentProtocolHistory } = require('../utils/protocolPresentation');
+const { timingComparison, quantityAudit, TIMING } = require('../utils/protocolExecution');
+const { unrecordedOccurrences } = require('../utils/protocolTimeline');
+const { presentProtocolHistory } = require('../utils/protocolPresentation');
 const {
     PROTOCOL_TYPE: T,
     PROTOCOL_STATUS: S,
@@ -18,8 +18,7 @@ const {
 const { emitNotification } = require('../realtime/notification.socket');
 const { dataAccess } = require('../plugins');
 
-const DAY_MS = 86400000;
-const VIETNAM_OFFSET_MS = 7 * 60 * 60 * 1000;
+const { readDay, anchorDate, localDate, delayedActivationAt, DAY_MS } = require('./protocolDay.service');
 const SEASON_SELECT = {
     id: true,
     name: true,
@@ -72,53 +71,6 @@ const DETAIL_SELECT = {
         },
     },
 };
-const ITEM_SELECT = {
-    id: true,
-    operationType: true,
-    productId: true,
-    recommendedProductDetails: true,
-    plannedTime: true,
-    doseBasis: true,
-    doseValue: true,
-    doseUnit: true,
-    instructions: true,
-    startDayOffset: true,
-    endDayOffset: true,
-    repeatIntervalDays: true,
-    productionMealId: true,
-    dailyDoseIncrement: true,
-    recurrenceAnchorDay: true,
-    doseAnchorDay: true,
-    materialSnapshot: true,
-    dueAtMinutes: true,
-    product: { select: { name: true, imageUrls: true } },
-};
-const SCHEDULE_SELECT = {
-    id: true,
-    productId: true,
-    protocolItemId: true,
-    scheduledAt: true,
-    status: true,
-    plannedQuantity: true,
-    unit: true,
-    basisQuantity: true,
-    basisUnit: true,
-    doseValueSnapshot: true,
-    cancellationReason: true,
-    cancelledAt: true,
-    execution: {
-        select: {
-            actualQuantity: true,
-            actualProductId: true,
-            varianceReason: true,
-            note: true,
-            executedAt: true,
-            executor: { select: { fullName: true } },
-            actualProduct: { select: { name: true, unit: true } },
-        },
-    },
-};
-
 /**
  * Restrict every read and write to submitted versions in farms owned by this account.
  */
@@ -127,24 +79,6 @@ const ownedWhere = (ownerId) => ({
     submittedAt: { not: null },
     season: { pond: { farm: { ownerId } } },
 });
-
-/**
- * SQL DATE anchors are UTC dates, while treatment timestamps use the Vietnamese calendar.
- */
-const anchorDate = (protocol) => {
-    if (protocol.protocolType === T.PRODUCTION)
-        return protocol.season.stockingDate?.toISOString().slice(0, 10) ?? null;
-    return protocol.treatmentStartAt
-        ? new Date(protocol.treatmentStartAt.getTime() + VIETNAM_OFFSET_MS)
-              .toISOString()
-              .slice(0, 10)
-        : null;
-};
-/**
- * Derive the Vietnam calendar date used to compare protocol schedule days.
- */
-const localDate = (timestamp) =>
-    new Date(timestamp.getTime() + VIETNAM_OFFSET_MS).toISOString().slice(0, 10);
 
 /** Count each occurrence once while retaining replaced cancellation rows in day history. */
 const currentOccurrences = (schedules) => {
@@ -164,20 +98,6 @@ const currentOccurrences = (schedules) => {
     return [...occurrences.values()];
 };
 
-/** Only the production version activated alongside the season can expose historical feed. */
-const delayedActivationAt = async (client, protocol) => {
-    const { activatedAt, activationDelayReason } = protocol.season;
-    return protocol.protocolType === T.PRODUCTION && activatedAt && activationDelayReason &&
-        await lifecycle.isActivationProduction(client, protocol.id, activatedAt)
-        ? activatedAt : null;
-};
-
-const historicalScheduleTime = (protocol, item, day, activatedAt) => {
-    if (!activatedAt || item.operationType !== 'FEEDING') return null;
-    const at = scheduledAtDay(protocol, item, day);
-    return at && at < activatedAt ? at : null;
-};
-
 const dayMarker = (markers, day) => {
     if (!markers.has(day)) markers.set(day, { day, completed: 0, planned: 0, cancelled: 0, issues: 0 });
     return markers.get(day);
@@ -185,39 +105,17 @@ const dayMarker = (markers, day) => {
 
 /** Historical previews remain visible until replaced by a persisted occurrence. */
 const addUnrecordedMarkers = async (client, protocol, activatedAt, occurrences, markers) => {
-    const activationDay = cultureDay(protocol.season.stockingDate, activatedAt);
-    if (activationDay < 1) return;
     const items = await client.protocolItem.findMany({
-        where: { protocolId: protocol.id, operationType: 'FEEDING',
-            startDayOffset: { lte: activationDay }, plannedTime: { not: null } },
+        where: { protocolId: protocol.id, operationType: 'FEEDING', plannedTime: { not: null } },
         select: { id: true, operationType: true, plannedTime: true, startDayOffset: true,
             endDayOffset: true, repeatIntervalDays: true, recurrenceAnchorDay: true },
     });
-    const persisted = new Set(occurrences.map((row) => `${row.protocolItemId}:${row.scheduledAt.getTime()}`));
-    for (const item of items) {
-        const range = occurrenceRange(item);
-        if (!range.count) continue;
-        for (let day = range.first; day <= Math.min(range.last, activationDay); day += item.repeatIntervalDays) {
-            const at = historicalScheduleTime(protocol, item, day, activatedAt);
-            if (!at) break;
-            if (persisted.has(`${item.id}:${at.getTime()}`)) continue;
-            const marker = dayMarker(markers, day);
-            marker.unrecorded = (marker.unrecorded ?? 0) + 1;
-        }
+    for (const { day } of unrecordedOccurrences(protocol, items, activatedAt, occurrences)) {
+        const marker = dayMarker(markers, day);
+        marker.unrecorded = (marker.unrecorded ?? 0) + 1;
     }
 };
 
-const quantityAudit = (protocol, schedule) => {
-    const execution = schedule?.execution;
-    if (!execution || (execution.actualProductId != null && execution.actualProductId !== schedule.productId)) {
-        return null;
-    }
-    return quantityComparison(
-        schedule.plannedQuantity,
-        execution.actualQuantity,
-        protocol.allowedVariancePct ?? 10,
-    );
-};
 /**
  * Match a Prisma timestamp within the millisecond precision available to the client.
  */
@@ -441,116 +339,13 @@ const day = async (ownerId, id, selectedDay) =>
             const p = await findOwned(client, ownerId, id, {
                 id: true,
                 protocolType: true,
+                treatmentStartAt: true,
                 status: true,
                 reviewedAt: true,
                 allowedVariancePct: true,
                 season: { select: { stockingDate: true, activatedAt: true, activationDelayReason: true } },
             });
-            const duration = await client.protocolItem.aggregate({
-                where: { protocolId: id },
-                _max: { endDayOffset: true },
-            });
-            if (selectedDay > (duration._max.endDayOffset ?? 0))
-                throw ApiError.badRequest(messages.PROTOCOL.INVALID_DAY);
-            // Database days are one-based; calendar arithmetic is zero-based.
-            const offset = selectedDay - 1;
-            const anchor = anchorDate(p);
-            const date = anchor
-                ? new Date(Date.parse(anchor) + offset * DAY_MS).toISOString().slice(0, 10)
-                : null;
-            const start = date ? new Date(`${date}T00:00:00+07:00`) : null;
-            const activatedAt = p.season.activatedAt;
-            const activationAt = start && activatedAt && start < activatedAt
-                ? await delayedActivationAt(client, p)
-                : null;
-            const [items, schedules] = await Promise.all([
-                client.protocolItem.findMany({
-                    where: {
-                        protocolId: id,
-                        startDayOffset: { lte: selectedDay },
-                        endDayOffset: { gte: selectedDay },
-                    },
-                    select: ITEM_SELECT,
-                    orderBy: { sequenceOrder: 'asc' },
-                }),
-                start
-                    ? client.operationSchedule.findMany({
-                          where: {
-                              protocolItem: { protocolId: id },
-                              scheduledAt: { gte: start, lt: new Date(start.getTime() + DAY_MS) },
-                          },
-                          select: SCHEDULE_SELECT,
-                          orderBy: [{ scheduledAt: 'asc' }, { id: 'asc' }],
-                      })
-                    : [],
-            ]);
-            const rows = items
-                .map((item) => {
-                    structure.assertItemMetadata(item);
-                    return item;
-                })
-                .filter((i) => structure.occursOn(i, selectedDay))
-                .flatMap((i) => {
-                    const matches = schedules.filter((s) => s.protocolItemId === i.id);
-                    const beforeActivation = historicalScheduleTime(p, i, selectedDay, activationAt);
-                    return (matches.length ? matches : [null]).map((s) => ({
-                        itemId: i.id,
-                        operationType: i.operationType,
-                        productImageUrls: i.materialSnapshot?.imageUrls ?? i.product?.imageUrls ?? [],
-                        productName:
-                            i.materialSnapshot?.name ??
-                            i.product?.name ??
-                            i.recommendedProductDetails?.proposed?.name ??
-                            'Vật tư',
-                        time: s
-                            ? new Date(s.scheduledAt.getTime() + VIETNAM_OFFSET_MS)
-                                  .toISOString()
-                                  .slice(11, 16)
-                            : (i.plannedTime?.toISOString().slice(11, 16) ?? null),
-                        doseBasis: i.doseBasis,
-                        doseValue: Number(
-                            s?.doseValueSnapshot ?? structure.doseAtDay(i, selectedDay),
-                        ),
-                        ...structure.itemMetadata(i),
-                        doseUnit: i.doseUnit,
-                        instructions: i.instructions,
-                        scheduleId: s?.id ?? null,
-                        productionMealId: i.productionMealId,
-                        scheduledAt: s?.scheduledAt ?? null,
-                        dueAt: s ? timingComparison(s, i.dueAtMinutes).dueAt : null,
-                        dueAtMinutes: i.dueAtMinutes,
-                        quantityExceedsThreshold: s
-                            ? (quantityAudit(p, s)?.exceedsThreshold ?? null)
-                            : null,
-                        status:
-                            s?.status ??
-                            (p.status === S.PENDING_APPROVAL
-                                ? S.PENDING_APPROVAL
-                                : beforeActivation ? 'NOT_RECORDED' : 'NOT_GENERATED'),
-                        plannedQuantity: s ? Number(s.plannedQuantity) : null,
-                        unit: s?.unit ?? i.doseUnit,
-                        basisQuantity: s?.basisQuantity == null ? null : Number(s.basisQuantity),
-                        basisUnit: s?.basisUnit ?? null,
-                        actualQuantity: s?.execution ? Number(s.execution.actualQuantity) : null,
-                        actualProductName: s?.execution?.actualProduct?.name ?? null,
-                        actualUnit: s?.execution
-                            ? s.unit
-                            : (s?.execution?.actualProduct?.unit ?? s?.unit ?? null),
-                        varianceReason: s?.execution?.varianceReason ?? null,
-                        note: s?.execution?.note ?? null,
-                        executorName: s?.execution?.executor.fullName ?? null,
-                        executedAt: s?.execution?.executedAt ?? null,
-                        cancellationReason: lifecycleReason(s?.cancellationReason) ?? null,
-                        cancelledAt: s?.cancelledAt ?? null,
-                    }));
-                });
-            rows.sort((a, b) => (a.time ?? '').localeCompare(b.time ?? ''));
-            return {
-                day: selectedDay,
-                date,
-                allowedVariancePct: Number(p.allowedVariancePct ?? 10),
-                rows,
-            };
+            return readDay(client, p, selectedDay);
         },
         { isolationLevel: 'RepeatableRead' },
     );

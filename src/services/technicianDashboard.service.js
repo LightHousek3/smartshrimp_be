@@ -2,7 +2,7 @@ const { Prisma } = require('@prisma/client');
 const prisma = require('../config/prisma');
 const { ApiError, productionSchedule: scheduleRules } = require('../utils');
 const { readSources, populationMatches } = require('./seasonBiomass.service');
-const { timingComparison, TIMING } = require('../utils/protocolExecution');
+const { timingComparison, TIMING, operationOccurrenceKey } = require('../utils/protocolExecution');
 const { treatmentOccurrences, courseEndsAt, cultureDay } = require('../utils/protocolTimeline');
 const lifecycle = require('./protocolLifecycle.service');
 const {
@@ -229,10 +229,9 @@ const readBlockedAlerts = async (tx, seasons, now, window, sources, protocols) =
     );
     const byId = new Map(seasons.map((s) => [s.id, s]));
     const sourcesAt = new Map([[now.toISOString(), sources]]);
-    const alerts = [];
+    const alerts = new Map();
     for (const protocol of protocols.values()) {
         const season = byId.get(protocol.seasonId);
-        const blocked = [];
         const occurrences = occurrencesByProtocol.get(protocol.id);
         for (const { item, doc, scheduledAt } of occurrences) {
             if (
@@ -259,22 +258,26 @@ const readBlockedAlerts = async (tx, seasons, now, window, sources, protocols) =
                 biomassMaxAgeHours: PRODUCTION_PROTOCOL_LIMITS.biomassMaxAgeHours,
             });
             if (['BIOMASS_MISSING_OR_STALE', 'VOLUME_MISSING'].includes(calculation.blocked)) {
-                blocked.push({ code: calculation.blocked, scheduledAt });
+                const alert = alerts.get(season.id) ?? {
+                    id: `${kind.SCHEDULE_BLOCKED}:${season.id}`,
+                    kind: kind.SCHEDULE_BLOCKED,
+                    ...context(season),
+                    observedAt: scheduledAt,
+                    occurrences: new Set(),
+                    reasons: new Set(),
+                };
+                alert.occurrences.add(operationOccurrenceKey({
+                    protocolItem: { ...item, protocolId: protocol.id }, protocolItemId: item.id, scheduledAt,
+                }));
+                alert.reasons.add(calculation.blocked);
+                if (scheduledAt < alert.observedAt) alert.observedAt = scheduledAt;
+                alerts.set(season.id, alert);
             }
         }
-        if (blocked.length) {
-            blocked.sort((a, b) => a.scheduledAt - b.scheduledAt);
-            alerts.push({
-                id: `${kind.SCHEDULE_BLOCKED}:${season.id}`,
-                kind: kind.SCHEDULE_BLOCKED,
-                ...context(season),
-                count: blocked.length,
-                observedAt: blocked[0].scheduledAt,
-                reasonCodes: [...new Set(blocked.map((b) => b.code))],
-            });
-        }
     }
-    return alerts;
+    return [...alerts.values()].map(({ occurrences, reasons, ...alert }) => ({
+        ...alert, count: occurrences.size, reasonCodes: [...reasons],
+    }));
 };
 
 /** Read current facts, never another user's inbox or notification read/resolved assumptions. */
@@ -289,7 +292,10 @@ const readAlerts = async (tx, seasons, now, window, sources, protocols) => {
                 seasonId: true,
                 scheduledAt: true,
                 status: true,
-                protocolItem: { select: { dueAtMinutes: true, protocolId: true } },
+                protocolItemId: true,
+                protocolItem: {
+                    select: { dueAtMinutes: true, protocolId: true, productionMealId: true, mealNumber: true },
+                },
             },
         }),
         readBlockedAlerts(tx, seasons, now, window, sources, protocols),
@@ -311,14 +317,18 @@ const readAlerts = async (tx, seasons, now, window, sources, protocols) => {
             id: `${kind.OVERDUE_OPERATIONS}:${row.seasonId}`,
             kind: kind.OVERDUE_OPERATIONS,
             ...context(byId.get(row.seasonId)),
-            count: 0,
+            occurrences: new Set(),
             observedAt: row.scheduledAt,
         };
-        group.count++;
+        // The meal identifies the occurrence; separate material rows can share the same meal.
+        group.occurrences.add(operationOccurrenceKey(row));
         if (row.scheduledAt < group.observedAt) group.observedAt = row.scheduledAt;
         groups.set(row.seasonId, group);
     }
-    return [...blocked, ...groups.values(), ...water].sort(
+    const overdueAlerts = [...groups.values()].map(({ occurrences, ...alert }) => ({
+        ...alert, count: occurrences.size,
+    }));
+    return [...blocked, ...overdueAlerts, ...water].sort(
         (a, b) =>
             order[a.kind] - order[b.kind] ||
             a.observedAt - b.observedAt ||
@@ -340,6 +350,7 @@ const readOperations = async (tx, seasons, now, window, protocols) => {
             operationType: true,
             scheduledAt: true,
             plannedQuantity: true,
+            protocolItemId: true,
             unit: true,
             product: { select: { id: true, name: true } },
             protocolItem: {
@@ -347,6 +358,8 @@ const readOperations = async (tx, seasons, now, window, protocols) => {
                     dueAtMinutes: true,
                     materialSnapshot: true,
                     protocolId: true,
+                    productionMealId: true,
+                    mealNumber: true,
                 },
             },
         },
@@ -364,7 +377,10 @@ const readOperations = async (tx, seasons, now, window, protocols) => {
             continue;
         const timing = timingComparison(row, row.protocolItem.dueAtMinutes, now);
         if (timing.status !== TIMING.PENDING) continue;
-        const group = groups.get(row.seasonId) ?? { ...context(byId.get(row.seasonId)), items: [] };
+        const group = groups.get(row.seasonId) ?? {
+            ...context(byId.get(row.seasonId)), items: [], occurrences: new Set(),
+        };
+        group.occurrences.add(operationOccurrenceKey(row));
         const snapshot = row.protocolItem.materialSnapshot;
         group.items.push({
             id: row.id,
@@ -378,7 +394,9 @@ const readOperations = async (tx, seasons, now, window, protocols) => {
         });
         groups.set(row.seasonId, group);
     }
-    return [...groups.values()];
+    return [...groups.values()].map(({ occurrences, ...group }) => ({
+        ...group, occurrenceCount: occurrences.size,
+    }));
 };
 
 /** Preview the latest measured snapshot, explicitly separating missing/stale/post-harvest data. */

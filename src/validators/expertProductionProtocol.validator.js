@@ -12,7 +12,8 @@ const {
  * Create a fresh Joi schema for identifiers used in production protocol requests.
  */
 const uuid = () => Joi.string().uuid();
-const { productCompliance, manufacturer } = require('./materialCompliance.validator');
+const { productCompliance } = require('./materialCompliance.validator');
+const { manufacturer } = require('./supplier.validator');
 const proposal = Joi.object({
     name: Joi.string().trim().min(1).max(255).required(),
     description: Joi.string().max(500).allow('', null),
@@ -27,7 +28,6 @@ const proposal = Joi.object({
         .allow(null),
     manufacturerId: uuid().empty(null),
     manufacturer: manufacturer
-        .keys({ supplierType: Joi.string().lowercase().valid('manufacturer', 'both') })
         .unknown(true)
         .empty(null),
     productCompliance: productCompliance.required(),
@@ -196,7 +196,7 @@ const catalog = {
 /** Protocol identity must be supplied together with its parent season identity. */
 const detail = {
     params: protocolParams,
-    query: Joi.object({}).unknown(false),
+    query: Joi.object({ day: Joi.number().integer().min(1).max(3650) }).unknown(false),
 };
 
 /**

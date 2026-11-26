@@ -22,7 +22,7 @@ const treatment = {
     rollingWindowDays: Joi.number().valid(3).default(3),
 };
 const getContext = { params, query: Joi.object({}).unknown(false) };
-const detail = { params: protocolParams, query: Joi.object({}).unknown(false) };
+const detail = { params: protocolParams, query: production.detail.query };
 const create = { params, body: production.create.body.keys(treatment) };
 const update = { params: protocolParams, body: production.update.body.keys(treatment) };
 const reason = Joi.string().trim().min(1).max(500).required();

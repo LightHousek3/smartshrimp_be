@@ -1,6 +1,7 @@
 const limits = require('../constants/pushNotification');
 const { eventId } = require('./jobNotification');
 const { courseEndsAt } = require('./protocolTimeline');
+const { operationOccurrenceKey, operationOccurrenceWhere } = require('./protocolExecution');
 const lifecycle = require('../services/protocolLifecycle.service');
 
 const occurrenceRelations = {
@@ -44,6 +45,35 @@ const occurrenceExpiry = async (db, slot, accountId, now) => {
     return replacement && now >= replacement ? null : new Date(Math.min(end, replacement ?? end));
 };
 
+/** A grouped reminder stays relevant while another material in that slot can still be recorded. */
+const reminderExpiry = async (db, notification, slot, now) => {
+    const expiryFor = async (row) => {
+        const end = await occurrenceExpiry(db, row, notification.accountId, now);
+        if (!end || notification.type !== 'OPERATION_DUE') return end;
+        const dueAt = new Date(row.scheduledAt.getTime() + row.protocolItem.dueAtMinutes * 60000);
+        return now < dueAt ? new Date(Math.min(end, dueAt)) : null;
+    };
+    const directExpiry = await expiryFor(slot);
+    if (directExpiry || !slot?.protocolItem || notification.id !== eventId([
+        notification.accountId, notification.type, 'occurrence', operationOccurrenceKey(slot),
+    ])) return directExpiry;
+    const siblings = await db.operationSchedule.findMany({
+        where: {
+            ...operationOccurrenceWhere(slot),
+            id: { not: slot.id },
+            seasonId: slot.seasonId,
+            status: 'PLANNED',
+            execution: null,
+        },
+        include: occurrenceRelations,
+    });
+    for (const sibling of siblings) {
+        const expiry = await expiryFor(sibling);
+        if (expiry) return expiry;
+    }
+    return null;
+};
+
 /** A push is a short-lived hint; it cannot revive a closed occurrence or an obsolete task deadline. */
 const expiresAt = async (db, notification, now) => {
     let expiry = new Date(notification.createdAt.getTime() + limits.maxAgeMs);
@@ -56,16 +86,9 @@ const expiresAt = async (db, notification, now) => {
             where: { id: notification.referenceId },
             include: occurrenceRelations,
         });
-        const end = await occurrenceExpiry(db, slot, notification.accountId, now);
+        const end = await reminderExpiry(db, notification, slot, now);
         if (!end) return null;
         expiry = new Date(Math.min(expiry, end));
-        if (notification.type === 'OPERATION_DUE')
-            expiry = new Date(
-                Math.min(
-                    expiry,
-                    slot.scheduledAt.getTime() + slot.protocolItem.dueAtMinutes * 60000,
-                ),
-            );
     }
     if (
         notification.type === 'OPERATION_OVERDUE' &&

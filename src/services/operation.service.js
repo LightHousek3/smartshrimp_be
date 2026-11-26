@@ -23,7 +23,7 @@ const { readScheduleWarnings } = require('./technicianDashboard.service');
 const historicalFeeding = require('./historicalFeeding.service');
 const { courseEndsAt } = require('../utils/protocolTimeline');
 const { latestHarvestAt } = require('./harvest.service');
-const { quantityComparison, timingComparison, TIMING } = require('../utils/protocolExecution');
+const { quantityComparison, timingComparison, TIMING, summarizeOperationProgress } = require('../utils/protocolExecution');
 const {
     messages,
     PERSONNEL_ROLE,
@@ -1070,92 +1070,82 @@ const executeSchedulesBatch = async (technicianId, items) => {
 /**
  * Aggregate operational progress and compliance metrics by category and schedule status.
  */
-const getSeasonStats = async (technicianId, seasonId) => {
-    const assignment = await prisma.seasonPersonnelAssignment.findFirst({
-        where: {
-            seasonId,
-            accountId: technicianId,
-            role: PERSONNEL_ROLE.TECHNICIAN,
-            unassignedAt: null,
-        },
-    });
-    if (!assignment) {
-        throw ApiError.forbidden(messages.OPERATION.NOT_ASSIGNED_TECHNICIAN);
-    }
+const getSeasonStats = (technicianId, seasonId) =>
+    prisma.$transaction(async (tx) => {
+        const season = await tx.aquacultureSeason.findFirst({
+            where: {
+                id: seasonId,
+                personnelAssignments: {
+                    some: { accountId: technicianId, role: PERSONNEL_ROLE.TECHNICIAN, unassignedAt: null },
+                },
+                pond: { farm: { owner: { managedAccounts: { some: { id: technicianId } } } } },
+            },
+            select: { name: true, stockingDate: true, pond: { select: { name: true } } },
+        });
+        if (!season) throw ApiError.forbidden(messages.OPERATION.NOT_ASSIGNED_TECHNICIAN);
 
-    const now = new Date();
+        const now = new Date();
 
-    const counts = await prisma.operationSchedule.groupBy({
-        by: ['status'],
-        where: { seasonId },
-        _count: { _all: true },
-    });
-    const statusMap = Object.fromEntries(counts.map((c) => [c.status, c._count._all]));
-    const planned = statusMap[OPERATION_STATUS.PLANNED] || 0;
-    const completed = statusMap[OPERATION_STATUS.COMPLETED] || 0;
-    const cancelled = statusMap[OPERATION_STATUS.CANCELLED] || 0;
-    const total = planned + completed + cancelled;
-
-    const pending = await prisma.operationSchedule.findMany({
-        where: {
-            seasonId,
-            status: OPERATION_STATUS.PLANNED,
-            scheduledAt: { lt: now },
-            protocolItem: { protocol: { status: 'ACTIVE' } },
-        },
-        select: {
-            scheduledAt: true,
-            status: true,
-            protocolItem: { select: { dueAtMinutes: true } },
-        },
-    });
-
-    const overdue = pending.filter(
-        (row) =>
-            timingComparison(row, row.protocolItem.dueAtMinutes, now).status === TIMING.OVERDUE,
-    ).length;
-
-    // Grouping by operationType and status
-    const typeGroups = await prisma.operationSchedule.groupBy({
-        by: ['operationType', 'status'],
-        where: { seasonId },
-        _count: { id: true },
-    });
-
-    const byType = {};
-    for (const type of Object.values(OPERATION_TYPE)) {
-        byType[type.toLowerCase()] = {
-            total: 0,
-            planned: 0,
-            completed: 0,
-            cancelled: 0,
+        const protocols = await tx.protocol.findMany({
+            where: { seasonId },
+            select: {
+                id: true, protocolType: true, status: true, treatmentStartAt: true, abortedAt: true, supersededAt: true,
+                items: { select: { startDayOffset: true, endDayOffset: true, repeatIntervalDays: true,
+                    recurrenceAnchorDay: true, dueAtMinutes: true, plannedTime: true } },
+                statusHistory: { where: { toStatus: { in: ['SUPERSEDED', 'PAUSED'] } },
+                    select: { changedAt: true, eventData: true }, orderBy: { changedAt: 'desc' } },
+            },
+        });
+        const versions = new Map(protocols.map((protocol) => [protocol.id, protocol]));
+        const courseEnds = new Map(protocols.map((protocol) => [protocol.id, courseEndsAt({ ...protocol, season })]));
+        const waitingReplacements = new Map(await Promise.all(
+            protocols.filter(({ status }) => status === PROTOCOL_STATUS.ACTIVE).map(async ({ id }) =>
+                [id, await lifecycle.nextTreatmentStart(tx, seasonId, id)],
+            ),
+        ));
+        const schedules = await tx.operationSchedule.findMany({
+            where: { seasonId, createdAt: { lte: now } },
+            select: {
+                protocolItemId: true, operationType: true, scheduledAt: true, status: true, cancelledAt: true, cancellationType: true,
+                protocolItem: { select: { protocolId: true, productionMealId: true, mealNumber: true, dueAtMinutes: true } },
+            },
+        });
+        // Keep row totals for older clients while newer clients use eligible occurrence progress.
+        const totals = { planned: 0, completed: 0, cancelled: 0, overdue: 0 };
+        const byType = Object.fromEntries(Object.values(OPERATION_TYPE).map((type) =>
+            [type.toLowerCase(), { total: 0, planned: 0, completed: 0, cancelled: 0 }]));
+        const reportRows = schedules.flatMap((row) => {
+            const version = versions.get(row.protocolItem.protocolId);
+            const status = row.status.toLowerCase();
+            const type = byType[row.operationType.toLowerCase()];
+            totals[status]++;
+            type[status]++;
+            type.total++;
+            if (!version) return [];
+            if (row.status === OPERATION_STATUS.PLANNED && version.status === PROTOCOL_STATUS.ACTIVE &&
+                timingComparison(row, row.protocolItem.dueAtMinutes, now).status === TIMING.OVERDUE) {
+                totals.overdue++;
+            }
+            const replaced = version.statusHistory.find((entry) => entry.changedAt.getTime() === row.cancelledAt?.getTime());
+            const replacementAt = versions.get(replaced?.eventData?.replacementId)?.treatmentStartAt;
+            const effectiveEndAt = [courseEnds.get(version.id), version.abortedAt,
+                replacementAt ?? version.supersededAt, waitingReplacements.get(version.id)]
+                .filter(Boolean).sort((a, b) => a - b)[0];
+            if (row.status === OPERATION_STATUS.PLANNED && version.status !== PROTOCOL_STATUS.ACTIVE &&
+                (!effectiveEndAt || now <= effectiveEndAt)) return [];
+            return [{ ...row, effectiveEndAt }];
+        });
+        const activeTotal = totals.planned + totals.completed;
+        return {
+            total: schedules.length,
+            ...totals,
+            completionRate: activeTotal ? Number(((totals.completed / activeTotal) * 100).toFixed(2)) : 0,
+            byType,
+            ...summarizeOperationProgress(reportRows, now),
+            seasonName: season.name,
+            pondName: season.pond.name,
         };
-    }
-
-    for (const group of typeGroups) {
-        const typeKey = group.operationType.toLowerCase();
-        const statusKey = group.status.toLowerCase();
-        if (!byType[typeKey]) {
-            byType[typeKey] = { total: 0, planned: 0, completed: 0, cancelled: 0 };
-        }
-        byType[typeKey][statusKey] = group._count.id;
-        byType[typeKey].total += group._count.id;
-    }
-
-    const activeTotal = total - cancelled;
-    const completionRate =
-        activeTotal > 0 ? Number(((completed / activeTotal) * 100).toFixed(2)) : 0;
-
-    return {
-        total,
-        planned,
-        completed,
-        cancelled,
-        overdue,
-        completionRate,
-        byType,
-    };
-};
+    }, { isolationLevel: 'RepeatableRead' });
 
 module.exports = {
     listSchedules,

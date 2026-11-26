@@ -2,6 +2,8 @@ const messages = require('../constants/messages.js');
 const Joi = require('joi');
 const { hasSharedMealDeadline } = require('../utils/protocolStructure');
 const { SHRIMP_TYPE, PRODUCTION_PROTOCOL_LIMITS } = require('../constants');
+const { productCompliance } = require('./materialCompliance.validator');
+const { manufacturer } = require('./supplier.validator');
 const {
     ProductCategory,
     ConversionUnit,
@@ -14,12 +16,10 @@ const clock = Joi.string()
     .pattern(/^(?:[01]\d|2[0-3]):[0-5]\d$/)
     .required();
 const recommendation = Joi.object({
-    productCompliance: require('./materialCompliance.validator').productCompliance.required(),
+    productCompliance: productCompliance.required(),
     // A proposal must identify either an Owner-scoped manufacturer or a complete inline identity.
     manufacturerId: uuid.empty(null),
-    manufacturer: require('./materialCompliance.validator').manufacturer.empty(
-        null
-    ),
+    manufacturer: manufacturer.empty(null),
     name: Joi.string().trim().min(1).max(255).required(),
     description: Joi.string().trim().max(500).allow('', null).default(null),
     category: Joi.string()

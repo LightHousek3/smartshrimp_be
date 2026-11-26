@@ -11,6 +11,7 @@ const {
 } = require('../utils');
 const { messages, FARM_STATUS, PRODUCTION_PROTOCOL_LIMITS } = require('../constants');
 const { materialRevision, assertMaterialRevision } = require('../utils/protocolMaterial');
+const { getSupplierNameKeys, validateProposedManufacturers } = require('./supplier.service');
 
 /**
  * Use the same response for missing templates and templates outside the account's scope.
@@ -230,8 +231,8 @@ const readTemplate = async (account, templateId) => {
 };
 /** Limit available farms and manufacturers to the Expert's managing Owner. */
 const getCreationOptions = async ({ managedByOwnerId }) => {
-    if (!managedByOwnerId) return { farms: [], manufacturers: [] };
-    const [farms, manufacturers] = await Promise.all([
+    if (!managedByOwnerId) return { farms: [], manufacturers: [], reservedSupplierNames: [] };
+    const [farms, manufacturers, supplierNames] = await Promise.all([
         prisma.farm.findMany({
             where: { ownerId: managedByOwnerId, status: FARM_STATUS.ACTIVE },
             select: { id: true, name: true },
@@ -255,10 +256,12 @@ const getCreationOptions = async ({ managedByOwnerId }) => {
             },
             orderBy: [{ name: 'asc' }, { id: 'asc' }],
         }),
+        getSupplierNameKeys(prisma, managedByOwnerId),
     ]);
     return {
         farms,
         manufacturers: manufacturers.map(normalizeManufacturer),
+        reservedSupplierNames: [...supplierNames],
     };
 };
 
@@ -501,6 +504,12 @@ const saveTemplate = async (account, body, templateId = null) => {
                     throw ApiError.conflict(
                         messages.EXPERT_PROTOCOL_TEMPLATE.MANUFACTURER_UNAVAILABLE_OR_FOREIGN,
                     );
+                await validateProposedManufacturers(
+                    tx,
+                    account.managedByOwnerId,
+                    entries.filter(({ recommendation }) => recommendation && !recommendation.manufacturerId)
+                        .map(({ recommendation }) => recommendation.manufacturer),
+                );
                 const items = entries.map((entry, index) => {
                     const catalog = products.find((row) => row.id === entry.productId);
                     const product = entry.productId

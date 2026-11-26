@@ -40,15 +40,4 @@ const productCompliance = Joi.object({
     checkedAt: Joi.any().strip(),
 }).unknown(false);
 
-const manufacturer = Joi.object({
-    name: Joi.string().trim().replace(/\s+/gu, ' ').min(1).max(255).required(),
-    supplierType: Joi.string()
-        .valid('manufacturer', 'both')
-        .default('manufacturer'),
-    contactName: Joi.string().trim().max(255).allow('', null).default(null),
-    phone: Joi.string().trim().max(20).allow('', null).default(null),
-    email: Joi.string().trim().email().max(320).allow('', null).default(null),
-    address: Joi.string().trim().max(1000).allow('', null).default(null),
-    note: Joi.string().trim().max(2000).allow('', null).default(null),
-}).unknown(false);
-module.exports = { productCompliance, manufacturer };
+module.exports = { productCompliance };

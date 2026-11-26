@@ -256,6 +256,8 @@ const messages = {
     },
 
     SUPPLIER: {
+        PHONE_REQUIRED: 'Vui lòng nhập số điện thoại',
+        PHONE_INVALID: 'Số điện thoại không hợp lệ',
         IDENTITY_LOCKED:
             'Nhà cung cấp đã có tham chiếu nghiệp vụ. Không thể đổi tên hoặc vai trò cung ứng',
         NOT_SELECTABLE: 'Chọn đối tác đang hoạt động, đúng vai trò và thuộc danh bạ của bạn',
@@ -268,6 +270,12 @@ const messages = {
         UPDATED: 'Cập nhật nhà cung cấp thành công',
         NOT_FOUND: 'Không tìm thấy nhà cung cấp đang hoạt động của trang trại',
         NAME_EXISTS: 'Tên nhà cung cấp đã tồn tại trong trang trại',
+        PROPOSED_MANUFACTURER_NAME_EXISTS: (name) =>
+            `Tên nhà sản xuất “${name}” đã có trong danh bạ của Chủ trang trại. Hãy chọn nhà sản xuất có sẵn nếu đang hoạt động và đúng vai trò.`,
+        PROPOSED_MANUFACTURER_INVALID: (name) =>
+            `Hãy kiểm tra tên, vai trò, số điện thoại, địa chỉ và các thông tin liên hệ của nhà sản xuất “${name}”.`,
+        PROPOSED_MANUFACTURER_ADDRESS_CONFLICT: (name) =>
+            `Nhà sản xuất “${name}” được đề xuất với nhiều địa chỉ. Hãy kiểm tra lại thông tin theo nhãn.`,
         CHANGE_CONFLICT: 'Nhà cung cấp đã thay đổi. Vui lòng tải lại và thử lại',
     },
 
@@ -374,8 +382,10 @@ const messages = {
         ACTIVATION_CONDITIONS_NOT_MET: 'Vụ nuôi chưa đáp ứng đủ điều kiện kích hoạt',
         ACTIVATION_STOCKING_DATE_FUTURE: 'Ngày thả giống thực tế không được sau hôm nay.',
         ACTIVATION_DELAY_REASON_REQUIRED: 'Vui lòng nhập lý do kích hoạt muộn.',
-        ACTIVATION_PROTOCOL_NOT_READY: 'Phác đồ nuôi đã duyệt chưa thể áp dụng. Vui lòng kiểm tra lại phác đồ.',
-        ACTIVATION_PROTOCOL_NO_FUTURE_OCCURRENCE: 'Phác đồ nuôi đã duyệt không còn cữ để áp dụng. Vui lòng đề nghị chuyên gia cập nhật phác đồ.',
+        ACTIVATION_PROTOCOL_NOT_READY:
+            'Phác đồ nuôi đã duyệt chưa thể áp dụng. Vui lòng kiểm tra lại phác đồ.',
+        ACTIVATION_PROTOCOL_NO_FUTURE_OCCURRENCE:
+            'Phác đồ nuôi đã duyệt không còn cữ để áp dụng. Vui lòng đề nghị chuyên gia cập nhật phác đồ.',
         ACTIVATED_NOTIFICATION_TITLE: 'Vụ nuôi đã được kích hoạt',
         STATUS_CHANGED_NOTIFICATION_TITLE: 'Trạng thái vụ nuôi đã thay đổi',
         CANCELLATION_NOT_ALLOWED: 'Chỉ có thể hủy vụ nuôi đang lập kế hoạch hoặc đang hoạt động',
@@ -454,15 +464,19 @@ const messages = {
             `Cỡ tôm ${size} con/kg nằm ngoài khoảng thường gặp 10–500 con/kg. Kiểm tra lại khối lượng hoặc số con.`,
         SIZE_SPECIES_WARNING: (min, max) =>
             `Cỡ tôm nằm ngoài khoảng thường gặp ${min}–${max} con/kg. Kiểm tra lại khối lượng hoặc số con.`,
-        SIZE_OUT_OF_RANGE: (min, max) => `Cỡ tôm phải từ ${min} đến ${max} con/kg. Kiểm tra lại khối lượng hoặc số con.`,
-        PRICE_OUT_OF_RANGE: 'Đơn giá phải từ 10.000 đến 1.000.000 đ/kg, hoặc bằng 0 khi khai rõ không có doanh thu.',
-        PRICE_WARNING: 'Đơn giá nằm ngoài khoảng thường gặp của loài tôm này. Vui lòng kiểm tra lại.',
+        SIZE_OUT_OF_RANGE: (min, max) =>
+            `Cỡ tôm phải từ ${min} đến ${max} con/kg. Kiểm tra lại khối lượng hoặc số con.`,
+        PRICE_OUT_OF_RANGE:
+            'Đơn giá phải từ 10.000 đến 1.000.000 đ/kg, hoặc bằng 0 khi khai rõ không có doanh thu.',
+        PRICE_WARNING:
+            'Đơn giá nằm ngoài khoảng thường gặp của loài tôm này. Vui lòng kiểm tra lại.',
         PRICE_REQUIRED: 'Vui lòng nhập đơn giá thu hoạch.',
         PRICE_CONFIRMATION_UNAVAILABLE: 'Hiện chưa thể bổ sung đơn giá thu hoạch.',
         PRICE_ALREADY_CONFIRMED: 'Phiếu thu hoạch đã có đơn giá.',
         PRICE_CONFIRMED: 'Đã bổ sung đơn giá thu hoạch.',
         PRICE_REMINDER_TITLE: 'Phiếu thu hoạch chưa chốt giá',
-        PRICE_REMINDER_CONTENT: (season) => `Phiếu thu hoạch vụ ${season} chưa có đơn giá. Mở phiếu để bổ sung.`,
+        PRICE_REMINDER_CONTENT: (season) =>
+            `Phiếu thu hoạch vụ ${season} chưa có đơn giá. Mở phiếu để bổ sung.`,
         DOC_WARNING: (days) =>
             `Vụ nuôi mới ${days} ngày. Kiểm tra tình trạng thực tế trước khi ghi nhận thu hoạch.`,
         BIOMASS_DEVIATION: (percent, date) =>
@@ -497,7 +511,8 @@ const messages = {
         FINAL_COUNT_REQUIRED: 'Vui lòng nhập số con thu hoạch khi thu hoạch cuối.',
         FINAL_REASON_REQUIRED:
             'Vui lòng nhập lý do thu hoạch cuối khi còn ca bệnh chưa đóng hoặc phác đồ điều trị chưa kết thúc.',
-        DISEASE_ACTIVE: 'Không thể thu tỉa khi còn ca bệnh chưa đóng hoặc phác đồ điều trị chưa kết thúc.',
+        DISEASE_ACTIVE:
+            'Không thể thu tỉa khi còn ca bệnh chưa đóng hoặc phác đồ điều trị chưa kết thúc.',
         POPULATION_UNKNOWN:
             'Chưa xác định được số tôm hiện có. Vui lòng cập nhật số lượng trước khi thu tỉa.',
         PARTIAL_MISMATCH: (available, quantity, expected) =>
@@ -573,7 +588,8 @@ const messages = {
 
     PROTOCOL: {
         PROPOSAL_NOT_FOUND: 'Không tìm thấy vật tư đề xuất trong phác đồ này.',
-        PROPOSED_SUPPLIER_REQUIRED: 'Hãy tạo nhà sản xuất được Chuyên gia đề xuất trước khi lưu vật tư.',
+        PROPOSED_SUPPLIER_REQUIRED:
+            'Hãy tạo nhà sản xuất được Chuyên gia đề xuất trước khi lưu vật tư.',
         FETCHED: 'Lấy dữ liệu phác đồ thành công.',
         REVIEWED: 'Đã lưu quyết định phác đồ.',
         NOT_FOUND: 'Không tìm thấy phác đồ trong phạm vi quản lý.',
@@ -762,10 +778,13 @@ const messages = {
         INSUFFICIENT_INVENTORY_TITLE: 'Tồn kho hợp lệ không đủ để thực hiện vận hành',
         INSUFFICIENT_INVENTORY_CONTENT:
             'Kiểm tra số lượng, hạn sử dụng và hồ sơ của vật tư trước khi thực hiện lại.',
-        VARIANCE_REASON_REQUIRED: 'Vui lòng nhập lý do khi lượng thực tế lệch ngoài ngưỡng cho phép.',
-        EXECUTION_BEFORE_ACTIVATION: 'Chỉ được ghi nhận cữ được lên lịch và thực hiện từ lúc vụ nuôi được kích hoạt.',
+        VARIANCE_REASON_REQUIRED:
+            'Vui lòng nhập lý do khi lượng thực tế lệch ngoài ngưỡng cho phép.',
+        EXECUTION_BEFORE_ACTIVATION:
+            'Chỉ được ghi nhận cữ được lên lịch và thực hiện từ lúc vụ nuôi được kích hoạt.',
         INVALID_EXECUTION_TIME: 'Giờ thực hiện phải hợp lệ và không được sau thời điểm hiện tại.',
-        EXECUTION_TIME_REASON_REQUIRED: 'Vui lòng nhập lý do khi thực hiện quá hạn hoặc ghi bổ sung do vụ kích hoạt muộn.',
+        EXECUTION_TIME_REASON_REQUIRED:
+            'Vui lòng nhập lý do khi thực hiện quá hạn hoặc ghi bổ sung do vụ kích hoạt muộn.',
         HISTORICAL_FEED_UNAVAILABLE: 'Cữ ăn trước kích hoạt không còn đủ điều kiện ghi bổ sung.',
         HISTORICAL_FEED_BASIS: 'Cữ ăn trước kích hoạt thiếu căn cứ tính lượng theo phác đồ.',
         HISTORICAL_FEED_TIME: 'Vui lòng chọn giờ cho ăn thực tế trong cùng ngày với cữ.',
@@ -836,7 +855,8 @@ const messages = {
         START_TIMEZONE_REQUIRED: 'Mốc điều trị phải có cả ngày, giờ và múi giờ (Z hoặc ±HH:mm).',
         STATE: 'Trạng thái ca hoặc phác đồ không cho phép thao tác này.',
         REASON_REQUIRED: 'Cần ghi lý do và quyết định cho phác đồ nuôi tiếp tục hoặc tạm giữ.',
-        COMPLETED: 'Đã kết thúc thời gian áp dụng phác đồ. Chuyên gia cần quyết định chăm sóc tiếp.',
+        COMPLETED:
+            'Đã kết thúc thời gian áp dụng phác đồ. Chuyên gia cần quyết định chăm sóc tiếp.',
         RECORDING_CLOSED: 'Phác đồ đã kết thúc thời gian áp dụng; lịch đã khóa ghi nhận.',
         REPLACEMENT_DUE:
             'Đã tới mốc thay phác đồ; lịch cũ đã khóa. Vui lòng tải lại và kiểm tra bản điều trị mới.',
