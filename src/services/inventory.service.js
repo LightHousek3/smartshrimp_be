@@ -11,7 +11,9 @@ const {
     PRODUCT_ARCHIVE_STATUS,
     PRODUCT_STATUS,
     OPERATION_STATUS,
+    OPERATION_TYPE,
     PROTOCOL_STATUS,
+    PROTOCOL_TYPE,
     INVENTORY_TRANSACTION_TYPE,
     OWNER_INVENTORY_TRANSACTION_TYPES,
     NOTIFICATION_TYPE,
@@ -1823,6 +1825,60 @@ const HISTORY_SELECT = {
     },
 };
 
+const stockOutExecutionId = (transaction) =>
+    transaction.transactionType === INVENTORY_TRANSACTION_TYPE.STOCK_OUT &&
+    transaction.referenceType === 'operation_execution'
+        ? transaction.referenceId
+        : null;
+
+/** Resolve pre-activation feedings for the current page, including stock-outs split across lots. */
+const getHistoricalFeedingExecutions = async (farmId, rows) => {
+    const ids = [...new Set(rows.map(stockOutExecutionId).filter(Boolean))];
+    if (!ids.length) return new Map();
+
+    const executions = await prisma.operationExecution
+        .findMany({
+            where: {
+                id: { in: ids },
+                schedule: {
+                    operationType: OPERATION_TYPE.FEEDING,
+                    protocolItem: { protocol: { protocolType: PROTOCOL_TYPE.PRODUCTION } },
+                    season: {
+                        pond: { farmId },
+                        activatedAt: { not: null },
+                        activationDelayReason: { not: null },
+                    },
+                },
+            },
+            select: {
+                id: true,
+                executedAt: true,
+                actualProductId: true,
+                schedule: {
+                    select: {
+                        scheduledAt: true,
+                        seasonId: true,
+                        season: { select: { activatedAt: true } },
+                    },
+                },
+            },
+        })
+        .catch((error) => {
+            // Older inventory databases can serve history without the activation fields.
+            if (error.code === 'P2022') {
+                const column = String(error.meta?.column ?? '').split('.').at(-1);
+                if (['activated_at', 'activation_delay_reason'].includes(column)) return [];
+            }
+            throw error;
+        });
+
+    return new Map(
+        executions
+            .filter(({ schedule }) => schedule.scheduledAt < schedule.season.activatedAt)
+            .map((execution) => [execution.id, execution]),
+    );
+};
+
 /**
  * Read the owned farm ledger with validated filters and a scoped pagination cursor.
  * Preserve historical products; value totals use the full filtered set, not just the current page.
@@ -1967,7 +2023,20 @@ const getInventoryHistory = async (farmId, ownerId, query) => {
         getHistoryOptions(farmId),
     ]);
     const hasNextPage = rows.length > limit;
-    const transactions = (hasNextPage ? rows.slice(0, limit) : rows).map(normalizeTransaction);
+    const pageRows = hasNextPage ? rows.slice(0, limit) : rows;
+    const historicalFeedings = await getHistoricalFeedingExecutions(farmId, pageRows);
+    const transactions = pageRows.map((row) => {
+        const transaction = normalizeTransaction(row);
+        const feeding = historicalFeedings.get(stockOutExecutionId(row));
+        if (
+            feeding &&
+            feeding.schedule.seasonId === row.seasonId &&
+            feeding.actualProductId === row.productId
+        ) {
+            transaction.historicalFeedingExecutedAt = feeding.executedAt;
+        }
+        return transaction;
+    });
 
     return {
         transactions,
