@@ -295,6 +295,7 @@ enum NotificationType {
   INVENTORY_LOW                @map("inventory_low")
   INVENTORY_INSUFFICIENT       @map("inventory_insufficient")
   HARVEST_DUE                  @map("harvest_due")
+  HARVEST_RECORDED             @map("harvest_recorded")
   SEASON_COMPLETED             @map("season_completed")
 
   @@map("notification_type")

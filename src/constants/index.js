@@ -41,6 +41,7 @@ const HARVEST_ERROR_CODE = Object.freeze({
     WITHDRAWAL_UNKNOWN: 'HARVEST_WITHDRAWAL_UNKNOWN',
     WITHDRAWAL_ACTIVE: 'HARVEST_WITHDRAWAL_ACTIVE',
     VARIANCE_REASON_REQUIRED: 'HARVEST_VARIANCE_REASON_REQUIRED',
+    CORRECTED_REMAINDER_REQUIRED: 'HARVEST_CORRECTED_REMAINDER_REQUIRED',
     SIZE_OUT_OF_RANGE: 'HARVEST_SIZE_OUT_OF_RANGE',
     PRICE_OUT_OF_RANGE: 'HARVEST_PRICE_OUT_OF_RANGE',
 });
@@ -48,6 +49,7 @@ const HARVEST_ERROR_CODE = Object.freeze({
 const deferredPriceEnabled = (process.env.HARVEST_DEFERRED_PRICE_ENABLED ?? 'true') === 'true';
 const HARVEST_POLICY = Object.freeze({
     withdrawalEnabled: true,
+    populationCorrectionEnabled: (process.env.HARVEST_POPULATION_CORRECTION_ENABLED ?? 'true') === 'true',
     speciesThresholdsEnabled: (process.env.HARVEST_SPECIES_THRESHOLDS_ENABLED ?? 'true') === 'true',
     deferredPriceEnabled,
     priceConfirmationEnabled: deferredPriceEnabled || process.env.HARVEST_PRICE_CONFIRMATION_ENABLED === 'true',
