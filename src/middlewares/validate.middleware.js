@@ -36,7 +36,7 @@ const validate = (schema) => (req, res, next) => {
         .validate(object);
 
     if (error) {
-        const errorMessage = error.details.map(displayMessage).join(', ');
+        const errorMessage = [...new Set(error.details.map(displayMessage))].join(' ');
         return next(new ApiError(httpStatus.BAD_REQUEST, errorMessage));
     }
 

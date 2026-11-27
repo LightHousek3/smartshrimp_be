@@ -1,3 +1,6 @@
+/** Daily estimates may carry an old weight and cannot serve as measurements. */
+const isWeightSample = (log) => Number(log.sampleSize) > 0 && Number(log.avgWeightG) > 0;
+
 /** Population observations cannot silently renew or contradict a quantitative measurement. */
 const populationMatches = (source) =>
     (source.estimatedPopulation == null || Number(source.estimatedPopulation) > 0) &&
@@ -29,7 +32,7 @@ const selectBiomass = (logs, scheduledAt, now, maxAgeHours, latestHarvestAt) => 
                 (!log.createdAt || (log.createdAt <= now && log.createdAt <= scheduledAt)),
         )
         .sort(newestFirst);
-    const measured = eligible.find((log) => log.estimatedBiomassKg != null);
+    const measured = eligible.find(isWeightSample);
     if (
         !measured ||
         !(Number(measured.estimatedBiomassKg) > 0) ||
@@ -48,4 +51,4 @@ const selectBiomass = (logs, scheduledAt, now, maxAgeHours, latestHarvestAt) => 
         : null;
 };
 
-module.exports = { populationMatches, selectBiomass };
+module.exports = { isWeightSample, populationMatches, selectBiomass };

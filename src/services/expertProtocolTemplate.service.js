@@ -21,15 +21,21 @@ const notFound = () => ApiError.notFound(messages.EXPERT_PROTOCOL_TEMPLATE.NOT_F
  * Limit farm-scoped template operations to active farms owned by the specified account.
  */
 const activeScope = (ownerId) => ({ farm: { ownerId, status: FARM_STATUS.ACTIVE } });
-// Detached templates remain readable as history but cannot enter any write path.
+// Colleagues share the farm library; detached templates are visible only to their creator.
 const readScope = (account) => ({
     OR: [
         activeScope(account.managedByOwnerId),
         { farmId: null, status: TemplateStatus.inactive, createdBy: account.id },
     ],
 });
+// Only the creator may manage a template that still belongs to an active farm.
+const writeScope = ({ id, managedByOwnerId }) => ({
+    ...activeScope(managedByOwnerId),
+    createdBy: id,
+});
 const headerSelect = {
     id: true,
+    createdBy: true,
     title: true,
     description: true,
     shrimpType: true,
@@ -94,15 +100,17 @@ const applications = (ownerId, ids) =>
             season: { pond: { farm: { ownerId } } },
         },
     });
-/** Include application counts and deletion eligibility without exposing internal relation counts. */
-const normalizeHeader = (row, appliedSeasons) => {
-    const { _count, ...header } = row;
+/** Expose management permissions without returning internal ownership fields. */
+const normalizeHeader = (row, appliedSeasons, accountId) => {
+    const { _count, createdBy, ...header } = row;
+    const canManage = row.farm != null && createdBy === accountId;
     return {
         ...header,
         farm: row.farm ?? { id: null, name: messages.EXPERT_PROTOCOL_TEMPLATE.DELETED_FARM },
         allowedVariancePct: Number(row.allowedVariancePct),
         usedSeasonCount: appliedSeasons.filter((entry) => entry.sourceTemplateId === row.id).length,
-        canDelete: _count.sourcedProtocols === 0,
+        canManage,
+        canDelete: canManage && _count.sourcedProtocols === 0,
     };
 };
 /** Filter templates within the Expert's managing Owner before paginating. */
@@ -151,7 +159,7 @@ const getTemplates = async (account, query = {}) => {
           )
         : null;
     return {
-        templates: rows.map((row) => normalizeHeader(row, data)),
+        templates: rows.map((row) => normalizeHeader(row, data, account.id)),
         meta: { page, limit, totalResults, farms },
     };
 };
@@ -199,11 +207,11 @@ const normalizeItem = (item, farmId) => {
     };
 };
 /** Return scoped template details and retain the farm lock once operational versions reference it. */
-const readTemplate = async (account, templateId) => {
+const readTemplate = async (account, templateId, scope = readScope(account)) => {
     const { managedByOwnerId } = account;
     if (!managedByOwnerId) throw notFound();
     const row = await prisma.productionProtocolTemplate.findFirst({
-        where: { id: templateId, ...readScope(account) },
+        where: { id: templateId, ...scope },
         select: {
             ...headerSelect,
             referencePostCount: true,
@@ -217,7 +225,7 @@ const readTemplate = async (account, templateId) => {
     if (!row) throw notFound();
     const { items, ...header } = row;
     return {
-        ...normalizeHeader(header, await applications(managedByOwnerId, [templateId])),
+        ...normalizeHeader(header, await applications(managedByOwnerId, [templateId]), account.id),
         // Duration belongs to detail/editor responses; the list has no duration column.
         duration: items.length
             ? {
@@ -265,11 +273,7 @@ const getCreationOptions = async ({ managedByOwnerId }) => {
     };
 };
 
-/** Stock is informational: templates neither reserve inventory nor use availability as compliance evidence. */
-const getMaterials = async (
-    { managedByOwnerId },
-    { farmId, group = 'ALL', search, page = 1, limit = 5 },
-) => {
+const requireAuthoringFarm = async (managedByOwnerId, farmId) => {
     const farm =
         managedByOwnerId &&
         (await prisma.farm.findFirst({
@@ -277,6 +281,43 @@ const getMaterials = async (
             select: { id: true },
         }));
     if (!farm) throw ApiError.notFound(messages.EXPERT_PROTOCOL_TEMPLATE.FARM_NOT_FOUND);
+};
+
+/** Validate label facts and current supplier availability before the client uploads new images. */
+const validateMaterialProposal = async (account, {
+    farmId, proposal, pendingImageCount, environment, production,
+}) => {
+    const ownerId = account.managedByOwnerId;
+    await requireAuthoringFarm(ownerId, farmId);
+    const { productCompliance, review } = assessTemplateProposal(
+        proposal, account.id, new Date(), pendingImageCount,
+    );
+    assertMaterialSafety({
+        ...proposal,
+        productCompliance: { ...productCompliance, ...review },
+    }, environment, null, { production });
+    if (proposal.manufacturerId) {
+        const supplier = await prisma.supplier.findFirst({
+            where: {
+                id: proposal.manufacturerId,
+                ownerId,
+                status: 'active',
+                supplierType: { in: ['MANUFACTURER', 'BOTH'] },
+            },
+            select: { id: true },
+        });
+        if (!supplier) throw ApiError.badRequest(messages.MATERIAL_COMPLIANCE.MANUFACTURER_REQUIRED);
+    } else {
+        await validateProposedManufacturers(prisma, ownerId, [proposal.manufacturer]);
+    }
+};
+
+/** Stock is informational: templates neither reserve inventory nor use availability as compliance evidence. */
+const getMaterials = async (
+    { managedByOwnerId },
+    { farmId, group = 'ALL', search, page = 1, limit = 5 },
+) => {
+    await requireAuthoringFarm(managedByOwnerId, farmId);
     const where = {
         farmId,
         status: 'ACTIVE',
@@ -433,7 +474,7 @@ const saveTemplate = async (account, body, templateId = null) => {
                     existing = await tx.productionProtocolTemplate.findFirst({
                         where: {
                             id: templateId,
-                            ...readScope(account),
+                            ...writeScope(account),
                         },
                         select: {
                             versionNo: true,
@@ -603,7 +644,7 @@ const saveTemplate = async (account, body, templateId = null) => {
                             id: templateId,
                             versionNo: body.expectedVersionNo,
                             farmId: existing.farmId,
-                            ...readScope(account),
+                            ...writeScope(account),
                         },
                         data: { ...data, versionNo: { increment: 1 } },
                     });
@@ -648,7 +689,7 @@ const deleteTemplate = async (account, templateId, expectedVersionNo) => {
                 await requireExpert(tx, account);
                 const where = {
                     id: templateId,
-                    ...readScope(account),
+                    ...writeScope(account),
                 };
                 const row = await tx.productionProtocolTemplate.findFirst({
                     where,
@@ -692,7 +733,7 @@ const updateStatus = async (account, templateId, body) => {
                 await requireExpert(tx, account);
                 const where = {
                     id: templateId,
-                    ...activeScope(account.managedByOwnerId),
+                    ...writeScope(account),
                 };
                 const row = await tx.productionProtocolTemplate.findFirst({
                     where,
@@ -772,9 +813,10 @@ module.exports = {
     updateStatus,
     getTemplates,
     getTemplate: readTemplate,
-    getTemplateEditor: readTemplate,
+    getTemplateEditor: (account, templateId) => readTemplate(account, templateId, writeScope(account)),
     getCreationOptions,
     getMaterials,
+    validateMaterialProposal,
     createTemplate: saveTemplate,
     /**
      * Require an existing template ID before entering the shared create and update flow.

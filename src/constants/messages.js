@@ -248,10 +248,8 @@ const messages = {
         HAS_REFERENCES: 'Không thể xóa ao còn dữ liệu liên quan hoặc lịch sử vụ nuôi',
         OPEN_SEASON_RESTRICTS_UPDATE:
             'Vụ nuôi đang mở không cho phép thay đổi loại ao hoặc chuyển sang bảo trì',
-        VOLUME_OUT_OF_RANGE: 'Thể tích tính từ diện tích và độ sâu vượt quá giới hạn cho phép',
-        VOLUME_EXCEEDS_CAPACITY: 'Thể tích không được vượt quá diện tích nhân với độ sâu của ao',
-        DIMENSIONS_IMMUTABLE:
-            'Không được cập nhật diện tích và độ sâu của ao; chỉ được cập nhật thể tích',
+        VOLUME_OUT_OF_RANGE: 'Thể tích ước tính nằm ngoài giới hạn lưu trữ. Vui lòng nhập thể tích nước thực tế.',
+        OPEN_SEASON_DIMENSIONS_LOCKED: 'Không thể đổi diện tích hoặc độ sâu khi ao có vụ đang chuẩn bị hoặc đang nuôi.',
         CHANGE_CONFLICT: 'Trạng thái ao đã thay đổi. Vui lòng tải lại và thử lại',
     },
 
@@ -480,12 +478,10 @@ const messages = {
         DOC_WARNING: (days) =>
             `Vụ nuôi mới ${days} ngày. Kiểm tra tình trạng thực tế trước khi ghi nhận thu hoạch.`,
         BIOMASS_DEVIATION: (percent, date) =>
-            `Số thu và số còn lại lệch ${percent}% so với quần thể ước tính từ lần chài mẫu ngày ${date}. Kiểm tra lại số con hoặc lý do hiệu chỉnh.`,
+            `Số thu và số còn lại lệch ${percent}% so với quần thể ước tính từ lần chài mẫu ngày ${date}. Vui lòng kiểm tra lại số lượng.`,
         NOTE_TOO_LONG: (limit) => `Ghi chú thu hoạch tối đa ${limit} ký tự.`,
         VARIANCE_REASON_REQUIRED:
-            'Số thu thực tế và số còn lại vượt ước tính hiện có. Vui lòng nhập lý do hiệu chỉnh ước tính.',
-        CORRECTED_REMAINDER_REQUIRED:
-            'Vui lòng nhập số tôm sống còn lại lớn hơn 0 sau thu tỉa. Nếu đã thu hết, chọn thu hoạch cuối.',
+            'Số tôm thu hoạch cuối vượt ước tính hiện có. Vui lòng nhập lý do hiệu chỉnh.',
         SCHEDULE_COMPLETED_REASON: 'Vụ nuôi đã hoàn tất thu hoạch cuối.',
         WITHDRAWAL_UNVERIFIED_WARNING:
             'Chưa đủ dữ liệu xác nhận thời gian ngừng thuốc. Vui lòng kiểm tra lịch sử dùng vật tư trước khi thu hoạch.',
@@ -520,7 +516,9 @@ const messages = {
         PARTIAL_MISMATCH: (available, quantity, expected) =>
             `Số lượng thu tỉa không khớp: hiện có ${available} con, thu ${quantity} con thì phải còn ${expected} con. Vui lòng kiểm tra lại; hao hụt cần được ghi nhận riêng.`,
         PARTIAL_EXHAUSTED:
-            'Thu tỉa phải còn tôm trong ao. Nếu thu hết, vui lòng chọn thu hoạch cuối.',
+            'Số lượng thu tỉa phải nhỏ hơn số tôm hiện có ước tính. Nếu thu hết hoặc vượt ước tính, vui lòng chọn thu hoạch cuối.',
+        PARTIAL_LATER_MORTALITY:
+            'Số tôm còn lại sau thu tỉa nhỏ hơn số hao hụt đã ghi sau giờ thu. Vui lòng kiểm tra lại giờ và số lượng thu.',
         EARLY_WARNING: (days, typicalDays) =>
             `Lưu ý: thu hoạch sau ${days} ngày nuôi, sớm hơn chu kỳ tham khảo ${typicalDays} ngày của loài. Chủ trại cân nhắc theo tình trạng thực tế; bản ghi vẫn hợp lệ.`,
         RECORDED_TITLE: 'Đã ghi nhận thu tỉa',
@@ -569,6 +567,7 @@ const messages = {
         ESTIMATED_POPULATION_EXCEEDS_INITIAL:
             'Số lượng tôm ước tính không được vượt quá số lượng giống thả ban đầu',
         MORTALITY_EXCEEDS_AVAILABLE: 'Số lượng hao hụt vượt quá số lượng tôm hiện có trong ao',
+        SAMPLE_WEIGHT_REQUIRED: 'Vui lòng cung cấp khối lượng trung bình của mẫu tôm.',
         MORTALITY_INVALID: 'Số lượng hao hụt không hợp lệ',
         RECORDED_AT_PAST_DAY: 'Chỉ được ghi nhận sức khỏe tôm trong ngày hôm nay',
         INVALID_RECORDED_AT: 'Thời điểm ghi nhận không hợp lệ',
@@ -590,6 +589,8 @@ const messages = {
 
     PROTOCOL: {
         PROPOSAL_NOT_FOUND: 'Không tìm thấy vật tư đề xuất trong phác đồ này.',
+        PROPOSAL_CATALOG_MISMATCH:
+            'Thông tin vật tư không khớp với đề xuất đã gửi. Vui lòng mở lại đề xuất và kiểm tra thông tin.',
         PROPOSED_SUPPLIER_REQUIRED:
             'Hãy tạo nhà sản xuất được Chuyên gia đề xuất trước khi lưu vật tư.',
         FETCHED: 'Lấy dữ liệu phác đồ thành công.',
@@ -606,6 +607,10 @@ const messages = {
     },
 
     PRODUCTION_PROTOCOL: {
+        PROPOSAL_MANUFACTURER_CONFLICT:
+            'Vật tư đề xuất có cả nhà sản xuất đã chọn và thông tin tạo mới. Vui lòng chọn lại nhà sản xuất cho vật tư.',
+        PROPOSAL_MANUFACTURER_REQUIRED:
+            'Vui lòng chọn nhà sản xuất có sẵn hoặc nhập thông tin nhà sản xuất mới cho vật tư đề xuất.',
         DRAFT_DELETED: 'Đã xóa bản nháp phác đồ.',
         DRAFT_DELETE_STATE:
             'Chỉ được xóa bản nháp chưa từng gửi duyệt; các bản đã gửi hoặc đã hủy được giữ trong lịch sử.',

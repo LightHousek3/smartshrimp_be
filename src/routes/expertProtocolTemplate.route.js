@@ -39,6 +39,19 @@ router.get(
 );
 
 /**
+ * @route   POST /api/v1/expert/protocol-templates/materials/validate-proposal
+ * @desc    Validate a proposal before its new label images are uploaded.
+ * @access  Private (Expert)
+ */
+router.post(
+    '/materials/validate-proposal',
+    authenticate,
+    authorize(ACCOUNT_ROLE.EXPERT),
+    validate(expertProtocolTemplateValidator.validateMaterialProposal),
+    expertProtocolTemplateController.validateMaterialProposal,
+);
+
+/**
  * @route   POST /api/v1/expert/protocol-templates
  * @desc    Create a one-based production template with per-occurrence doses and proposal snapshots.
  * @access  Private (Expert)
@@ -53,7 +66,7 @@ router.post(
 
 /**
  * @route   GET /api/v1/expert/protocol-templates
- * @desc    List owned production templates with optional search, farm, species and status filters.
+ * @desc    List templates in the Expert's accessible farms and their management permissions.
  * @access  Private (Expert)
  */
 router.get(
@@ -79,7 +92,7 @@ router.get(
 
 /**
  * @route   GET /api/v1/expert/protocol-templates/:templateId/editor
- * @desc    Read editable rules, material identities and safety warnings for an owned template.
+ * @desc    Read editable rules and material details for the template creator.
  * @access  Private (Expert)
  */
 router.get(
@@ -91,7 +104,7 @@ router.get(
 );
 /**
  * @route   PUT /api/v1/expert/protocol-templates/:templateId
- * @desc    Atomically replace template rules and increment its version; never rewrite applied schedules.
+ * @desc    Let the creator replace the rules and increment the version for future applications.
  * @access  Private (Expert)
  */
 router.put(
@@ -104,7 +117,7 @@ router.put(
 
 /**
  * @route   DELETE /api/v1/expert/protocol-templates/:templateId
- * @desc    Hard-delete an unreferenced template with version protection.
+ * @desc    Let the creator delete an unreferenced template with version protection.
  * @access  Private (Expert)
  */
 router.delete(
@@ -117,7 +130,7 @@ router.delete(
 
 /**
  * @route   PATCH /api/v1/expert/protocol-templates/:templateId/status
- * @desc    Change availability with version protection; preserve all material rules.
+ * @desc    Let the creator change availability while preserving the rules.
  * @access  Private (Expert)
  */
 router.patch(

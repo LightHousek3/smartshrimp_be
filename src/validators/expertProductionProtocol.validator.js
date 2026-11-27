@@ -44,6 +44,10 @@ const proposal = Joi.object({
         .required(),
 })
     .xor('manufacturerId', 'manufacturer')
+    .messages({
+        'object.xor': messages.PRODUCTION_PROTOCOL.PROPOSAL_MANUFACTURER_CONFLICT,
+        'object.missing': messages.PRODUCTION_PROTOCOL.PROPOSAL_MANUFACTURER_REQUIRED,
+    })
     .unknown(true);
 // Strings avoid silently rounding PostgreSQL NUMERIC input at the JSON boundary.
 const decimal = (integerDigits, scale, zero = false) =>

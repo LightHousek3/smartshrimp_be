@@ -11,15 +11,16 @@ const readSources = async (client, seasonIds, at) => {
     if (!seasonIds.length) return new Map();
     const rows = await client.$queryRaw(Prisma.sql`
         SELECT s.id AS "seasonId", b.id, b.recorded_at AS "recordedAt",
+            b.sample_size AS "sampleSize", b.avg_weight_g AS "avgWeightG",
             b.estimated_biomass_kg AS "estimatedBiomassKg", b.estimated_population AS "estimatedPopulation",
             p.id AS "populationId", p.recorded_at AS "populationAt", p.estimated_population AS "latestPopulation",
             h.harvested_at AS "latestPartialHarvestAt"
         FROM aquaculture_seasons s
         LEFT JOIN LATERAL (
-            SELECT l.id, l.recorded_at, l.estimated_biomass_kg, l.estimated_population
+            SELECT l.id, l.recorded_at, l.sample_size, l.avg_weight_g, l.estimated_biomass_kg, l.estimated_population
             FROM shrimp_health_logs l
             WHERE l.season_id = s.id AND NOT l.is_voided AND l.recorded_at <= ${at} AND l.created_at <= ${at}
-                AND l.estimated_biomass_kg IS NOT NULL
+                AND l.sample_size > 0 AND l.avg_weight_g > 0
             ORDER BY l.recorded_at DESC, l.created_at DESC, l.id DESC LIMIT 1
         ) b ON true
         LEFT JOIN LATERAL (

@@ -361,6 +361,15 @@ module.exports = {
     createTemplate,
     creationOptions,
     getMaterials,
+    validateMaterialProposal: {
+        body: Joi.object({
+            farmId: uuid.required(),
+            proposal: recommendation.fork('imageUrls', (schema) => schema.min(0)).required(),
+            pendingImageCount: Joi.number().integer().min(0).max(3).required(),
+            environment: Joi.boolean().required(),
+            production: Joi.boolean().required(),
+        }),
+    },
     updateTemplate,
     deleteTemplate,
 };
