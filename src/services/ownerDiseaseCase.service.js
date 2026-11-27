@@ -238,13 +238,28 @@ const list = (ownerId, { seasonId, resolved, page, limit }) => prisma.$transacti
     };
 }, { isolationLevel: 'RepeatableRead' });
 
+/** Keep legacy JSON values outside the HTTPS attachment contract out of the timeline. */
+const responseAttachmentUrls = (attachments) =>
+    Array.isArray(attachments)
+        ? attachments.filter((url) =>
+            typeof url === 'string' && /^https:\/\//i.test(url) && URL.canParse(url),
+        )
+        : [];
+
 /** Merge status changes and replies oldest-first, with changes first on equal timestamps. */
 const caseTimeline = (row) => [
     ...row.statusHistory.map(({ fromStatus, toStatus, changedAt, reason, changer }) => ({
         kind: 'status', fromStatus, toStatus, at: changedAt, message: lifecycleReason(reason), authorName: changer?.fullName ?? 'Hệ thống',
     })),
-    ...row.responses.map(({ responseType, createdAt, message, author, careAction }) => ({
-        kind: 'response', responseType, at: createdAt, message, authorName: author.fullName, authorRole: author.role, careAction,
+    ...row.responses.map(({ responseType, createdAt, message, author, careAction, attachments }) => ({
+        kind: 'response',
+        responseType,
+        at: createdAt,
+        message,
+        authorName: author.fullName,
+        authorRole: author.role,
+        careAction,
+        attachments: responseAttachmentUrls(attachments),
     })),
 ].sort((first, second) => first.at - second.at);
 
@@ -281,7 +296,7 @@ const detail = (ownerId, caseId) => prisma.$transaction(async (client) => {
             },
             responses: {
                 select: {
-                    id: true, responseType: true, createdAt: true, message: true,
+                    id: true, responseType: true, createdAt: true, message: true, attachments: true,
                     author: { select: { fullName: true, role: true } },
                 },
                 orderBy: [{ createdAt: 'asc' }, { id: 'asc' }],
