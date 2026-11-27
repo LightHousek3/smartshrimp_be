@@ -1129,6 +1129,10 @@ const createWorkflow = ({ protocolType = 'PRODUCTION', diseaseCaseId = null } = 
                         instructions: item.instructions,
                         product: {
                             ...product,
+                            // Template proposals store the supplier link outside the label snapshot.
+                            ...(!item.productId && item.recommendedManufacturerId && {
+                                manufacturerId: item.recommendedManufacturerId,
+                            }),
                             safety: getMaterialSafety(product),
                             ...(item.productId && { materialRevision: materialRevision(product) }),
                         },

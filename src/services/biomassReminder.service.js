@@ -1,16 +1,17 @@
-const { populationMatches } = require('../utils/biomassSource');
+const { isWeightSample, populationMatches } = require('../utils/biomassSource');
 const notices = require('../utils/jobNotification');
 
 /** Remind against the source episode, not every slot or every daily comment. */
 const remind = async (tx, protocol, logs, firstMissingAt, harvestedAt, now) => {
     if (!firstMissingAt) return [];
-    const measured = logs.find((row) => row.estimatedBiomassKg != null);
+    const measured = logs.find(isWeightSample);
     const population = logs.find((row) => row.estimatedPopulation != null);
     const voided = await tx.shrimpHealthLog.findFirst({
         where: {
             seasonId: protocol.seasonId,
             isVoided: true,
-            estimatedBiomassKg: { not: null },
+            sampleSize: { gt: 0 },
+            avgWeightG: { gt: 0 },
             voidedAt: { lte: now },
         },
         orderBy: [{ voidedAt: 'desc' }, { id: 'desc' }],

@@ -90,7 +90,7 @@ const assertOperationalMaterial = (product, item, farmId, ownerId, protocol = {}
 };
 
 /** Labels may change; physical identity, conversion and approved professional facts require a new decision. */
-const assertApprovedMaterial = (product, snapshot) => {
+const assertApprovedMaterial = (product, snapshot, message = messages.PRODUCTION_PROTOCOL.MATERIAL_CHANGED) => {
     const decimal = (value) => (value == null ? null : new Prisma.Decimal(value).toString());
     const signature = (value) => {
         const profile = value.compliance ?? value.productCompliance ?? {};
@@ -109,16 +109,16 @@ const assertApprovedMaterial = (product, snapshot) => {
         });
     };
     if (!snapshot || signature(product) !== signature(snapshot))
-        throw ApiError.conflict(messages.PRODUCTION_PROTOCOL.MATERIAL_CHANGED);
+        throw ApiError.conflict(message);
 };
 
 /** Owner resolves catalogue identity, not a different technical prescription (BR-48/49). */
-const assertSelectionMatches = (item, product, submittedItem) => {
+const assertSelectionMatches = (item, product, submittedItem, message = messages.PRODUCTION_PROTOCOL.MATERIAL_CHANGED) => {
     if (item.productId) {
         if (item.productId !== product.id)
-            throw ApiError.conflict(messages.PRODUCTION_PROTOCOL.MATERIAL_CHANGED);
+            throw ApiError.conflict(message);
         const snapshot = submittedItem?.product ?? item.materialSnapshot;
-        if (snapshot) assertApprovedMaterial(product, snapshot);
+        if (snapshot) assertApprovedMaterial(product, snapshot, message);
         return;
     }
     const proposed = item.recommendedProductDetails?.proposed;
@@ -141,13 +141,13 @@ const assertSelectionMatches = (item, product, submittedItem) => {
                 (proposed.manufacturer?.address &&
                     !sameText(proposed.manufacturer.address, product.manufacturer?.address))))
     ) {
-        throw ApiError.conflict(messages.PRODUCTION_PROTOCOL.MATERIAL_CHANGED);
+        throw ApiError.conflict(message);
     }
     assertApprovedMaterial(product, {
         ...proposed,
         manufacturerId: item.recommendedManufacturerId ?? product.manufacturerId,
         compliance: proposed.productCompliance,
-    });
+    }, message);
 };
 
 /**
@@ -302,14 +302,38 @@ const prepareCreation = async (client, ownerId, farmId, context) => {
  */
 const linkCreatedMaterial = async (client, context, product, ownerId) => {
     const { protocol, item, items } = context;
-    assertSelectionMatches(item, product);
+    const mismatch = messages.PROTOCOL.PROPOSAL_CATALOG_MISMATCH;
+    assertSelectionMatches(item, product, undefined, mismatch);
+    const proposed = item.recommendedProductDetails.proposed;
+    const proposedImages = proposed.imageUrls ?? [];
+    const proposedEvidence = proposed.productCompliance?.evidenceUrls ?? [];
+    const expectedEvidence = proposedEvidence.length ? proposedEvidence : proposedImages;
+    const text = (value) => String(value ?? '').trim();
+    // Older app versions collapse whitespace in the locked name and description fields.
+    const displayText = (value) => text(value).replace(/\s+/gu, ' ');
+    if (
+        displayText(product.name) !== displayText(proposed.name) ||
+        displayText(product.description) !== displayText(proposed.description) ||
+        text(product.recommendationReason) !== text(proposed.recommendationReason) ||
+        JSON.stringify(product.imageUrls) !== JSON.stringify(proposedImages) ||
+        JSON.stringify(product.compliance?.evidenceUrls ?? []) !== JSON.stringify(expectedEvidence)
+    ) {
+        throw ApiError.conflict(mismatch);
+    }
     if (!item.recommendedManufacturerId) {
         const manufacturer = await client.supplier.findFirst({
             where: { id: product.manufacturerId, ownerId },
-            select: { createdAt: true },
+            select: { createdAt: true, supplierType: true, note: true },
         });
         if (!manufacturer || manufacturer.createdAt < protocol.submittedAt)
             throw ApiError.badRequest(messages.PROTOCOL.PROPOSED_SUPPLIER_REQUIRED);
+        if (
+            manufacturer.supplierType?.toLowerCase() !==
+                (proposed.manufacturer?.supplierType ?? 'manufacturer').toLowerCase() ||
+            text(manufacturer.note) !== text(proposed.manufacturer?.note)
+        ) {
+            throw ApiError.conflict(mismatch);
+        }
     }
     // Meal-specific notes and evidence links do not create a second catalogue identity.
     const matching = items.filter(row => {

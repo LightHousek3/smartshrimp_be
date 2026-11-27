@@ -16,6 +16,7 @@ const withdrawalError = (message, errorCode) => {
  * S08 uses immutable execution snapshots, including fractional 24-hour days.
  * The caller holds the season lock shared with S07. Later corrections can only
  * extend protection; cancelled schedules never erase a recorded use.
+ * A zero-day withdrawal does not set a harvest cutoff.
  */
 const readWithdrawal = async (tx, seasonId, at) => {
     if (!HARVEST_POLICY.withdrawalEnabled)
@@ -23,7 +24,8 @@ const readWithdrawal = async (tx, seasonId, at) => {
     const [state] = await tx.$queryRaw(Prisma.sql`SELECT
         coalesce(bool_or((e.withdrawal_days_snapshot IS NULL OR c.withdrawal_days IS NULL) AND
             (p.category = 'medicine' OR c.regulatory_type = 'medicine' OR s.operation_type = 'medicine')), false) AS unknown,
-        max(e.executed_at + GREATEST(e.withdrawal_days_snapshot, c.withdrawal_days) * INTERVAL '24 hours') AS "latestEndAt"
+        max(e.executed_at + GREATEST(e.withdrawal_days_snapshot, c.withdrawal_days) * INTERVAL '24 hours')
+            FILTER (WHERE GREATEST(e.withdrawal_days_snapshot, c.withdrawal_days) > 0) AS "latestEndAt"
         FROM operation_executions e JOIN operation_schedules s ON s.id = e.schedule_id
         LEFT JOIN products p ON p.id = coalesce(e.actual_product_id, s.product_id)
         LEFT JOIN product_compliance c ON c.product_id = p.id

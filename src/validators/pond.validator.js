@@ -56,14 +56,9 @@ const createPond = {
     }),
 };
 
-// Dimensions are fixed at creation; PATCH may only adjust usable water volume.
 const updatePond = {
     params: pondParams,
-    body: Joi.object({
-        ...pondFields,
-        areaM2: Joi.forbidden(),
-        depthM: Joi.forbidden(),
-    }).min(1),
+    body: Joi.object(pondFields).min(1),
 };
 
 module.exports = {

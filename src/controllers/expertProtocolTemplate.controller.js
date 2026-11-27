@@ -56,6 +56,14 @@ const getMaterials = asyncHandler(async (req, res) => {
 });
 
 /**
+ * POST /api/v1/expert/protocol-templates/materials/validate-proposal
+ */
+const validateMaterialProposal = asyncHandler(async (req, res) => {
+    await expertProtocolTemplateService.validateMaterialProposal(req.account, req.body);
+    ResponseHandler.noContent(res);
+});
+
+/**
  * POST /api/v1/expert/protocol-templates
  */
 const createTemplate = asyncHandler(async (req, res) => {
@@ -125,6 +133,7 @@ module.exports = {
     getTemplate,
     getCreationOptions,
     getMaterials,
+    validateMaterialProposal,
     createTemplate,
     getTemplateEditor,
     updateTemplate,

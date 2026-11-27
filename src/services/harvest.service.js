@@ -313,9 +313,13 @@ const create = async (ownerId, seasonId, body, key) => {
                     const saved = normalize(existing, season);
                     const savedInput = comparable(saved);
                     // An omitted derived field is not part of the client's retry fingerprint.
-                    const replayInput = input.harvestType === 'PARTIAL' && input.estimatedRemainingCount == null
-                        ? { ...input, estimatedRemainingCount: savedInput.estimatedRemainingCount }
-                        : input;
+                    const replayInput = {
+                        ...input,
+                        estimatedRemainingCount:
+                            input.estimatedRemainingCount ?? savedInput.estimatedRemainingCount,
+                        // A later confirmation can fill a price omitted from the original request.
+                        pricePerKg: input.pricePerKg ?? savedInput.pricePerKg,
+                    };
                     if (JSON.stringify(savedInput) !== JSON.stringify(replayInput))
                         throw ApiError.conflict(M.KEY_CONFLICT);
                     return {
@@ -367,8 +371,7 @@ const create = async (ownerId, seasonId, body, key) => {
                     throw ApiError.badRequest(M.NOTE_TOO_LONG(HARVEST_LIMITS.noteMaxLength));
                 }
                 const withdrawalWarning = await withdrawal.checkHarvest(tx, seasonId, harvestedAt);
-                const correctionEnabled = HARVEST_POLICY.populationCorrectionEnabled;
-                if (!correctionEnabled && await hasDiseaseBlocker(tx, seasonId)) {
+                if (!HARVEST_POLICY.populationCorrectionEnabled && await hasDiseaseBlocker(tx, seasonId)) {
                     if (input.harvestType === 'PARTIAL') {
                         throw validationError(M.DISEASE_ACTIVE, HARVEST_ERROR_CODE.DISEASE_ACTIVE);
                     }
@@ -383,7 +386,7 @@ const create = async (ownerId, seasonId, body, key) => {
                     if (input.quantityCount == null || quantity <= 0n) {
                         throw validationError(M.FINAL_COUNT_REQUIRED, HARVEST_ERROR_CODE.FINAL_COUNT_REQUIRED);
                     }
-                    if (correctionEnabled && available != null && quantity > BigInt(available)
+                    if (available != null && quantity > BigInt(available)
                         && !input.varianceReason) {
                         throw validationError(M.VARIANCE_REASON_REQUIRED, HARVEST_ERROR_CODE.VARIANCE_REASON_REQUIRED);
                     }
@@ -401,20 +404,15 @@ const create = async (ownerId, seasonId, body, key) => {
                     }
                     remaining = BigInt(available) - quantity;
                     if (remaining <= 0n) {
-                        if (!correctionEnabled) {
-                            throw validationError(M.PARTIAL_EXHAUSTED, HARVEST_ERROR_CODE.POPULATION_MISMATCH);
-                        }
-                        if (!input.varianceReason) {
-                            throw validationError(M.VARIANCE_REASON_REQUIRED, HARVEST_ERROR_CODE.VARIANCE_REASON_REQUIRED);
-                        }
-                        if (input.estimatedRemainingCount == null) {
-                            throw validationError(
-                                M.CORRECTED_REMAINDER_REQUIRED,
-                                HARVEST_ERROR_CODE.CORRECTED_REMAINDER_REQUIRED,
-                            );
-                        }
-                        remaining = BigInt(input.estimatedRemainingCount);
-                    } else if (input.estimatedRemainingCount != null
+                        throw validationError(M.PARTIAL_EXHAUSTED, HARVEST_ERROR_CODE.POPULATION_MISMATCH);
+                    }
+                    const [subsequentLoss] = await tx.$queryRaw`SELECT coalesce(sum(mortality_count), 0) AS count
+                        FROM shrimp_health_logs WHERE season_id = ${seasonId}::uuid
+                            AND is_voided = false AND recorded_at > ${harvestedAt}`;
+                    if (new Prisma.Decimal(subsequentLoss.count).gt(remaining.toString())) {
+                        throw validationError(M.PARTIAL_LATER_MORTALITY, HARVEST_ERROR_CODE.POPULATION_MISMATCH);
+                    }
+                    if (input.estimatedRemainingCount != null
                         && BigInt(input.estimatedRemainingCount) !== remaining) {
                         throw validationError(
                             M.PARTIAL_MISMATCH(String(available), quantity.toString(), remaining.toString()),

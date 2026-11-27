@@ -177,6 +177,7 @@ const readWaterAlerts = async (tx, seasons, now) => {
 /** Keep original source times; no harvest-derived weight or copied daily observation renews biomass. */
 const usableSource = (source) =>
     source?.recordedAt &&
+    Number(source.estimatedBiomassKg) > 0 &&
     populationMatches(source) &&
     (!source.latestPartialHarvestAt || source.recordedAt > source.latestPartialHarvestAt)
         ? source
@@ -408,7 +409,7 @@ const presentSeason = (season, sources, now) => {
         biomassState =
             source.latestPartialHarvestAt && source.recordedAt <= source.latestPartialHarvestAt
                 ? 'AFTER_HARVEST'
-                : !populationMatches(source)
+                : !populationMatches(source) || !(Number(source.estimatedBiomassKg) > 0)
                   ? 'POPULATION_CHANGED'
                   : now - source.recordedAt >
                       PRODUCTION_PROTOCOL_LIMITS.biomassMaxAgeHours * 3600000

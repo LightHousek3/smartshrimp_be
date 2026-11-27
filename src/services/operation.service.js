@@ -713,7 +713,12 @@ const executeScheduleInTx = async (
             config.productionProtocol.biomassMaxAgeHours,
             harvestedAt,
         );
-        if (!source || source.id !== schedule.sourceHealthLogId) {
+        if (
+            !source ||
+            source.id !== schedule.sourceHealthLogId ||
+            schedule.basisQuantity == null ||
+            !new Prisma.Decimal(source.estimatedBiomassKg).eq(schedule.basisQuantity)
+        ) {
             throw ApiError.conflict(messages.PRODUCTION_PROTOCOL.BIOMASS_SOURCE_INVALID);
         }
     }

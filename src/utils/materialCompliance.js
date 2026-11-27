@@ -110,9 +110,14 @@ const assertMaterialSafety = (
     }
 };
 /** Validate the proposal before stamping its declaring account and submission time. */
-const confirmProposal = (product, accountId, now = new Date()) => {
+const confirmProposal = (product, accountId, now, pendingImageCount) => {
     assertNoProhibitedIngredients(product);
-    if (!hasLabelImages(product)) throw ApiError.badRequest(messages.INVENTORY.LABEL_IMAGE_REQUIRED);
+    const uploadedCount = product.imageUrls?.length ?? 0;
+    if (
+        uploadedCount + pendingImageCount < 1 ||
+        uploadedCount + pendingImageCount > 3 ||
+        (uploadedCount > 0 && !hasLabelImages(product))
+    ) throw ApiError.badRequest(messages.INVENTORY.LABEL_IMAGE_REQUIRED);
     if (!product.manufacturerId && !product.manufacturer?.name?.trim()) {
         throw ApiError.badRequest(messages.MATERIAL_COMPLIANCE.MANUFACTURER_REQUIRED);
     }
@@ -133,14 +138,14 @@ const confirmProposal = (product, accountId, now = new Date()) => {
  * The author/time stamp records this submission, not independent evidence verification.
  * Proposals remain planning snapshots and never authorize operational use of a catalog product.
  */
-const assessTemplateProposal = (product, accountId, now = new Date()) => {
+const assessTemplateProposal = (product, accountId, now = new Date(), pendingImageCount = 0) => {
     const fields = ['regulatoryType', 'registrationNumber', 'ingredientsText', 'containsAntibiotic',
         'usageInstructions', 'withdrawalDays', 'evidenceUrls'];
     const productCompliance = Object.fromEntries(fields.filter(field => Object.hasOwn(product.productCompliance ?? {}, field))
         .map(field => [field, product.productCompliance[field]]));
     return {
         productCompliance,
-        review: confirmProposal({ ...product, productCompliance }, accountId, now),
+        review: confirmProposal({ ...product, productCompliance }, accountId, now, pendingImageCount),
     };
 };
 /** Reconstruct proposal display fields without assigning a catalog product identity. */

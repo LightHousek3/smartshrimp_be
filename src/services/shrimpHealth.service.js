@@ -1,4 +1,6 @@
 const { Prisma } = require('@prisma/client');
+const { isWeightSample } = require('../utils/biomassSource');
+const { readSources, populationMatches } = require('./seasonBiomass.service');
 const { availableAt, recalculateHealthPopulations } = require('./seasonPopulation.service');
 const prisma = require('../config/prisma');
 const { assertCalculationStorage } = require('../utils/jobStorage');
@@ -275,15 +277,17 @@ const createShrimpHealthLog = async (accountId, seasonId, data, idempotencyKey =
         throw ApiError.badRequest(messages.SHRIMP_HEALTH_LOG.RECORDED_AT_PAST_DAY);
     }
 
-    let sampleSize =
+    const sampleSize =
         data.sampleSize !== undefined && data.sampleSize !== null ? Number(data.sampleSize) : null;
-    let avgWeightG =
-        data.avgWeightG !== undefined && data.avgWeightG !== null ? Number(data.avgWeightG) : null;
-    let avgLengthCm =
+    const avgWeightG = sampleSize == null ? null : Number(data.avgWeightG ?? 0);
+    if (sampleSize != null && !(avgWeightG > 0)) {
+        throw ApiError.badRequest(messages.SHRIMP_HEALTH_LOG.SAMPLE_WEIGHT_REQUIRED);
+    }
+    const avgLengthCm =
         data.avgLengthCm !== undefined && data.avgLengthCm !== null
             ? Number(data.avgLengthCm)
             : null;
-    let mortalityCount =
+    const mortalityCount =
         data.mortalityCount !== undefined && data.mortalityCount !== null
             ? Number(data.mortalityCount)
             : 0;
@@ -292,11 +296,7 @@ const createShrimpHealthLog = async (accountId, seasonId, data, idempotencyKey =
         throw ApiError.badRequest(messages.SHRIMP_HEALTH_LOG.MORTALITY_INVALID);
     }
 
-    const liveAvailable = await availableAt(prisma, season, recordedAt);
-    if (liveAvailable !== null && BigInt(mortalityCount) > BigInt(liveAvailable)) {
-        throw ApiError.badRequest(messages.SHRIMP_HEALTH_LOG.MORTALITY_EXCEEDS_AVAILABLE);
-    }
-    let estimatedPopulation =
+    const estimatedPopulation =
         data.estimatedPopulation !== undefined && data.estimatedPopulation !== null
             ? Number(data.estimatedPopulation)
             : null;
@@ -309,42 +309,11 @@ const createShrimpHealthLog = async (accountId, seasonId, data, idempotencyKey =
         throw ApiError.badRequest(messages.SHRIMP_HEALTH_LOG.ESTIMATED_POPULATION_EXCEEDS_INITIAL);
     }
 
-    let estimatedBiomassKg =
-        data.estimatedBiomassKg !== undefined && data.estimatedBiomassKg !== null
-            ? Number(data.estimatedBiomassKg)
-            : null;
+    const estimatedBiomassKg = avgWeightG != null && estimatedPopulation != null
+        ? new Prisma.Decimal(avgWeightG).mul(estimatedPopulation).div(1000).toDecimalPlaces(3)
+        : null;
     const healthStatus = data.healthStatus || HEALTH_STATUS.GOOD;
     const note = (data.note || '').trim() || null;
-
-    // If mean body weight is omitted (e.g. mortality-only log), inherit latest valid weight & length prior to recordedAt
-    if (avgWeightG === null || avgWeightG <= 0) {
-        const previousObservation = await prisma.shrimpHealthLog.findFirst({
-            where: {
-                seasonId,
-                isVoided: false,
-                avgWeightG: { not: null, gt: 0 },
-                recordedAt: { lte: recordedAt },
-            },
-            orderBy: [{ recordedAt: 'desc' }, { id: 'desc' }],
-        });
-        if (previousObservation) {
-            avgWeightG = Number(previousObservation.avgWeightG);
-            if ((avgLengthCm === null || avgLengthCm <= 0) && previousObservation.avgLengthCm) {
-                avgLengthCm = Number(previousObservation.avgLengthCm);
-            }
-        }
-    }
-
-    // Infer biomass from population and mean body weight when an explicit weight is omitted.
-    if (
-        estimatedBiomassKg === null &&
-        estimatedPopulation !== null &&
-        avgWeightG !== null &&
-        estimatedPopulation > 0 &&
-        avgWeightG > 0
-    ) {
-        estimatedBiomassKg = Math.round(((estimatedPopulation * avgWeightG) / 1000) * 1000) / 1000;
-    }
 
     // Reject concurrent submissions sharing the same in-flight idempotency key.
     const rawKey = (idempotencyKey || '').trim().slice(0, 128);
@@ -401,6 +370,11 @@ const createShrimpHealthLog = async (accountId, seasonId, data, idempotencyKey =
                     select: { id: true },
                 });
                 if (!current) throw ApiError.conflict(messages.SHRIMP_HEALTH_LOG.NO_ASSIGNMENT);
+                // Validate against the same population snapshot as the insert and harvest.
+                const liveAvailable = await availableAt(tx, season, recordedAt);
+                if (liveAvailable !== null && BigInt(mortalityCount) > liveAvailable) {
+                    throw ApiError.badRequest(messages.SHRIMP_HEALTH_LOG.MORTALITY_EXCEEDS_AVAILABLE);
+                }
                 const log = await tx.shrimpHealthLog.create({
                     data: {
                         seasonId,
@@ -610,6 +584,7 @@ const voidShrimpHealthLog = async (accountId, seasonId, logId, { voidReason }) =
                 sourceHealthLogId: logId,
                 status: OPERATION_STATUS.PLANNED,
                 execution: null,
+                scheduledAt: { gt: voidedAt },
             },
             data: {
                 status: OPERATION_STATUS.CANCELLED,
@@ -711,9 +686,9 @@ const getStatistics = async (accountId, seasonId, query = {}, scope = 'ktv') => 
             date: dateKey,
             recordedAt: r.recordedAt.toISOString(),
             dayOfCulture: doc,
-            avgWeightG: toNumberOrNull(r.avgWeightG),
+            avgWeightG: isWeightSample(r) ? toNumberOrNull(r.avgWeightG) : null,
             avgLengthCm: toNumberOrNull(r.avgLengthCm),
-            estimatedBiomassKg: toNumberOrNull(r.estimatedBiomassKg),
+            estimatedBiomassKg: isWeightSample(r) ? toNumberOrNull(r.estimatedBiomassKg) : null,
             estimatedPopulation:
                 r.estimatedPopulation !== null && r.estimatedPopulation !== undefined
                     ? Number(r.estimatedPopulation)
@@ -727,7 +702,7 @@ const getStatistics = async (accountId, seasonId, query = {}, scope = 'ktv') => 
     // Take the latest valid non-voided measurement for each indicator.
     const [
         latestValidLog,
-        latestBiomassLog,
+        sources,
         latestAvgWeightLog,
         latestAvgLengthLog,
         latestPopulationLog,
@@ -736,12 +711,9 @@ const getStatistics = async (accountId, seasonId, query = {}, scope = 'ktv') => 
             where: { seasonId, isVoided: false },
             orderBy: [{ recordedAt: 'desc' }, { id: 'desc' }],
         }),
+        readSources(prisma, [seasonId], to),
         prisma.shrimpHealthLog.findFirst({
-            where: { seasonId, isVoided: false, estimatedBiomassKg: { not: null, gt: 0 } },
-            orderBy: [{ recordedAt: 'desc' }, { id: 'desc' }],
-        }),
-        prisma.shrimpHealthLog.findFirst({
-            where: { seasonId, isVoided: false, avgWeightG: { not: null, gt: 0 } },
+            where: { seasonId, isVoided: false, recordedAt: { lte: to }, avgWeightG: { gt: 0 }, sampleSize: { gt: 0 } },
             orderBy: [{ recordedAt: 'desc' }, { id: 'desc' }],
         }),
         prisma.shrimpHealthLog.findFirst({
@@ -791,27 +763,19 @@ const getStatistics = async (accountId, seasonId, query = {}, scope = 'ktv') => 
         );
     }
 
-    // Resolve current biomass; adjust if partial harvest occurred after the latest biomass measurement
+    // Display only a measured, representative biomass for the remaining stock.
     const [latestHarvest] = await prisma.$queryRaw(Prisma.sql`
         SELECT id, harvest_type, harvested_at
         FROM harvest_events
         WHERE season_id = ${seasonId}::uuid AND harvested_at <= ${to}
         ORDER BY harvested_at DESC, id DESC LIMIT 1
     `);
-    let currentBiomassKg = toNumberOrNull(latestBiomassLog?.estimatedBiomassKg);
-    if (latestHarvest) {
-        if (latestHarvest.harvest_type === 'final') {
-            currentBiomassKg = 0;
-        } else if (
-            latestBiomassLog &&
-            new Date(latestHarvest.harvested_at) > new Date(latestBiomassLog.recordedAt) &&
-            latestAvgWeightLog?.avgWeightG &&
-            currentPop != null &&
-            currentPop > 0
-        ) {
-            currentBiomassKg = Math.round(((currentPop * Number(latestAvgWeightLog.avgWeightG)) / 1000) * 10) / 10;
-        }
-    }
+    const source = sources.get(seasonId);
+    const representative = source?.recordedAt &&
+        (!source.latestPartialHarvestAt || source.recordedAt > source.latestPartialHarvestAt) &&
+        populationMatches(source) && Number(source.estimatedBiomassKg) > 0;
+    const currentBiomassKg = latestHarvest?.harvest_type === 'final'
+        ? 0 : representative ? toNumberOrNull(source.estimatedBiomassKg) : null;
 
     const totalValidLogs = rows.length;
     const healthDistribution = {

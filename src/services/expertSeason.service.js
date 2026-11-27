@@ -1,6 +1,7 @@
 const { Prisma } = require('@prisma/client');
 const prisma = require('../config/prisma');
 const { readProfessionalHistory } = require('./harvest.service');
+const { isWeightSample, selectBiomass } = require('../utils/biomassSource');
 const { ApiError } = require('../utils');
 const {
     PERSONNEL_ROLE,
@@ -224,7 +225,7 @@ const detailSelect = {
 
 /** Growth compares actual weighing days within the current post-partial-harvest cohort. */
 const normalizeGrowth = (season, logs, latestHarvest) => {
-    const samples = logs.filter((log) => log.avgWeightG != null);
+    const samples = logs.filter(isWeightSample);
     const latest = samples.at(-1);
     if (!latest) return null;
     const weight = toNumber(latest?.avgWeightG);
@@ -267,13 +268,13 @@ const normalizeGrowth = (season, logs, latestHarvest) => {
 };
 
 /** Estimates keep independent source times; never combine old weight with a new remaining count. */
-const normalizeStock = (season, logs, harvests, latestHarvest) => {
+const normalizeStock = (season, logs, harvests, latestHarvest, now) => {
     const final = harvests.find((event) => event.harvest_type === 'final');
     const afterHarvest = (log) => !latestHarvest || log.recordedAt > latestHarvest.harvested_at;
     const populationLog = logs.findLast(
         (log) => log.estimatedPopulation != null && afterHarvest(log),
     );
-    const biomassLog = logs.findLast((log) => log.estimatedBiomassKg != null && afterHarvest(log));
+    const biomassLog = final ? null : selectBiomass(logs, now, now, Infinity, latestHarvest?.harvested_at);
     const population = final
         ? { count: 0, recordedAt: final.harvested_at.toISOString(), source: 'HARVEST' }
         : populationLog
@@ -455,6 +456,7 @@ const getAssignedSeasonMetrics = (accountId, seasonId, now = new Date()) =>
                     where: { seasonId, isVoided: false, recordedAt: { lte: now } },
                     select: {
                         recordedAt: true,
+                        sampleSize: true,
                         avgWeightG: true,
                         estimatedPopulation: true,
                         estimatedBiomassKg: true,
@@ -487,7 +489,7 @@ const getAssignedSeasonMetrics = (accountId, seasonId, now = new Date()) =>
             const latestHarvest =
                 harvests.find((event) => event.harvest_type === 'final') ?? harvests.at(-1);
             result.growth = normalizeGrowth(season, logs, latestHarvest);
-            result.stock = normalizeStock(season, logs, harvests, latestHarvest);
+            result.stock = normalizeStock(season, logs, harvests, latestHarvest, now);
             result.health = normalizeHealth(season, logs, now);
             result.harvest = normalizeHarvest(season, harvests);
             result.feed = {

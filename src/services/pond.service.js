@@ -13,26 +13,18 @@ const {
  */
 const normalizePondNameKey = (name) => name.replace(/\s+/gu, '').toLocaleLowerCase('vi');
 
-/** Round capacity to the database's two decimal places before comparing volumes. */
+/** Round the estimated volume to the database precision. */
 const calculateVolumeM3 = (areaM2, depthM) => {
     if (areaM2 == null || depthM == null) return null;
     const volumeM3 = Math.round(Number(areaM2) * Number(depthM) * 100) / 100;
-    if (volumeM3 > POND_LIMITS.VOLUME_M3) {
+    if (volumeM3 <= 0 || volumeM3 > POND_LIMITS.VOLUME_M3) {
         throw new ApiError(httpStatus.BAD_REQUEST, messages.POND.VOLUME_OUT_OF_RANGE);
     }
     return volumeM3;
 };
 
-/** Omitted usable volume defaults to capacity; an explicit value cannot exceed it. */
-const resolveVolumeM3 = (areaM2, depthM, suppliedVolumeM3) => {
-    const calculatedVolumeM3 = calculateVolumeM3(areaM2, depthM);
-    if (suppliedVolumeM3 === undefined) return calculatedVolumeM3;
-    const volumeM3 = Number(suppliedVolumeM3);
-    if (volumeM3 > calculatedVolumeM3) {
-        throw new ApiError(httpStatus.BAD_REQUEST, messages.POND.VOLUME_EXCEEDS_CAPACITY);
-    }
-    return volumeM3;
-};
+const resolveVolumeM3 = (areaM2, depthM, suppliedVolumeM3) =>
+    suppliedVolumeM3 ?? calculateVolumeM3(areaM2, depthM);
 
 const POND_SELECT = {
     id: true,
@@ -204,24 +196,18 @@ const createPond = async (farmId, pondData, ownerId) => {
     }
 };
 
-/** Keep dimensions immutable and validate volume against the stored capacity. */
-const buildPondUpdate = (current, changes) => {
-    if (Object.hasOwn(changes, 'areaM2') || Object.hasOwn(changes, 'depthM')) {
-        throw new ApiError(httpStatus.BAD_REQUEST, messages.POND.DIMENSIONS_IMMUTABLE);
-    }
-    const data = { ...changes };
-    if (Object.hasOwn(changes, 'volumeM3')) {
-        data.volumeM3 = resolveVolumeM3(current.areaM2, current.depthM, changes.volumeM3);
-    }
-    return data;
-};
-
 /** An open season protects pond type and prevents entering maintenance. */
 const assertOpenSeasonAllowsUpdate = (current, changes) => {
     if (current.seasons.length === 0) return;
     const changesType = changes.type !== undefined && changes.type !== current.type;
     const entersMaintenance =
         changes.status === POND_STATUS.MAINTENANCE && current.status !== POND_STATUS.MAINTENANCE;
+    const changesDimensions = ['areaM2', 'depthM'].some((field) =>
+        changes[field] !== undefined && (current[field] == null || Number(changes[field]) !== Number(current[field])),
+    );
+    if (changesDimensions) {
+        throw new ApiError(httpStatus.CONFLICT, messages.POND.OPEN_SEASON_DIMENSIONS_LOCKED);
+    }
     if (changesType || entersMaintenance) {
         throw new ApiError(httpStatus.CONFLICT, messages.POND.OPEN_SEASON_RESTRICTS_UPDATE);
     }
@@ -247,7 +233,7 @@ const updatePond = async (farmId, pondId, pondData, ownerId) => {
                 if (pondData.name !== undefined) {
                     await requireUniquePondName(transaction, farmId, pondData.name, pondId);
                 }
-                const updateData = buildPondUpdate(current, pondData);
+                const updateData = pondData;
                 assertOpenSeasonAllowsUpdate(current, updateData);
                 if (updateData.volumeM3 !== undefined) {
                     const seasons = await transaction.aquacultureSeason.findMany({
