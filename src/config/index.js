@@ -34,12 +34,23 @@ const webUrl = new URL(WEB_BASE_URL);
 if (webUrl.username || webUrl.password || webUrl.search || webUrl.hash) {
     throw new Error('WEB_BASE_URL must not contain credentials, query parameters or a fragment.');
 }
+const trustProxyHops = Number(process.env.TRUST_PROXY_HOPS ?? 1);
+if (!Number.isSafeInteger(trustProxyHops) || trustProxyHops < 0) {
+    throw new Error('TRUST_PROXY_HOPS must be a nonnegative integer.');
+}
 
 const config = {
     env: process.env.NODE_ENV || 'development',
     port: parseInt(process.env.PORT, 10) || 3000,
     apiPrefix: API_PREFIX,
+    trustProxyHops,
     database: { url: process.env.DATABASE_URL },
+    redis: {
+        url: process.env.REDIS_URL?.trim(),
+        rateLimitUrl: process.env.REDIS_RATE_LIMIT_URL?.trim(),
+        socketUrl: process.env.REDIS_SOCKET_URL?.trim(),
+        keyPrefix: process.env.REDIS_KEY_PREFIX?.trim() || `smartshrimp:${process.env.NODE_ENV || 'development'}`,
+    },
     app: {
         backendUrl: BASE_URL || undefined,
         webBaseUrl: WEB_BASE_URL,
@@ -81,7 +92,7 @@ const config = {
 
     log: {
         level: process.env.LOG_LEVEL || 'debug',
-        dir: process.env.LOG_DIR || 'logs',
+        dir: process.env.LOG_DIR ?? 'logs',
     },
 
     email: {

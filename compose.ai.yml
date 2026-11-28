@@ -1,0 +1,11 @@
+services:
+  api:
+    environment:
+      AI_SERVICE_URL: http://classification:8000
+      RAG_SERVICE_URL: http://rag:8000
+    networks: [ai]
+
+networks:
+  ai:
+    name: smartshrimp-ai_default
+    external: true

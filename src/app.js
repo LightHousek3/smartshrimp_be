@@ -16,6 +16,7 @@ const hpp = require('hpp');
 const config = require('./config');
 const corsOptions = require('./config/cors');
 const logger = require('./config/logger');
+const prisma = require('./config/prisma');
 const { apiLimiter, errorConverter, errorHandler, notFoundHandler } = require('./middlewares');
 const routesV1 = require('./routes');
 const { swaggerUi, swaggerSpec } = require('./docs/swagger');
@@ -27,7 +28,7 @@ const app = express();
 // ═══════════════════════════════════════════════
 
 // Set security HTTP headers
-app.set('trust proxy', 1);
+app.set('trust proxy', config.trustProxyHops ?? 1);
 app.use(helmet());
 
 // CORS
@@ -81,6 +82,21 @@ app.get('/health', (req, res) => {
         timestamp: new Date().toISOString(),
         environment: config.env,
     });
+});
+
+app.get('/ready', async (req, res) => {
+    res.set('Cache-Control', 'no-store');
+    const unavailable = () => res.status(503).json({ success: false, message: 'Service unavailable' });
+    if (!app.locals.ready) return unavailable();
+
+    try {
+        await prisma.$transaction((tx) => tx.$queryRaw`SELECT 1`, { maxWait: 500, timeout: 1500 });
+    } catch {
+        return unavailable();
+    }
+
+    if (!app.locals.ready) return unavailable();
+    return res.status(200).json({ success: true, message: 'Service ready' });
 });
 
 // ═══════════════════════════════════════════════

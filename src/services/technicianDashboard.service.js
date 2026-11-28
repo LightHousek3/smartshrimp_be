@@ -381,10 +381,15 @@ const readOperations = async (tx, seasons, now, window, protocols) => {
         const group = groups.get(row.seasonId) ?? {
             ...context(byId.get(row.seasonId)), items: [], occurrences: new Set(),
         };
-        group.occurrences.add(operationOccurrenceKey(row));
+        const occurrenceKey = operationOccurrenceKey(row);
+        group.occurrences.add(occurrenceKey);
         const snapshot = row.protocolItem.materialSnapshot;
         group.items.push({
             id: row.id,
+            occurrenceKey,
+            mealNumber: row.protocolItem.mealNumber ?? null,
+            productionMealId: row.protocolItem.productionMealId ?? null,
+            isTreatment: protocol.protocolType === PROTOCOL_TYPE.TREATMENT,
             operationType: row.operationType,
             scheduledAt: row.scheduledAt,
             dueAt: timing.dueAt,

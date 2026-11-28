@@ -3,8 +3,10 @@ const config = require('../config');
 const logger = require('../config/logger');
 const { ACCOUNT_ROLE } = require('../constants');
 const { loadActiveAccount } = require('../middlewares');
+const { openNotificationAdapter } = require('./notificationAdapter');
 
 let io;
+let closeAdapter;
 
 /**
  * Use a private room per account so its authenticated sockets receive the same inbox updates.
@@ -21,8 +23,11 @@ const allowedRoles = new Set([
  * roles.
  */
 const attachNotificationSocket = (httpServer) => {
+    const { adapter, close } = openNotificationAdapter(config.redis?.socketUrl, config.redis?.keyPrefix);
+    closeAdapter = close;
     io = new Server(httpServer, {
         cors: { origin: config.cors.origin, credentials: true },
+        ...(adapter && { adapter }),
     });
 
     io.use(async (socket, next) => {
@@ -49,6 +54,12 @@ const attachNotificationSocket = (httpServer) => {
     return io;
 };
 
+const closeNotificationAdapter = () => {
+    closeAdapter?.();
+    closeAdapter = undefined;
+    io = undefined;
+};
+
 /**
  * Deliver an inbox event to the account room on a best-effort basis after persistence.
  */
@@ -62,4 +73,4 @@ const emitNotification = (accountId, event, payload) => {
     }
 };
 
-module.exports = { attachNotificationSocket, emitNotification };
+module.exports = { attachNotificationSocket, closeNotificationAdapter, emitNotification };

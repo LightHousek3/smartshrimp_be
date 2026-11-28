@@ -20,8 +20,8 @@ const transports = [
     }),
 ];
 
-// File transports only in non-test environments
-if (config.env !== 'test') {
+// Containers can use stdout and leave file logging to the runtime.
+if (config.env !== 'test' && config.log.dir) {
     transports.push(
         new winston.transports.File({
             filename: path.join(config.log.dir, 'error.log'),

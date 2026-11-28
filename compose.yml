@@ -1,0 +1,63 @@
+name: smartshrimp-be
+
+x-redis-service: &redis-service
+  image: redis:7.4-alpine
+  restart: unless-stopped
+  networks: [redis]
+  healthcheck:
+    test: [CMD, redis-cli, ping]
+    interval: 5s
+    timeout: 2s
+    retries: 8
+
+services:
+  api:
+    build: .
+    init: true
+    restart: unless-stopped
+    stop_grace_period: 40s
+    env_file:
+      - path: ${BE_ENV_FILE:-.env.container}
+        format: raw
+    environment:
+      NODE_ENV: production
+      PORT: '3000'
+      LOG_DIR: ''
+      REDIS_URL: redis://redis-cache:6379
+      REDIS_SOCKET_URL: redis://redis-cache:6379
+      REDIS_RATE_LIMIT_URL: redis://redis-rate-limit:6379
+    ports:
+      - '${BE_BIND_ADDRESS:-127.0.0.1}:${BE_HOST_PORT:-3000}:3000'
+    networks: [default, redis]
+    depends_on:
+      redis-cache:
+        condition: service_healthy
+      redis-rate-limit:
+        condition: service_healthy
+    healthcheck:
+      test: [CMD, node, -e, "fetch('http://127.0.0.1:3000/ready', {signal: AbortSignal.timeout(2500)}).then(r => process.exit(r.ok ? 0 : 1), () => process.exit(1))"]
+      start_period: 45s
+      interval: 15s
+      timeout: 3s
+      retries: 4
+    logging:
+      options:
+        max-size: 10m
+        max-file: '3'
+
+  redis-cache:
+    <<: *redis-service
+    command: [redis-server, --save, '', --appendonly, 'no', --maxmemory, 64mb, --maxmemory-policy, allkeys-lru]
+
+  redis-rate-limit:
+    <<: *redis-service
+    command: [redis-server, --save, '', --appendonly, 'yes', --appendfsync, everysec, --maxmemory, 64mb, --maxmemory-policy, noeviction]
+    volumes:
+      - redis-rate-limit-data:/data
+
+networks:
+  redis:
+    internal: true
+
+volumes:
+  redis-rate-limit-data:
