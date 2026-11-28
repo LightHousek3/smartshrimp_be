@@ -1,0 +1,10 @@
+services:
+  api:
+    environment:
+      GOOGLE_APPLICATION_CREDENTIALS: /run/secrets/firebase-admin.json
+    secrets:
+      - firebase-admin.json
+
+secrets:
+  firebase-admin.json:
+    file: ${FIREBASE_CREDENTIALS_FILE:-.secrets/firebase-admin.json}

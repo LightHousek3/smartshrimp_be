@@ -1,0 +1,10 @@
+*
+!package.json
+!package-lock.json
+!prisma/
+!prisma/schema.prisma
+!src/
+!src/**
+**/.env
+**/.env.*
+**/.secrets

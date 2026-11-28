@@ -3,6 +3,7 @@ const axios = require('axios');
 const Joi = require('joi');
 const prisma = require('../config/prisma');
 const config = require('../config');
+const redis = require('../config/redis');
 const { ApiError, checkIngredients } = require('../utils');
 const {
     PRODUCT_REGULATORY_TYPE,
@@ -58,8 +59,20 @@ const resultValidator = Joi.object({
     }).required()]))).required(),
     warnings: Joi.array().items(Joi.string().trim().max(500)).max(10).required(),
 }).prefs({ convert: false });
+const cachedResultValidator = Joi.object({
+    ...Object.fromEntries(Object.entries(valueSchemas).map(([name, schema]) => [
+        name, schema.allow(null).required(),
+    ])),
+    evidence: Joi.object(Object.fromEntries(Object.keys(valueSchemas).map((name) => [
+        name, Joi.string().max(12000),
+    ]))).required(),
+    warnings: Joi.array().items(Joi.string().max(500)).max(11).required(),
+}).prefs({ convert: false });
+const cacheVersion = createHash('sha256')
+    .update(JSON.stringify([INVENTORY_LABEL_PROMPT, responseSchema]))
+    .digest('hex');
 
-// Cache, quota and concurrency are per process and reset on restart; see docs/INVENTORY_LABEL_OCR.md.
+// Keep a bounded local cache for single-process use and Redis outages.
 const cache = new Map();
 const pending = new Map();
 let activeRequests = 0;
@@ -138,18 +151,11 @@ const parseResult = (body) => {
     if (Object.keys(result.evidence).length === 0) {
         result.warnings.push(messages.INVENTORY_LABEL.NO_EVIDENCE);
     }
-    return { ...result, substanceCheck: checkIngredients(result.ingredientsText) };
+    return result;
 };
 
-/**
- * Enforce the combined image budget and track the process-local daily OCR quota on the Vietnam
- * calendar.
- */
-const requestGemini = async (images) => {
-    const loaded = await Promise.all(images.map(loadImage));
-    if (loaded.reduce((sum, image) => sum + image.size, 0) > limits.MAX_TOTAL_BYTES) {
-        throw ApiError.badRequest(messages.INVENTORY_LABEL.TOTAL_SIZE_EXCEEDED);
-    }
+/** Track the process-local daily OCR quota on the Vietnam calendar. */
+const requestGemini = async (loaded) => {
     const today = new Date(Date.now() + 7 * 60 * 60 * 1000).toISOString().slice(0, 10);
     if (quotaDay !== today) {
         quotaDay = today;
@@ -196,6 +202,60 @@ const requestGemini = async (images) => {
     }
 };
 
+const hashKey = (parts) => createHash('sha256').update(JSON.stringify(parts)).digest('hex');
+
+const readCachedResult = async (key) => {
+    const now = Date.now();
+    for (const [id, entry] of cache) if (entry.expires <= now) cache.delete(id);
+    const cached = cache.get(key);
+    if (cached) return cached.result;
+    if (!config.redis?.url) return null;
+
+    const raw = await redis.get(key);
+    if (raw === null) return null;
+    try {
+        const { error, value } = cachedResultValidator.validate(JSON.parse(raw));
+        return error ? null : value;
+    } catch (error) {
+        if (error instanceof SyntaxError) return null;
+        throw error;
+    }
+};
+
+const scanImages = async (farmId, ownerId, images) => {
+    const loaded = await Promise.all(images.map(loadImage));
+    if (loaded.reduce((sum, image) => sum + image.size, 0) > limits.MAX_TOTAL_BYTES) {
+        throw ApiError.badRequest(messages.INVENTORY_LABEL.TOTAL_SIZE_EXCEEDED);
+    }
+
+    // A Cloudinary URL can change contents. Key the result by the ordered image bytes.
+    const imageDigests = loaded.map(({ inlineData }) =>
+        createHash('sha256').update(inlineData.data).digest('hex'),
+    );
+    const digest = hashKey([ownerId, farmId, config.ocr.model, cacheVersion, imageDigests]);
+    const key = config.redis?.url
+        ? `${config.redis.keyPrefix}:cache:inventory-label:v1:${digest}`
+        : digest;
+    const cached = await readCachedResult(key);
+    if (cached) return cached;
+    if (Date.now() < cooldownUntil) {
+        throw new ApiError(httpStatus.TOO_MANY_REQUESTS, messages.INVENTORY_LABEL.COOLDOWN);
+    }
+
+    const result = await requestGemini(loaded);
+    if (cache.size >= limits.CACHE_MAX_ENTRIES) cache.delete(cache.keys().next().value);
+    cache.set(key, { result, expires: Date.now() + limits.CACHE_TTL_MS });
+    if (config.redis?.url) {
+        await redis.set(key, JSON.stringify(result), limits.CACHE_TTL_MS / 1000);
+    }
+    return result;
+};
+
+const buildScanResponse = (result) => ({
+    ...structuredClone(result),
+    substanceCheck: checkIngredients(result.ingredientsText),
+});
+
 /**
  * Check farm ownership and reuse identical in-flight or recent scans within the owner's farm.
  */
@@ -205,28 +265,16 @@ const scanLabel = async (farmId, ownerId, images) => {
     if (!config.ocr.apiKey) {
         throw new ApiError(httpStatus.SERVICE_UNAVAILABLE, messages.INVENTORY_LABEL.MISSING_KEY);
     }
-    const key = createHash('sha256')
-        .update(JSON.stringify([ownerId, farmId, config.ocr.model, config.ocr.apiKey, images]))
-        .digest('hex');
-    const now = Date.now();
-    for (const [id, entry] of cache) if (entry.expires <= now) cache.delete(id);
-    const cached = cache.get(key);
-    if (cached) return structuredClone(cached.result);
-    if (pending.has(key)) return structuredClone(await pending.get(key));
-    if (now < cooldownUntil) {
-        throw new ApiError(httpStatus.TOO_MANY_REQUESTS, messages.INVENTORY_LABEL.COOLDOWN);
-    }
+    const key = hashKey([ownerId, farmId, images]);
+    if (pending.has(key)) return buildScanResponse(await pending.get(key));
     if (activeRequests >= limits.MAX_CONCURRENT_REQUESTS) {
         throw new ApiError(httpStatus.TOO_MANY_REQUESTS, messages.INVENTORY_LABEL.BUSY);
     }
     activeRequests += 1;
-    const task = requestGemini(images);
+    const task = scanImages(farmId, ownerId, images);
     pending.set(key, task);
     try {
-        const result = await task;
-        if (cache.size >= limits.CACHE_MAX_ENTRIES) cache.delete(cache.keys().next().value);
-        cache.set(key, { result, expires: Date.now() + limits.CACHE_TTL_MS });
-        return structuredClone(result);
+        return buildScanResponse(await task);
     } finally {
         activeRequests -= 1;
         pending.delete(key);

@@ -1,5 +1,5 @@
 const multer = require('multer');
-const rateLimit = require('express-rate-limit');
+const { createLimiter } = require('./rateLimiter.middleware');
 const { ApiError, asyncHandler } = require('../utils');
 const { AI_LIMITS, AI_IMAGE_TYPES, messages } = require('../constants');
 const aiDiagnosisService = require('../services/aiDiagnosis.service');
@@ -91,13 +91,11 @@ const completeUpload = (handler) =>
         }
     });
 
-// Quota is per authenticated technician and per BE process; it is not a distributed rate limit.
-const diagnosisLimiter = rateLimit({
+// Upload memory is bounded per process; the technician's request quota can be shared.
+const diagnosisLimiter = createLimiter('ai-diagnosis', {
     windowMs: 60000,
     limit: AI_LIMITS.REQUESTS_PER_MINUTE,
     keyGenerator: (req) => req.account.id,
-    standardHeaders: true,
-    legacyHeaders: false,
     handler: (req, res, next) => next(new ApiError(429, text.RATE_LIMITED)),
 });
 

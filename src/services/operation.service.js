@@ -318,6 +318,8 @@ const listSchedules = async (technicianId, seasonId, query = {}) => {
                         id: true,
                         actualQuantity: true,
                         executedAt: true,
+                        executedBy: true,
+                        createdAt: true,
                         note: true,
                         varianceReason: true,
                         actualProduct: {

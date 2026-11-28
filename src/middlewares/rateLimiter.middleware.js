@@ -1,11 +1,41 @@
 const rateLimit = require('express-rate-limit');
 const config = require('../config');
 const { httpStatus, messages } = require('../constants');
+const { RedisRateLimitStore, RedisRateLimitUnavailable } = require('./redisRateLimitStore');
+
+/** Keep each quota independent and preserve Express's local store when Redis is disabled. */
+const createLimiter = (name, options) => {
+    const defaults = { standardHeaders: true, legacyHeaders: false };
+    if (!config.redis?.rateLimitUrl) return rateLimit({ ...defaults, ...options });
+
+    const allowLocalFallback = name === 'api' || config.env === 'development';
+    const localLimiter = allowLocalFallback ? rateLimit({ ...defaults, ...options }) : null;
+    const store = new RedisRateLimitStore(`${config.redis.keyPrefix}:rate:v1:${name}:`);
+    const { skipSuccessfulRequests, ...limits } = options;
+    const limiter = rateLimit({ ...defaults, ...limits, store });
+    if (!localLimiter && !skipSuccessfulRequests) return limiter;
+
+    return (req, res, next) => limiter(req, res, (error) => {
+        // Refund successful requests against the same store that admitted them.
+        if (localLimiter && error instanceof RedisRateLimitUnavailable) {
+            return localLimiter(req, res, next);
+        }
+        if (error) return next(error);
+        if (skipSuccessfulRequests) {
+            const { resetTime } = req.rateLimit;
+            const key = req.ip;
+            res.once('finish', () => {
+                if (res.statusCode < 400) void store.decrement(key, resetTime);
+            });
+        }
+        return next();
+    });
+};
 
 /**
  * General API rate limiter
  */
-const apiLimiter = rateLimit({
+const apiLimiter = createLimiter('api', {
     windowMs: config.rateLimit.windowMs,
     max: config.rateLimit.max,
     message: {
@@ -13,14 +43,12 @@ const apiLimiter = rateLimit({
         statusCode: httpStatus.TOO_MANY_REQUESTS,
         message: messages.SERVER.TOO_MANY_REQUESTS,
     },
-    standardHeaders: true,
-    legacyHeaders: false,
 });
 
 /**
  * Strict rate limiter for auth endpoints
  */
-const authLimiter = rateLimit({
+const authLimiter = createLimiter('auth', {
     windowMs: 15 * 60 * 1000, // 15 minutes
     max: 10, // 10 attempts per window
     message: {
@@ -28,15 +56,13 @@ const authLimiter = rateLimit({
         statusCode: httpStatus.TOO_MANY_REQUESTS,
         message: 'Quá nhiều lần thao tác không thành công. Vui lòng thử lại sau 15 phút.',
     },
-    standardHeaders: true,
-    legacyHeaders: false,
     skipSuccessfulRequests: true,
 });
 
 /**
  * Count successful requests too: both public OTP purposes share this IP quota.
  */
-const otpRequestLimiter = rateLimit({
+const otpRequestLimiter = createLimiter('otp-request', {
     windowMs: 15 * 60 * 1000,
     max: 10,
     message: {
@@ -44,12 +70,10 @@ const otpRequestLimiter = rateLimit({
         statusCode: httpStatus.TOO_MANY_REQUESTS,
         message: messages.SERVER.TOO_MANY_REQUESTS,
     },
-    standardHeaders: true,
-    legacyHeaders: false,
 });
 
 // Share one IP quota across document writes, including cancellation and metadata edits.
-const writeLimiter = rateLimit({
+const writeLimiter = createLimiter('write', {
     windowMs: config.rateLimit.writeWindowMs,
     max: config.rateLimit.writeMax,
     message: {
@@ -57,11 +81,9 @@ const writeLimiter = rateLimit({
         statusCode: httpStatus.TOO_MANY_REQUESTS,
         message: messages.SERVER.TOO_MANY_REQUESTS,
     },
-    standardHeaders: true,
-    legacyHeaders: false,
 });
 
-const inventoryLabelLimiter = rateLimit({
+const inventoryLabelLimiter = createLimiter('inventory-label', {
     windowMs: 60 * 1000,
     max: 5,
     keyGenerator: (req) => req.account.id,
@@ -70,11 +92,10 @@ const inventoryLabelLimiter = rateLimit({
         statusCode: httpStatus.TOO_MANY_REQUESTS,
         message: messages.INVENTORY_LABEL.RATE_LIMIT,
     },
-    standardHeaders: true,
-    legacyHeaders: false,
 });
 
 module.exports = {
+    createLimiter,
     inventoryLabelLimiter,
     apiLimiter,
     authLimiter,
